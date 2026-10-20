@@ -51,6 +51,31 @@ relation | value``, kept only where the span's words bear it out.
     the span -- never the assistant's, a document's or a peer's -- then the
     known subjects as data, and the section's room for its answer, which
     the run's window must hold.
+  * SD9 -- THE NEWER WORDS SAY WHOM THEY SPEAK OF: as shipped
+    (``newer_words: label``), a unit laid again whose statements the
+    librarian placed in it says whom they speak of, "(about Alice)", each
+    subject once in the order read, the user's as "the user", a pronoun's
+    as read; nothing is left out, every message before the turn's as
+    before; a unit read nothing in, of a span not read or of the Flesh is
+    laid bare.
+  * SD10 -- THE LABEL IS DEFANGED: a subject the user typed with a frame's
+    marker in it is named by its words alone, no marker in the label, and
+    the words it stands before are defanged with it, and said.
+  * SD11 -- THE MODE AS WRITTEN: ``label`` when left out, ``leave_out`` read,
+    anything else refused by name; in ``leave_out`` nothing is labelled;
+    ``label_words`` 6 when left out, a whole number read, anything else
+    refused by name.
+  * SD12 -- A LABEL SHOWS NO WORD A WITHDRAWAL REACHED: a subject is labelled
+    only as a sentence the user typed writes it, in a standing span no
+    later than the unit's and a turn no withdrawal reached; one known only
+    from a turn a withdrawal reached, or only from a later span, labels
+    nothing.
+  * SD13 -- A LABEL NAMES, AND NOTHING ELSE: its names are the subject's
+    words alone -- letters with their marks and digits in any script, an
+    apostrophe, a period or a hyphen inside one -- at most ``label_words``
+    words and ``label_chars`` characters, never a subject that reads as the
+    user's; and a subject the unit does not write, the user's included, is
+    labelled only on a unit that refers by a pronoun.
   * SD8 -- WHAT THE QUESTION REFERS TO KEEPS ITS WORDS: a first-person word
     arms nothing, the user known or not, and a unit with a statement whose
     subject shares a word with the question is laid: "remind me when the
@@ -66,6 +91,7 @@ import itertools
 import json
 import re
 import sys
+import unicodedata
 from dataclasses import replace
 from pathlib import Path
 
@@ -83,6 +109,11 @@ BUDGET_S = {
     "test_sd6_the_burst_reads_what_it_has_not_read": 5.0,
     "test_sd7_one_governed_call_with_its_own_room": 2.0,
     "test_sd8_what_the_question_refers_to_keeps_its_words": 5.0,
+    "test_sd9_the_newer_words_say_whom_they_speak_of": 5.0,
+    "test_sd10_the_label_is_defanged": 5.0,
+    "test_sd11_the_mode_as_written": 5.0,
+    "test_sd12_a_label_shows_no_word_a_withdrawal_reached": 5.0,
+    "test_sd13_a_label_names_and_nothing_else": 5.0,
 }
 
 _BOB = "Bob lives in Lyon."
@@ -113,10 +144,10 @@ def _spans(loaded, cid, cfg, typed, peels, after=6, flesh=()):
     return state, messages
 
 
-def _switched_on(lib, monkeypatch):
-    """The ``statements`` section as shipped, switched on: the reading and its rule, as a tree that measures them
-    switches them on."""
-    section = replace(lib._statements_section(), enabled=True)
+def _switched_on(lib, monkeypatch, newer_words="leave_out"):
+    """The ``statements`` section as shipped, switched on as a tree that measures it switches it on: the reading,
+    and what the newer words do with it -- leaving out, the rule SD3 to SD8 hold, unless told otherwise."""
+    section = replace(lib._statements_section(), enabled=True, newer_words=newer_words)
     monkeypatch.setattr(lib, "_statements_section", lambda: section)
     return section
 
@@ -678,6 +709,290 @@ def test_sd8_what_the_question_refers_to_keeps_its_words(monkeypatch):
                 assert win.refusal is None and _laid(win.messages[-1][1]) == [("t0005", _RELEASE[2])], (
                     "the release's update laid", cid, question)
         assert "newer_words" not in lib.counters(), "nothing left out"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# SD9 -- the newer words say whom they speak of
+# ---------------------------------------------------------------------------
+def test_sd9_the_newer_words_say_whom_they_speak_of(monkeypatch):
+    """SD9: as shipped, a unit laid again with statements placed in it says whom they speak of; nothing left out;
+    a unit read nothing in, of a span not read or of the Flesh is laid bare."""
+    loaded, restore = oj.open_window()
+    lib = loaded[oj.LIBRARIAN]
+    try:
+        assert lib._statements_section().newer_words == "label", "control: label as shipped"
+        _switched_on(lib, monkeypatch, newer_words="label")
+        cfg = oj.config(lib)
+        state, messages = _spans(loaded, "c1", cfg, (_BOB, _ALICE, _NEWS), _PEELS)
+        plain = oj.window(loaded, "c1", _ASK_BOB, messages=messages, config=cfg, model_window=8192)
+        assert _laid(plain.messages[-1][1]) == [("t0005", _NEWS)], "control: laid, the span not read, bare"
+        lib.read_spans(state, _reading(_READ))
+        for question in (_ASK_BOB, _ASK_ALICE):
+            win = oj.window(loaded, "c1", question, messages=messages, config=cfg, model_window=8192)
+            assert win.refusal is None and win.messages[:-1] == plain.messages[:-1], (
+                "every message before the turn's as before", question)
+            assert _laid(win.messages[-1][1]) == [("t0005", f"(about Alice) {_NEWS}")], (
+                "laid, saying whom it speaks of", question)
+        assert "newer_words" not in lib.counters(), "nothing left out"
+        # A pronoun, as the librarian read it; two subjects, the user's, each once in the order read.
+        she, both = "She lives in Oslo now.", "Alice and I live in Oslo now."
+        state, messages = _spans(loaded, "c2", cfg, (_ALICE, "Alice called me yesterday.", she, both),
+                                 (_PEELS[1], "The user said Alice called.", "The user said she lives in Oslo.",
+                                  "The user said Alice and the user live in Oslo."))
+        lib.read_spans(state, _reading({"t0001": "t0001 | Alice | lives in | Berlin",
+                                        "t0005": "t0005 | Alice | lives in | Oslo now",
+                                        "t0007": "t0007 | Alice | lives in | Oslo now\nt0007 | I | live in | Oslo now"
+                                                 "\nt0007 | alice | lives in | Oslo"}))
+        win = oj.window(loaded, "c2", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        laid = _laid(win.messages[-1][1])
+        assert ("t0007", f"(about Alice, the user) {both}") in laid, ("two subjects, each once, in the order read",
+                                                                    laid)
+        state, messages = _spans(loaded, "c9", cfg, (_ALICE, "Alice lives in Oslo now."),
+                                 (_PEELS[1], "The user said Alice lives in Oslo."))
+        lib.read_spans(state, _reading({"t0001": "t0001 | Alice | lives in | Berlin",
+                                        "t0003": "t0003 | Alice) | lives in | Oslo now\nt0003 | Alice | lives in | Oslo"}))
+        assert len({s.subject for s in state.statements[state.ledger.all()[1].key]}) == 2, "control: two subjects read"
+        win = oj.window(loaded, "c9", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert ("t0003", "(about Alice) Alice lives in Oslo now.") in _laid(win.messages[-1][1]), (
+            "two subjects the same name once", _laid(win.messages[-1][1]))
+        met = "I met Alice in Oslo."
+        state, messages = _spans(loaded, "c7", cfg, (_ALICE, met), (_PEELS[1], "The user met Alice in Oslo."))
+        lib.read_spans(state, _reading({"t0001": "t0001 | Alice | lives in | Berlin",
+                                        "t0003": "t0003 | I | met | Alice\nt0003 | Alice | is in | Oslo"}))
+        win = oj.window(loaded, "c7", _ASK_ALICE.replace("live?", "live, whom did I meet?"), messages=messages,
+                        config=cfg, model_window=8192)
+        assert ("t0003", f"(about the user, Alice) {met}") in _laid(win.messages[-1][1]), (
+            "in the order read", _laid(win.messages[-1][1]))
+        # Two turns of one span with sentences at the same places: a statement labels its own turn's alone.
+        eve = "She lives in Rome."
+        assert len(eve) == len(_BOB), "control: the same places, a sentence that refers by a pronoun"
+        messages = [oj.typed(_ALICE), oj.answer("Noted."), oj.typed(_BOB), oj.answer("Noted."), oj.typed(eve),
+                    oj.answer("Noted.")] + oj.conversation(6, start=7)
+        state = lib.state_for("c8", cfg)
+        state.mirror(messages)
+        oj.accept(loaded, state, 2, _PEELS[1])
+        oj.accept(loaded, state, 4, "The user said Bob lives in Lyon and Eve lives in Rome.")
+        lib.read_spans(state, _reading({"t0001": "t0001 | Alice | lives in | Berlin",
+                                        "t0003": "t0003 | Bob | lives in | Lyon"}))
+        win = oj.window(loaded, "c8", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert _laid(win.messages[-1][1]) == [("t0005", eve)], ("another turn's statement labels nothing",
+                                                                _laid(win.messages[-1][1]))
+        state, messages = _spans(loaded, "c3", cfg, (_ALICE, "Alice called me yesterday.", she),
+                                 (_PEELS[1], "The user said Alice called.", "The user said she lives in Oslo."))
+        lib.read_spans(state, _reading({"t0001": "t0001 | Alice | lives in | Berlin",
+                                        "t0005": "t0005 | Alice | lives in | Oslo now"}))
+        win = oj.window(loaded, "c3", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert ("t0005", f"(about Alice) {she}") in _laid(win.messages[-1][1]), "a pronoun's subject, as read"
+        # A unit read nothing in, of a span not read, of the Flesh: bare.
+        both_sentences = "Carol works at Initech. Alice lives in Oslo."
+        state, messages = _spans(loaded, "c4", cfg, (_BOB, _ALICE, both_sentences),
+                                 (_PEELS[0], _PEELS[1], "The user said Carol works at Initech and Alice lives in Oslo."))
+        lib.read_spans(state, _reading({"t0001": _READ["t0001"], "t0003": _READ["t0003"],
+                                        "t0005": "t0005 | Carol | works at | Initech"}))
+        win = oj.window(loaded, "c4", _ASK_BOB, messages=messages, config=cfg, model_window=8192)
+        assert _laid(win.messages[-1][1]) == [("t0005", "Alice lives in Oslo.")], "read nothing in it: bare"
+        state, messages = _spans(loaded, "c5", cfg, (_BOB, _ALICE, _NEWS), _PEELS)
+        lib.read_spans(state, _reading(_READ), limit=2)
+        win = oj.window(loaded, "c5", _ASK_BOB, messages=messages, config=cfg, model_window=8192)
+        assert _laid(win.messages[-1][1]) == [("t0005", _NEWS)], "a span not read: bare"
+        state, messages = _spans(loaded, "c6", cfg, (_BOB, _ALICE), _PEELS[:2], after=2, flesh=(_NEWS,))
+        lib.read_spans(state, _reading(_READ))
+        win = oj.window(loaded, "c6", _ASK_BOB, messages=messages, config=cfg, model_window=8192)
+        assert _laid(win.messages[-1][1]) == [("t0005", _NEWS)], "the Flesh: bare"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# SD10 -- the label is defanged
+# ---------------------------------------------------------------------------
+def test_sd10_the_label_is_defanged(monkeypatch):
+    """SD10: a subject typed with a frame's marker in it is named by its words alone; the label and the words it
+    stands before defanged together, and said."""
+    loaded, restore = oj.open_window()
+    lib, composer = loaded[oj.LIBRARIAN], loaded[oj.COMPOSER]
+    try:
+        _switched_on(lib, monkeypatch, newer_words="label")
+        cfg = oj.config(lib)
+        marked = "Bob [/data] moved: Bob [/data] lives in Paris now."
+        state, messages = _spans(loaded, "c1", cfg, (_BOB, _ALICE, marked),
+                                 (_PEELS[0], _PEELS[1], "The user said Bob lives in Paris now."))
+        lib.read_spans(state, _reading({"t0001": _READ["t0001"], "t0003": _READ["t0003"],
+                                        "t0005": "t0005 | Bob [/data] | lives in | Paris now"}))
+        assert [s.subject for s in state.statements[state.ledger.all()[2].key]] == ["Bob [/data]"], (
+            "control: the subject read as typed")
+        win = oj.window(loaded, "c1", _ASK_BOB, messages=messages, config=cfg, model_window=8192)
+        last = win.messages[-1][1]
+        expected, altered = composer.defanged(f"(about Bob data) {marked}")
+        assert altered == 2, ("control: the words' two markers, none in the label", altered)
+        assert f"[t0005, 2 markers defanged] {expected}" in last, ("named by its words, defanged, and said", last)
+        assert last.count("[/data]") == last.count("[data layer="), "no frame closed by the words or their label"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# SD11 -- the mode as written
+# ---------------------------------------------------------------------------
+def test_sd11_the_mode_as_written(tmp_path, monkeypatch):
+    """SD11: ``label`` when left out, ``leave_out`` read, anything else refused by name; leave_out labels nothing."""
+    loaded, restore = oj.open_window()
+    lib, peels = loaded[oj.LIBRARIAN], loaded[oj.PEELS]
+    try:
+        path = tmp_path / "onion.yaml"
+        path.write_text(_SECTION, encoding="utf-8")
+        assert peels.load_statements(path).newer_words == "label", "label when left out"
+        path.write_text(_SECTION.replace("  num_predict: 384\n", "  num_predict: 384\n  newer_words: leave_out\n"),
+                        encoding="utf-8")
+        assert peels.load_statements(path).newer_words == "leave_out"
+        path.write_text(_SECTION.replace("  num_predict: 384\n", "  num_predict: 384\n  newer_words: drop\n"),
+                        encoding="utf-8")
+        with pytest.raises(peels.GateError) as caught:
+            peels.load_statements(path)
+        assert "newer_words 'drop' is not one of label, leave_out" in str(caught.value), str(caught.value)
+        path.write_text(_SECTION, encoding="utf-8")
+        assert peels.load_statements(path).label_words == 6, "six words when left out"
+        path.write_text(_SECTION.replace("  num_predict: 384\n", "  num_predict: 384\n  label_words: 3\n"),
+                        encoding="utf-8")
+        assert peels.load_statements(path).label_words == 3, "a whole number read"
+        for wrong in ("0", "true", "2.5"):
+            path.write_text(_SECTION.replace("  num_predict: 384\n", f"  num_predict: 384\n  label_words: {wrong}\n"),
+                            encoding="utf-8")
+            with pytest.raises(peels.GateError) as caught:
+                peels.load_statements(path)
+            assert "label_words" in str(caught.value) and "whole number" in str(caught.value), (wrong, caught.value)
+        path.write_text(_SECTION, encoding="utf-8")
+        assert peels.load_statements(path).label_chars == 64, "sixty-four characters when left out"
+        path.write_text(_SECTION.replace("  num_predict: 384\n", "  num_predict: 384\n  label_chars: 20\n"),
+                        encoding="utf-8")
+        assert peels.load_statements(path).label_chars == 20, "a whole number read"
+        path.write_text(_SECTION.replace("  num_predict: 384\n", "  num_predict: 384\n  label_chars: 0\n"),
+                        encoding="utf-8")
+        with pytest.raises(peels.GateError) as caught:
+            peels.load_statements(path)
+        assert "label_chars 0 is not a whole number" in str(caught.value), str(caught.value)
+        _switched_on(lib, monkeypatch, newer_words="leave_out")
+        cfg = oj.config(lib)
+        state, messages = _spans(loaded, "c1", cfg, (_BOB, _ALICE, _NEWS), _PEELS)
+        lib.read_spans(state, _reading(_READ))
+        win = oj.window(loaded, "c1", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert _laid(win.messages[-1][1]) == [("t0005", _NEWS)], "leave_out labels nothing"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# SD12 -- a label shows no word a withdrawal reached
+# ---------------------------------------------------------------------------
+def test_sd12_a_label_shows_no_word_a_withdrawal_reached(monkeypatch):
+    """SD12: a subject known only from a turn a withdrawal reached labels nothing; written in a turn none reached, it
+    labels the unit."""
+    loaded, restore = oj.open_window()
+    lib, peels = loaded[oj.LIBRARIAN], loaded[oj.PEELS]
+    try:
+        _switched_on(lib, monkeypatch, newer_words="label")
+        cfg = oj.config(lib)
+        she = "She lives in Oslo now."
+        source = "document:" + "a" * 64
+        messages = [oj.typed(_BOB), oj.answer("Noted."), oj.typed("Dr Ames is my landlord.", lineage=[source]),
+                    oj.answer("Noted."), oj.typed(she), oj.answer("Noted.")] + oj.conversation(6, start=7)
+        for message in messages:
+            message.setdefault("lineage", [])
+        state = lib.state_for("c1", cfg)
+        state.mirror(messages)
+        for peel in (_PEELS[0], "The user said Dr Ames is their landlord.", "The user said she lives in Oslo."):
+            oj.accept(loaded, state, 2, peel)
+        lib.read_spans(state, _reading({"t0001": _READ["t0001"], "t0003": "t0003 | Dr Ames | is | my landlord",
+                                        "t0005": "t0005 | Dr Ames | lives in | Oslo now"}))
+        assert [s.subject for s in state.statements[state.ledger.all()[2].key]] == ["Dr Ames"], (
+            "control: the pronoun read as the landlord, known from the turn before")
+        reached_turns = [str(t["turn_id"]) for key in (r.key for r in state.ledger.all()) for t in state.cellar.get(key)
+                         if t["role"] == "user" and peels.withheld(peels.turn_label(t, state.lineage), (source,))]
+        assert reached_turns == ["t0003"], ("control: of the user's turns, the landlord's alone reached", reached_turns)
+        ask = "Quick check: where does Dr Ames live? Answer with one sentence of the form 'Dr Ames lives in <city>.'."
+        shown = oj.window(loaded, "c1", ask, messages=messages, config=cfg, model_window=8192)
+        assert ("t0005", f"(about Dr Ames) {she}") in _laid(shown.messages[-1][1]), (
+            "control: labelled, its subject written in a turn no withdrawal reached")
+        reached = oj.window(loaded, "c1", ask, messages=messages, config=cfg, model_window=8192, withdrawn=(source,))
+        laid = _laid(reached.messages[-1][1])
+        assert ("t0005", she) in laid and not any("(about" in words for _turn, words in laid), (
+            "the subject's only typed words reached by a withdrawal: laid bare", laid)
+        # A subject written only in a span later than the unit's: no label.
+        later = [oj.typed(_BOB), oj.answer("Noted."), oj.typed(she), oj.answer("Noted."),
+                 oj.typed("Dr Ames is my landlord."), oj.answer("Noted.")] + oj.conversation(6, start=7)
+        state = lib.state_for("c2", cfg)
+        state.mirror(later)
+        for peel in (_PEELS[0], "The user said she lives in Oslo.", "The user said Dr Ames is their landlord."):
+            oj.accept(loaded, state, 2, peel)
+        state.statements = {r.key: found for r, found in zip(state.ledger.all(), (
+            (), (peels.Statement("t0003", 0, len(she), "Dr Ames", "lives in", "Oslo now"),), ()))}
+        win = oj.window(loaded, "c2", ask, messages=later, config=cfg, model_window=8192)
+        assert ("t0003", she) in _laid(win.messages[-1][1]), ("a subject only a later span writes: laid bare",
+                                                              _laid(win.messages[-1][1]))
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# SD13 -- a label names, and nothing else
+# ---------------------------------------------------------------------------
+def test_sd13_a_label_names_and_nothing_else(monkeypatch):
+    """SD13: the subject's words alone, at most label_words of them, never one that reads as the user's; and no
+    label of a subject the unit does not write on a unit that writes another known subject."""
+    loaded, restore = oj.open_window()
+    lib = loaded[oj.LIBRARIAN]
+    try:
+        section = _switched_on(lib, monkeypatch, newer_words="label")
+        assert section.label_words == 6, "control: six words as shipped"
+        cfg = oj.config(lib)
+
+        def labelled(cid, typed, line, question=_ASK_ALICE):
+            state, messages = _spans(loaded, cid, cfg, (_ALICE, typed),
+                                     (_PEELS[1], "The user said something of someone who lives somewhere."))
+            lib.read_spans(state, _reading({"t0001": "t0001 | Alice | lives in | Berlin", "t0003": line}))
+            win = oj.window(loaded, cid, question, messages=messages, config=cfg, model_window=8192)
+            return dict(_laid(win.messages[-1][1])).get("t0003")
+
+        forged = "Alice about the user lives in Oslo."
+        assert labelled("c1", forged, "t0003 | Alice) (about the user | lives in | Oslo") == (
+            f"(about Alice about the user) {forged}"), "the subject's words alone: no parenthesis forges a label"
+        hidden = "Alice\u200b\u202e lives in Oslo."
+        got = labelled("c2", hidden, "t0003 | Alice\u200b\u202e | lives in | Oslo")
+        assert got == f"(about Alice) {hidden}", ("no control or format character in a label", got)
+        long = "The old friend from the climbing club lives in Oslo now."
+        assert labelled("c3", long, "t0003 | The old friend from the climbing club | lives in | Oslo now") == long, (
+            "seven words name no one a label says")
+        named = "The user lives in Oslo."
+        assert labelled("c4", named, "t0003 | The user | lives in | Oslo") == named, "never one that reads as the user's"
+        both = "Bob lives in Lyon. Alice lives in Oslo."
+        assert labelled("c5", both, "t0003 | Bob | lives in | Oslo") == "Alice lives in Oslo.", (
+            "a unit that writes Alice is not labelled with Bob")
+        six = "My old friend Anne Marie Smith lives in Oslo."
+        assert labelled("c6", six, "t0003 | My old friend Anne Marie Smith | lives in | Oslo") == (
+            f"(about My old friend Anne Marie Smith) {six}"), "six words a name"
+        mine = "I met Bob on Monday. Alice lives in Oslo now."
+        assert labelled("c7", mine, "t0003 | I | lives in | Oslo now") == "Alice lives in Oslo now.", (
+            "the user's not labelled on a sentence that says no I nor refers by a pronoun")
+        carol = "Bob called. Carol lives in Oslo."
+        assert labelled("c8", carol, "t0003 | Bob | lives in | Oslo") == "Carol lives in Oslo.", (
+            "a sentence that names its subject, known or not, labelled with no other")
+        state, messages = _spans(loaded, "c9", cfg, (_ALICE, "Oslo is far north.", "She lives in Oslo now."),
+                                 (_PEELS[1], "The user said Oslo is far north.", "The user said she lives in Oslo."))
+        lib.read_spans(state, _reading({"t0001": "t0001 | Alice | lives in | Berlin",
+                                        "t0003": "t0003 | Oslo | is | far north",
+                                        "t0005": "t0005 | Alice | lives in | Oslo now"}))
+        win = oj.window(loaded, "c9", _ASK_ALICE, messages=messages, config=cfg, model_window=8192)
+        assert ("t0005", "(about Alice) She lives in Oslo now.") in _laid(win.messages[-1][1]), (
+            "a known place in a pronoun's sentence takes no label away", _laid(win.messages[-1][1]))
+        name = "Re" + chr(0x301) + "ne O" + chr(0x2019) + "Brien"
+        marked = f"{name} lives in Oslo."
+        got = labelled("c10", marked, f"t0003 | {name} | lives in | Oslo")
+        assert got == f"(about {unicodedata.normalize('NFC', name)}) {marked}", ("a mark and an apostrophe kept", got)
+        chain = "-".join(["Ab"] * 30) + " lives in Oslo."
+        assert labelled("c11", chain, f"t0003 | {'-'.join(['Ab'] * 30)} | lives in | Oslo") == chain, (
+            "a name past sixty-four characters labels nothing")
     finally:
         restore()
 

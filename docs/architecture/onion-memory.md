@@ -579,28 +579,56 @@ readings, and a model a step stopped asking is not asked to read. What
 is read is kept in the process and never persisted, so a restart reads
 the spans again; switched off, nothing is read.
 
-What the librarian read takes back newer words. When a question names a
-subject the statements know -- every word that names it among the
-question's terms; never the user, whom "remind me" or "we" addresses as
-often as it asks of -- a unit is no longer laid whose statements, those
-placed in it, are of nothing the question refers to: none is the user's
-when the question says "I" or names the user, none has a subject that
-shares a word with the question, none is said of the user's own
-relation ("my wife", who may be the subject asked under a name), and the
-unit's own words name no subject asked. Asked where Bob lives, "News: the move is done, Alice lives in
-Oslo." is not laid; asked "Bob asked when the release is", the Harvest
-release's update is. Nothing is laid in its place, so an older unit never
-stands in for a newer one; a unit of the Flesh, of a span not read, or
-one the librarian placed nothing in, is laid as before, and so is every
-unit for a question that names no known subject. A reading that
-misnames a subject can only take back a unit the newer words would lay,
-never add one; but a question that refers to a subject by a word no
-statement of it holds -- "the launch" for "the Harvest release", "the
-CEO" for "Dana", and as much "releases" for "release" or "deploy" for
-"the deployment" -- while it names another known subject loses that
-subject's newer words. That is why the section ships off: the rule
-measured below takes back only another subject's words on the bench, and
-a review of it found the questions that bend a word.
+What the newer words do with what the librarian read is the section's
+`newer_words`. As shipped, `label`: each unit they lay again whose
+statements the librarian placed in it says whom it speaks of, before its
+words -- "(about Alice) News: the move is done, Alice lives in Oslo.",
+"(about Alice) She lives in Oslo now." for a pronoun the librarian
+resolved, each subject once in the order read, the user's as "the user".
+A label shows no word the window could not: a subject is named only as a
+sentence the user typed writes it, in a standing span no later than the
+unit's and a turn no withdrawal reached -- one known only from a turn a
+withdrawal reached names nothing; by its words alone -- letters with
+their marks and digits in any script, composed, an apostrophe, a period or
+a hyphen inside one -- at most `label_words` words and `label_chars`
+characters, never one that reads as the user's; and, when the unit does
+not write it -- the user's: a first-person word -- only on a unit that
+refers by one of the section's pronouns, never on one that names its
+subject itself. A word the user typed both in a turn a withdrawal reached
+and in another still names: what the label says of a pronoun, that it
+refers to that name, the reading may have drawn from the turn withdrawn.
+The label is defanged with the words it stands before. Nothing is left
+out; a unit of the Flesh, of a span not read, or one the librarian placed
+nothing in, is laid bare. A pronoun the librarian misreads labels its
+sentence with another's name: the label tells the model whom the sentence
+speaks of, and it can be wrong as the reading is.
+
+With `leave_out`, the reading takes back newer words instead. When a
+question names a subject the statements know -- every word that names it
+among the question's terms; never the user, whom "remind me" or "we"
+addresses as often as it asks of -- a unit is no longer laid whose
+statements, those placed in it, are of nothing the question refers to:
+none is the user's when the question says "I" or names the user, none has
+a subject that shares a word with the question, none is said of the
+user's own relation ("my wife", who may be the subject asked under a
+name), and the unit's own words name no subject asked. Asked where Bob
+lives, "News: the move is done, Alice lives in Oslo." is not laid; asked
+"Bob asked when the release is", the Harvest release's update is.
+Nothing is laid in its place, so an older unit never stands in for a
+newer one; a unit of the Flesh, of a span not read, or one the librarian
+placed nothing in, is laid as before, and so is every unit for a
+question that names no known subject. A reading that misnames a subject
+can only take back a unit the newer words would lay, never add one; but
+a question that refers to a subject by a word no statement of it holds
+-- "the launch" for "the Harvest release", "the CEO" for "Dana", and as
+much "releases" for "release" or "deploy" for "the deployment" -- while
+it names another known subject loses that subject's newer words, which
+a label never takes away.
+
+The section ships off. A machine switches the reading on in `local.yaml`
+(`onion: {statements: {enabled: true}}`, with the onion's own switch and
+its librarian's model); only a YAML boolean switches, the shipped switch
+standing otherwise, and a key the section does not take is said once.
 
 The user's surface on the Core and the receipts is a memory route scoped
 to the conversation: `GET /api/memory/onion/{conversation_id}` lists the
@@ -802,6 +830,17 @@ updates of the subject asked; it read nothing of "They live in Paris
 now." nor of "it ships on Thursday now", laid as before. A 0.8B reader
 left out no update of the subject asked, and two units of another
 subject stayed laid.
+Laid with whom they speak of instead (`label`, the same readings): 34
+of the 77 kept windows changed, each by the labels of the units laid
+again, every message before the turn's unchanged; no verdict turned; the
+4B's margins moved by +9.5 nats in sum over its 27 -- from -0.7 to +2.7,
+the Harvest release's date at 8192 +2.7 in four sets, Bob's city at
+16384 +0.7 against Oslo with Alice's move still laid -- and the 27B's by
++0.02 over its 7. On seven windows whose update of the subject asked is a
+pronoun's -- "She lives in Oslo now." after "Alice called me yesterday.",
+in English and in French -- read by the 4B and asked of it, the labels
+moved the margins by +4.8 nats in sum, one of them down by 0.2, no
+verdict turned.
 
 ## The native core
 

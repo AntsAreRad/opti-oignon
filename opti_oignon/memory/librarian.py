@@ -501,6 +501,39 @@ def _say_local(local, reason, outcome):
         logger.warning("%s %s: %s", local.name, reason, outcome)
 
 
+def _local_section(shipped):
+    """``(local, entry)``: ``local.yaml`` beside the shipped file, and its onion section when it is a mapping.
+
+    ``entry`` is None when the file sets nothing for the onion: missing, or
+    with no onion section; or when it cannot be read, does not parse, or
+    holds no mapping for onion -- each said once for each distinct reason,
+    and what the shipped file says stands.
+    """
+    local = Path(shipped).with_name("local.yaml")
+    shipped_stands = "what the shipped file says stands"
+    try:
+        text = local.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return local, None
+    except OSError as exc:
+        _say_local(local, f"cannot be read ({type(exc).__name__})", shipped_stands)
+        return local, None
+    try:
+        import yaml
+
+        data = yaml.safe_load(text)
+    except Exception as exc:  # noqa: BLE001 - a local file that does not parse sets nothing, and is said
+        _say_local(local, f"does not parse ({type(exc).__name__})", shipped_stands)
+        return local, None
+    if data is None or (isinstance(data, dict) and data.get("onion") is None):
+        return local, None
+    entry = data.get("onion") if isinstance(data, dict) else None
+    if not isinstance(entry, dict):
+        _say_local(local, "holds no mapping for onion", shipped_stands)
+        return local, None
+    return local, entry
+
+
 def _local_onion(shipped):
     """What the machine sets for the onion in ``local.yaml`` beside the shipped file: its switch and its librarian's model.
 
@@ -514,42 +547,46 @@ def _local_onion(shipped):
     section that is no mapping, a switch that is no boolean, a model that is
     no name and a key neither section takes set nothing for what they touch,
     each said once for each distinct reason, and what the shipped file says
-    stands. The twin of this reader lives in opti_oignon/run_journal.py; both
-    read a switch the same way.
+    stands. The section's ``statements`` is the reading's own switch
+    (``_local_statements``). The twin of this reader lives in
+    opti_oignon/run_journal.py; both read a switch the same way.
     """
-    local = Path(shipped).with_name("local.yaml")
-    shipped_stands = "what the shipped file says stands"
-    try:
-        text = local.read_text(encoding="utf-8")
-    except FileNotFoundError:
+    local, entry = _local_section(shipped)
+    if entry is None:
         return None, None
-    except OSError as exc:
-        _say_local(local, f"cannot be read ({type(exc).__name__})", shipped_stands)
-        return None, None
-    try:
-        import yaml
-
-        data = yaml.safe_load(text)
-    except Exception as exc:  # noqa: BLE001 - a local file that does not parse sets nothing, and is said
-        _say_local(local, f"does not parse ({type(exc).__name__})", shipped_stands)
-        return None, None
-    if data is None or (isinstance(data, dict) and data.get("onion") is None):
-        return None, None
-    entry = data.get("onion") if isinstance(data, dict) else None
-    if not isinstance(entry, dict):
-        _say_local(local, "holds no mapping for onion", shipped_stands)
-        return None, None
-    unknown = sorted(str(key) for key in entry if key not in ("enabled", "librarian"))
+    unknown = sorted(str(key) for key in entry if key not in ("enabled", "librarian", "statements"))
     if unknown:
         _say_local(local, f"holds keys the onion section does not take ({', '.join(unknown)})", "they set nothing")
     switch = entry.get("enabled")
     if type(switch) is not bool:
         # A switch written but not a boolean is said; one left out is said
         # only when the section sets nothing else either.
-        if "enabled" in entry or entry.get("librarian") is None:
+        if "enabled" in entry or (entry.get("librarian") is None and entry.get("statements") is None):
             _say_local(local, "holds no boolean onion.enabled", "the shipped switch of onion stands")
         switch = None
     return switch, _local_model(local, entry.get("librarian"))
+
+
+def _local_statements(shipped):
+    """The machine's switch of the reading in ``local.yaml`` (``onion: {statements: {enabled: true}}``): True,
+    False, or None when it sets none -- a section that is no mapping, a switch that is no boolean and a key the
+    section does not take each said once, and the shipped switch stands."""
+    local, entry = _local_section(shipped)
+    if entry is None or entry.get("statements") is None:
+        return None
+    said = entry["statements"]
+    stands = "the shipped switch of statements stands"
+    if not isinstance(said, dict):
+        _say_local(local, "holds no mapping for onion.statements", stands)
+        return None
+    unknown = sorted(str(key) for key in said if key != "enabled")
+    if unknown:
+        _say_local(local, f"holds keys onion.statements does not take ({', '.join(unknown)})", "they set nothing")
+    switch = said.get("enabled")
+    if type(switch) is not bool:
+        _say_local(local, "holds no boolean onion.statements.enabled", stands)
+        return None
+    return switch
 
 
 def _local_model(local, entry):
@@ -1844,15 +1881,18 @@ def _drain(state, today, cap, lexicon):
 
 
 def _statements_section():
-    """The ``statements`` section of ``onion.yaml``, or None when it does not read: no span is read, and no rule
-    reads what was, as when it is switched off."""
+    """The ``statements`` section of ``onion.yaml``, its switch given way to the machine's own in ``local.yaml``
+    (``_local_statements``), or None when the section does not read: no span is read, and nothing done with what
+    was, as when it is switched off."""
     from .peels import GateError, load_statements
 
     try:
-        return load_statements()
+        section = load_statements()
     except GateError as exc:
         logger.warning("the librarian reads no statement: %s", exc)
         return None
+    local = _local_statements(_CONFIG)
+    return section if local is None else replace(section, enabled=local)
 
 
 def _curation_burst(conversation_id, *, config=None, summarize=None, gate=None, budget=None, ladder=None,

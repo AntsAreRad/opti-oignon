@@ -2127,16 +2127,27 @@ def select_newer_words(chosen, query, *, ledger, cellar, peels, recent=(), linea
     once, defanged as an anchor is.
 
     With ``statements`` -- what the librarian read of the spans it read, a
-    tuple of ``Statement`` by span key, the standing spans alone -- a unit
-    of such a span that would be laid is left out when it speaks only of
-    others (``speaks_of_others``): the question names a subject the
-    statements know (``asked_subjects``), and none of the unit's own
-    statements may be of what the question refers to. Nothing is laid in
-    its place, so an older unit never stands in for a newer one; a unit of
-    the Flesh, or of a span not read, is laid as before. ``section`` is the
-    ``statements`` section of ``onion.yaml`` (``load_statements`` when
-    None); ``left_out``, when a list, receives the place
-    ``(turn_id, start, stop)`` of each unit left out.
+    tuple of ``Statement`` by span key, the standing spans alone -- the
+    section's ``newer_words`` says what is done with it. ``label``: a unit
+    laid whose statements the librarian placed in it says whom it speaks
+    of, "(about Alice, the user)" before its words, each subject once, in
+    the order read, the user's as "the user" -- defanged with the words
+    (``about``). A subject is named only as a sentence the user typed
+    writes it, in a standing span no later than the unit's and a turn no
+    withdrawal in ``withdrawn`` reached, so a label shows no word the
+    window could not; in its words alone, at most ``label_words`` and
+    ``label_chars`` (``label_name``); and, when the unit does not write it
+    -- the user's: a first-person word --, only on a unit that refers by
+    one of the section's pronouns, never on one that names its subject. ``leave_out``: a unit of such a span that would be laid is
+    left out when it speaks only of others (``speaks_of_others``): the
+    question names a subject the statements know (``asked_subjects``), and
+    none of the unit's own statements may be of what the question refers
+    to. Nothing is laid in its place, so an older unit never stands in for a
+    newer one. A unit of the Flesh, or of a span not read, is laid as
+    before in either. ``section`` is the ``statements`` section of
+    ``onion.yaml`` (``load_statements`` when None); ``left_out``, when a
+    list, receives the place ``(turn_id, start, stop)`` of each unit left
+    out.
     """
     from .composer import defanged
     from .probes import _is_question, generate_probes
@@ -2183,21 +2194,53 @@ def select_newer_words(chosen, query, *, ledger, cellar, peels, recent=(), linea
     # For each part, the newest unit that answers it.
     newest = {max((key for key, entry in found.items() if part in entry[1]), key=lambda key: found[key][0])
               for part in set().union(*(entry[1] for entry in found.values()))}
-    asked = ()
+    asked, known = (), []
     if statements is not None and newest:
         section = section or load_statements()
-        asked = asked_subjects(query, known_subjects(
-            [statement for r in ledger.all() for statement in statements.get(r.key, ())]), section)
+        known = known_subjects([statement for r in ledger.all() for statement in statements.get(r.key, ())])
+        if section.newer_words == "leave_out":
+            asked = asked_subjects(query, known, section)
+    # The sentences the user typed, by span, in turns no withdrawal reached: what a label may name a subject as.
+    typed_shown = {}
+
+    def shown_in(key):
+        if key not in typed_shown:
+            turns = cellar.get(key)
+            labels = {str(t.get("turn_id", "")): turn_label(t, lineage) for t in turns}
+            typed_shown[key] = [u.text for u in _typed_units(turns) if not withheld(labels[u.turn_id], withdrawn)]
+        return typed_shown[key]
+
+    def named(unit, placed, span):
+        from .probes import folded_words
+
+        upto = [r.key for r in ledger.all()
+                if r.kind != "superseded" and cellar.has(r.key) and places.get(r.key, -1) <= places[span]]
+        words = set(folded_words(unit.text))
+        refers = bool(words & section.pronouns)
+        names = []
+        for subject in known_subjects(placed):
+            if subject == "user":
+                name, written = "the user", bool(words & section.first_person)
+            else:
+                name = label_name(subject, section)
+                if name is None or not any(_words_within(subject, text) for key in upto for text in shown_in(key)):
+                    continue
+                written = _words_within(subject, unit.text)
+            if (written or refers) and name not in names:
+                names.append(name)
+        return names
+
     laid = []
     for key in sorted(newest, key=lambda key: found[key][0], reverse=True):
         at, _parts, unit, label, span = found[key]
-        if asked and span in statements and speaks_of_others(unit, [
-                s for s in statements[span] if (s.turn_id, s.start, s.stop) == (unit.turn_id, unit.start, unit.stop)],
-                query, asked, section):
+        placed = [s for s in statements[span] if (s.turn_id, s.start, s.stop) == (unit.turn_id, unit.start, unit.stop)
+                  ] if statements is not None and span in statements else []
+        if asked and span in statements and speaks_of_others(unit, placed, query, asked, section):
             if left_out is not None:
                 left_out.append((unit.turn_id, unit.start, unit.stop))
             continue
-        words, altered = defanged(unit.text)
+        tag = about(named(unit, placed, span)) if placed and section.newer_words == "label" else ""
+        words, altered = defanged(f"{tag} {unit.text}" if tag else unit.text)
         if altered:
             words = f"{_header(unit.turn_id, altered)} {words}"
         laid.append(Selected(text=words, provenance=key[0], label=tuple(label), at=at,
@@ -2230,7 +2273,11 @@ class Statements:
     Whether a burst reads what its spans state, how many spans it reads at
     most, how many known subjects a call is given, the tokens its answer
     may take, and the words of both languages read as one: those no subject
-    may hold (``pronouns``) and those that say the user (``first_person``).
+    may hold (``pronouns``) and those that say the user (``first_person``);
+    then what the newer words do with what was read (``newer_words``):
+    ``label`` says whom each unit laid again speaks of, in at most
+    ``label_words`` words and ``label_chars`` characters a name,
+    ``leave_out`` leaves out a unit of nothing the question refers to.
     """
 
     enabled: bool
@@ -2239,9 +2286,14 @@ class Statements:
     num_predict: int
     pronouns: frozenset
     first_person: frozenset
+    newer_words: str = "label"
+    label_words: int = 6
+    label_chars: int = 64
 
 
 _STATEMENT_COUNTS = ("per_burst", "known", "num_predict")
+# What the newer words may do with what the librarian read.
+_NEWER_WORDS = ("label", "leave_out")
 _STATEMENT_WORDS = ("pronouns", "first_person")
 # What a value may end with that the turn need not hold where it stands.
 _STATEMENT_TAIL = ".,;:!?"
@@ -2252,8 +2304,9 @@ _RELATION_WORDS = 8
 def load_statements(path=None):
     """The ``statements`` section of ``onion.yaml``, refused by name when malformed.
 
-    ``enabled`` is a boolean and each count a whole number, one or more;
-    both languages are required, each with ``pronouns`` and
+    ``enabled`` is a boolean and each count a whole number, one or more --
+    ``label_words`` and ``label_chars`` among them, 6 and 64 when left out; ``newer_words``, ``label``
+    when left out, is one of ``label`` and ``leave_out``; both languages are required, each with ``pronouns`` and
     ``first_person`` alone, lists of lower-case ASCII words, and no word is
     both a pronoun and a first-person word.
     """
@@ -2261,11 +2314,19 @@ def load_statements(path=None):
     section = raw.get("statements")
     if not isinstance(section, dict):
         raise GateError("statements: the section is missing or not a mapping")
-    unknown = sorted(set(map(str, section)) - {"enabled", *_STATEMENT_COUNTS, *_REPORTER_LANGUAGES})
+    unknown = sorted(set(map(str, section)) - {"enabled", "newer_words", "label_words", "label_chars",
+                                                  *_STATEMENT_COUNTS, *_REPORTER_LANGUAGES})
     if unknown:
         raise GateError(f"statements: unknown key {unknown[0]!r}")
     if type(section.get("enabled")) is not bool:
         raise GateError(f"statements: enabled {section.get('enabled')!r} is not a boolean")
+    mode = section.get("newer_words", "label")
+    if mode not in _NEWER_WORDS:
+        raise GateError(f"statements: newer_words {mode!r} is not one of {', '.join(_NEWER_WORDS)}")
+    label_words, label_chars = section.get("label_words", 6), section.get("label_chars", 64)
+    for name, value in (("label_words", label_words), ("label_chars", label_chars)):
+        if not _count(value, 1):
+            raise GateError(f"statements: {name} {value!r} is not a whole number, one or more")
     for name in _STATEMENT_COUNTS:
         if not _count(section.get(name), 1):
             raise GateError(f"statements: {name} {section.get(name)!r} is not a whole number, one or more")
@@ -2284,7 +2345,8 @@ def load_statements(path=None):
     if both:
         raise GateError(f"statements: {both[0]!r} is both a pronoun and a first-person word")
     return Statements(section["enabled"], section["per_burst"], section["known"], section["num_predict"],
-                      frozenset(words["pronouns"]), frozenset(words["first_person"]))
+                      frozenset(words["pronouns"]), frozenset(words["first_person"]), mode, label_words,
+                      label_chars)
 
 
 def _flat(text):
@@ -2401,6 +2463,33 @@ def read_statements(answer, span, known=(), said=None):
             seen.add(identity)
             kept.append(statement)
     return kept, refused
+
+
+def about(names):
+    """Whom a unit laid again speaks of, as it says it: "(about Alice, the user)"; empty for no name."""
+    return f"(about {', '.join(names)})" if names else ""
+
+
+# What may join two parts of a word in a label's name: an apostrophe, typographic or not, a period, a hyphen.
+_NAME_JOINERS = "'.-" + chr(0x2019)
+
+
+def label_name(subject, said):
+    """The words a label names ``subject`` with: its words alone, joined by a blank -- letters, the marks that
+    belong to them and digits, in any script, composed (NFC), an apostrophe, a period or a hyphen inside one; every
+    other character, a control, a format mark or a bracket, parts two words. None for a subject of no word, of more
+    than ``said.label_words`` words or ``said.label_chars`` characters, or one that reads as the user's, which only
+    the user's own statements are."""
+    import unicodedata
+
+    kept = "".join(ch if unicodedata.category(ch)[0] in "LMN" or ch in _NAME_JOINERS else " "
+                   for ch in unicodedata.normalize("NFC", str(subject)))
+    words = [word for word in (part.strip(_NAME_JOINERS) for part in kept.split()) if word]
+    name = " ".join(words)
+    if not words or len(words) > said.label_words or len(name) > said.label_chars or _flat(name) in (
+            "user", "the user"):
+        return None
+    return name
 
 
 def known_subjects(statements):

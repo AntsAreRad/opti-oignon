@@ -16,6 +16,12 @@ tracked file:
     {enabled: <bool>}``, read at each call so a change shows at the next,
     and never over a shipped file that cannot be read, which stays off.
   * LS3 -- NEVER COMMITTED: git ignores ``opti_oignon/config/local.yaml``.
+  * LS4 -- THE READING'S SWITCH: the shipped switch of the ``statements``
+    section gives way to ``onion: {statements: {enabled: <bool>}}``, both
+    ways; anything but a YAML boolean, a section that is no mapping and a
+    file that does not parse leave it, a key the section does not take is
+    said once; set alone, it is neither the onion's switch nor said as
+    missing one.
 
 The onion's modules and the journal are loaded through the shared isolation
 window, their shipped files copied into a temporary directory, where each
@@ -34,6 +40,7 @@ BUDGET_S = {
     "test_ls1_the_onions_switch_gives_way_to_the_machines_own": 5.0,
     "test_ls2_the_run_journals_switch_gives_way_to_the_machines_own_and_never_over_an_unreadable_file": 5.0,
     "test_ls3_git_ignores_the_machines_own_switches": 2.0,
+    "test_ls4_the_readings_switch_gives_way_to_the_machines_own": 5.0,
 }
 
 _MODULES = ("probes", "core_store", "receipts", "composer", "peels", "librarian")
@@ -162,3 +169,48 @@ def test_ls3_git_ignores_the_machines_own_switches():
     """LS3: ``opti_oignon/config/local.yaml`` is a line of the repository's .gitignore."""
     lines = (REPO / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "opti_oignon/config/local.yaml" in lines, "a machine's own switches are never committed"
+
+
+def test_ls4_the_readings_switch_gives_way_to_the_machines_own(tmp_path, caplog):
+    """LS4: ``onion: {statements: {enabled: <bool>}}`` in local.yaml wins over the shipped switch of the reading,
+    both ways; nothing else does; set alone, it is not the onion's switch, and no missing one is said."""
+    librarian, onion, restore = _onion_window(tmp_path)
+    try:
+        shipped = onion.read_text(encoding="utf-8")
+        assert "statements:\n  enabled: false\n" in shipped, "the reading is shipped off"
+        seen = {}
+        for case, text in (
+            ("no local file", None),
+            ("on locally", "onion:\n  statements:\n    enabled: true\n"),
+            ("off locally", "onion:\n  statements:\n    enabled: false\n"),
+            ("a string, not a boolean", "onion:\n  statements:\n    enabled: 'true'\n"),
+            ("no mapping", "onion:\n  statements: [enabled]\n"),
+            ("the onion's switch only", "onion:\n  enabled: true\n"),
+            ("does not parse", "onion: [\n"),
+        ):
+            _local(tmp_path, text)
+            seen[case] = librarian._statements_section().enabled
+        assert seen == {
+            "no local file": False, "on locally": True, "off locally": False, "a string, not a boolean": False,
+            "no mapping": False, "the onion's switch only": False, "does not parse": False,
+        }, ("only a boolean onion.statements.enabled in local.yaml switches the reading", seen)
+        onion.write_text(shipped.replace("statements:\n  enabled: false\n", "statements:\n  enabled: true\n", 1),
+                         encoding="utf-8")
+        _local(tmp_path, "onion:\n  statements:\n    enabled: false\n")
+        assert librarian._statements_section().enabled is False, "the machine's own switch turns it off too"
+        _local(tmp_path, None)
+        assert librarian._statements_section().enabled is True, "with no local file the shipped switch stands"
+        onion.write_text(shipped, encoding="utf-8")
+        caplog.clear()
+        librarian._LOCAL_SAID.clear()
+        with caplog.at_level(logging.WARNING):
+            _local(tmp_path, "onion:\n  statements:\n    enabled: true\n    leave_out: true\n")
+            for _ in range(2):
+                assert librarian._statements_section().enabled is True
+                assert librarian.load_config().enabled is False, "the reading's switch is not the onion's"
+        said = [r.getMessage() for r in caplog.records if "local.yaml" in r.getMessage()]
+        assert len(said) == 1 and "onion.statements" in said[0] and "leave_out" in said[0], (
+            "a key the section does not take said once, no missing onion switch said", said)
+    finally:
+        restore()
+

@@ -598,14 +598,20 @@ queue:
 # the question refers to. No subject holds a word of `pronouns` -- "you"
 # and the words of a group among them; the first-person words say the
 # user. Kept in the process: a restart reads the spans again.
-# Off as shipped: on the paired bench the reading named every subject it
-# read rightly and the rule took back only another subject's words, but a
-# question that bends a word -- "releases" for a statement of "the
-# release", "deploy" for "the deployment" -- can lose the newer words it
-# asks for once it names another known subject. A tree that measures it
-# switches it on here.
+# What the newer words do with what was read (newer_words): `label` lays
+# each unit read with whom it speaks of, "(about Alice)", each name in at
+# most label_words words and label_chars characters, and leaves out
+# nothing; `leave_out` leaves out a unit of nothing the question refers to,
+# which a question that bends a word -- "releases" for a statement of "the
+# release", "deploy" for "the deployment" -- can turn against the newer
+# words it asks for once it names another known subject. Off as shipped;
+# a machine switches the reading on in local.yaml (onion: {statements:
+# {enabled: true}}), a tree that measures it here.
 statements:
   enabled: false
+  newer_words: label
+  label_words: 6
+  label_chars: 64
   per_burst: 16
   known: 32
   num_predict: 384

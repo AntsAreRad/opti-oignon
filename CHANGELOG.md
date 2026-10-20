@@ -11,6 +11,22 @@ package costs.
 
 ### Added
 
+- The newer words say whom they speak of. With the `statements` section of
+  `onion.yaml` on, each unit the newer words lay again whose statements the
+  librarian read says whom it speaks of before its words -- "(about Alice)
+  She lives in Oslo now." -- each subject once in the order read, the
+  user's as "the user", named only as a sentence the user typed writes it
+  in a turn no withdrawal reached, by its words alone, at most
+  `label_words` words and `label_chars` characters, and, unless the unit
+  writes it, only on a unit that refers by a pronoun; the label is
+  defanged with the words, and nothing is left out. `newer_words: label`, as shipped, does this; `leave_out` keeps the
+  rule that leaves out a unit of nothing the question refers to. A machine
+  switches the reading on in `local.yaml` (`onion: {statements: {enabled:
+  true}}`). On the maintainer's machine, with a 4B librarian, 34 of the 77
+  kept windows changed by their labels alone and no verdict turned; the 4B's
+  cold margins moved by +9.5 nats in sum, the 27B's by +0.02, and on seven
+  windows whose update is a pronoun's by +4.8.
+
 - The librarian can read who or what each statement the user typed
   speaks of, and the newer words of a question can then leave out another
   subject's -- off as shipped. Switched on in the `statements` section of
