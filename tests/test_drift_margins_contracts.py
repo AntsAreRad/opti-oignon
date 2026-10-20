@@ -53,6 +53,16 @@ with its K likeliest alternatives, reading each probe's margin.
     the address whatever proxy the environment names; Ollama's refusal said
     with what it said; no answer within the time given, and an answer that
     is no JSON object, refused by name.
+  * MG8 -- WHAT A MARGIN IS READ AGAINST: the likeliest alternative going
+    the stale statement's way, or, with none, the likeliest going off the
+    value at its weakest token -- the sentence form's placeholder there --
+    the first listed of two equally likely; on a bound of at least, or where
+    no margin is read, nothing named; the margin itself unchanged.
+  * MG9 -- COMPOSE AND COMPARE SAY WHAT AGAINST: each row read for its
+    margin says what against; compare names, probe by probe, those that
+    moved by a nat or more or changed what they are read against, a bound
+    or an unread probe none of them; nothing for files that do not say it;
+    files asked otherwise refused.
 
 Local-only (the public distribution ships no tests). The scripts load as
 the paired windows' suite loads them (tests/test_drift_pairs_contracts.py);
@@ -82,6 +92,8 @@ BUDGET_S = {
     "test_mg5_compare_reads_the_margins": 2.0,
     "test_mg6_each_window_asked_cold_on_ollama": 20.0,
     "test_mg7_the_request_stays_on_this_machine_and_ends": 10.0,
+    "test_mg8_what_a_margin_is_read_against": 2.0,
+    "test_mg9_compose_and_compare_say_what_against": 60.0,
 }
 
 
@@ -450,3 +462,88 @@ def test_mg7_the_request_stays_on_this_machine_and_ends(monkeypatch):
     finally:
         server.shutdown()
         server.server_close()
+
+
+# ---------------------------------------------------------------------------
+# MG8 -- what a margin is read against
+# ---------------------------------------------------------------------------
+def test_mg8_what_a_margin_is_read_against():
+    """MG8: with a stale statement, the likeliest alternative going its way; with none, the likeliest going off the
+    value at its weakest token, not at its last -- the sentence form's own placeholder there -- the first listed of
+    two equally likely; on a bound of at most, the side read, of at least, none; none where no margin is read; the
+    margin itself as before."""
+    pairs = dp._pairs()
+    expected, stale, prefix = _ALICE
+    parting = _alice({" Oslo": -0.2, " Berlin": -3.5, " Ber": -2.9, " Rome": -1.0})
+    assert pairs.margin(parting, expected, stale, prefix) == (2.7, "exact", None, " Oslo", "expected"), (
+        "the margin as before")
+    assert pairs.margin_against(parting, expected, stale, prefix) == " Ber", (
+        "the likeliest going the stale way; one going neither way is not the rival")
+    alone = _alice({" Oslo": -0.2, " <": -3.0, " Paris": -4.0})
+    assert pairs.margin_against(alone, expected, None, prefix) == " <", "with none, the likeliest off the value"
+    weakest = _tokens(("Alice", {"Alice": -0.01}), (" lives", {" lives": -0.01}), (" in", {" in": -0.01}),
+                      (" Os", {" Os": -0.5, " <": -0.9}), ("lo", {"lo": -0.1, "aka": -3.0}), (".", {".": -0.01}))
+    assert pairs.margin(weakest, expected, None, prefix)[:2] == (0.4, "exact"), "control: the weakest is the first"
+    assert pairs.margin_against(weakest, expected, None, prefix) == " <", "at the weakest token, not the last"
+    bounded = _alice({" Oslo": -0.2, " Os": -1.0})
+    assert pairs.margin(bounded, expected, None, prefix)[1] == "at least", "control: the other side not read"
+    assert pairs.margin_against(bounded, expected, None, prefix) is None, "a margin of at least: nothing named"
+    most = _alice({" Berlin": -0.1, " Paris": -2.6})
+    assert pairs.margin(most, expected, stale, prefix)[1] == "at most", "control: the expected side not read"
+    assert pairs.margin_against(most, expected, stale, prefix) == " Berlin", "a margin of at most: the side read"
+    tied = _alice({" Oslo": -0.2, " Rome": -3.0, " Bern": -3.0})
+    assert pairs.margin_against(tied, expected, None, prefix) == " Rome", "of two equally likely, the first listed"
+    assert pairs.margin_against(alone, expected, None, "") is None, "no margin, nothing against"
+
+
+# ---------------------------------------------------------------------------
+# MG9 -- compose and compare say what against
+# ---------------------------------------------------------------------------
+def test_mg9_compose_and_compare_say_what_against(tmp_path):
+    """MG9: each row read for its margin says what it is read against; compare says, probe by probe, those that
+    moved by a nat or more or changed what they are read against, and against what -- a probe on a bound or unread
+    none of them; nothing for files that do not say it; files asked otherwise refused."""
+    ab, pairs = da._script(), dp._pairs()
+    loaded, restore = dp._window()
+    lib = loaded["opti_oignon.memory.librarian"]
+    try:
+        states = tmp_path / "states"
+        _kept_run(ab, lib, loaded, states, turns=17)
+        ollama = _Ollama(ab, pairs)
+        lib.reset_librarian()
+        out = tmp_path / "against.jsonl"
+        assert pairs.compose(states, out, resolve=lambda model: ollama, fetch=ollama.fetch, margins=5) == 0
+        rows = [json.loads(line) for line in out.read_text(encoding="utf-8").splitlines()]
+        assert [(r["turn"], r["margin"], r["margin_against"]) for r in rows] == [(16, 2.0, "~")], rows
+    finally:
+        lib.reset_librarian()
+        restore()
+    window = [{"role": "user", "content": "w"}]
+
+    def row(turn, value, against, bound="exact", **extra):
+        return dict({"turn": turn, "question": f"q{turn}", "rung": 4096, "refusal": None, "messages": window,
+                     "window_rung": 4096, "num_ctx": 4096, "verdict": "agrees", "cold": True, "sampling": "raw",
+                     "margin": value, "margin_bound": bound, "margin_against": against}, **extra)
+
+    def written(name, rows):
+        path = tmp_path / f"{name}.jsonl"
+        path.write_text("".join(json.dumps(r) + "\n" for r in rows), encoding="utf-8")
+        return path
+
+    refused = {"turn": 99, "question": "q99", "rung": 4096, "refusal": "count"}
+    before = written("before", [row(16, 3.0, " Oslo"), row(26, 2.0, "~"), row(36, 4.0, "<"), row(49, 1.0, " Berl"),
+                                row(59, 2.0, "x", "at least"), row(69, None, None), row(79, 2.0, "~"),
+                                row(89, 2.0, "~"), row(99, 2.0, "~")])
+    after = written("after", [row(16, 5.1, "<"), row(26, 2.5, "~"), row(36, 2.5, "<"), row(49, 1.2, " Os"),
+                              row(59, 4.0, "y"), row(69, 3.0, "z"), row(79, 3.0, "~"), row(89, 4.0, "~", "at most"),
+                              refused])
+    assert pairs.compare_against(before, after) == {
+        16: {"before": " Oslo", "after": "<", "delta": 2.1}, 36: {"before": "<", "after": "<", "delta": -1.5},
+        49: {"before": " Berl", "after": " Os", "delta": 0.2}, 79: {"before": "~", "after": "~", "delta": 1.0}}, (
+        "moved by a nat or more, or read against another token; a bound on either side, an unread or refused "
+        "probe, none")
+    plain = written("plain", [{k: v for k, v in row(16, 1.0, "<").items() if k != "margin_against"}])
+    assert pairs.compare_against(before, plain) is None, "a file that does not say what against: nothing"
+    assert pairs.compare_against(plain, before) is None, "first or second"
+    with pytest.raises(pairs.Refused, match="asked otherwise"):
+        pairs.compare_against(before, written("warm", [row(16, 1.0, "<", cold=False)]))

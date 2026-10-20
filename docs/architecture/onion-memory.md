@@ -710,9 +710,15 @@ carries its margin, in nats: with a stale statement the probe's expected
 one retired, at the token where the two part, the log-probability of going
 the expected way less that of going the stale one's; with none, at each
 token of the value, the least against every other token; a bound when one
-side is not among those read. `compare` refuses two files asked otherwise
-and says how each probe's margin moved, those read exactly that moved by a
-nat or more either way. Measured on the maintainer's machine with K of 20
+side is not among those read. Each probe also names the token its margin is
+read against: the stale value's, or, with none, the likeliest other -- often
+the sentence form's own placeholder ("<"), a copy of the form rather than
+another value. `compare` refuses two files asked otherwise and says how each
+probe's margin moved, those read exactly that moved by a nat or more either
+way, and, probe by probe, those read exactly on both sides that moved or
+changed what they are read against, with both tokens: a margin lost to
+another subject's value is not one lost to the copy of the form.
+Measured on the maintainer's machine with K of 20
 over the 91 kept probes, cold and unpenalized: under the change that lays
 the user's words of a newer statement, a 4B model's update probes gained
 2.8 to 9.1 nats and a 27B model's 3.4 to 9.2, one verdict of the 4B's and

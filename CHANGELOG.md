@@ -11,6 +11,19 @@ package costs.
 
 ### Added
 
+- Each margin of the paired windows says what it is read against. A probe
+  read with `scripts/drift_pairs.py compose --margins K` carries, beside its
+  margin, the token the margin is taken against: the likeliest alternative
+  going the stale statement's way, or, with none, the likeliest going off
+  the value at its weakest token; none on a margin of at least, where that
+  side is not among the alternatives read. `compare` prints, probe by probe,
+  those read exactly on both sides that moved by a nat or more or changed
+  what they are read against, with both tokens. On the maintainer's machine
+  a 4B model's margin on Bob's city fell 1.9 nats at 16384 against Oslo, the
+  city of another subject laid near the question, and 1.9 at 4096 against
+  "<", a copy of the question's sentence form: one loss is the memory's, the
+  other the bench's.
+
 - The paired windows ask each window cold and read how far it holds its
   answer. On Ollama, `scripts/drift_pairs.py compose` asks each window of a
   model loaded for it alone, the bench's trial line asked first: an engine

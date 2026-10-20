@@ -33,7 +33,10 @@ the reply's token where the statement the probe expects and its rival
 part -- the stale statement it retired, or, with none, the likeliest other
 token -- the log-probability of going the expected way less that of going
 the rival's, in nats. A margin moves with the window where a verdict only
-flips.
+flips. Each probe also says the token its margin is read against, and
+``compare`` which probes moved and against what: a margin lost to another
+subject's value (" Oslo" for Bob) is not one lost to the copy of the
+sentence form ("<").
 
 Run on the host, never in CI::
 
@@ -198,13 +201,27 @@ def margin(tokens, expected, rival=None, prefix="", reply=None):
     "expected", "rival" or "other". None, with ``why``, when the tokens are
     not ``reply``'s (when given), there is no form, the reply leaves the
     form before the value, ends before it, or reads neither side."""
+    return _read_margin(tokens, expected, rival, prefix, reply)[:5]
+
+
+def margin_against(tokens, expected, rival=None, prefix="", reply=None):
+    """The token ``margin`` reads its margin against, where it reads it: the likeliest alternative that goes on with
+    ``rival`` and not with ``expected`` -- with one -- or that does not go on with ``expected`` -- with none, at the
+    weakest token of the value: " Berlin" against " Oslo", or "<" where the reply would copy its sentence form; the
+    first listed of two equally likely. None where that side is not among the alternatives read (a margin of at
+    least), the least likely read standing in, or where no margin is read."""
+    return _read_margin(tokens, expected, rival, prefix, reply)[5]
+
+
+def _read_margin(tokens, expected, rival, prefix, reply):
+    """``margin``'s reading, the token it is read against last."""
     texts = [str(token.get("token", "")) for token in tokens]
     if reply is not None and "".join(texts) != reply:
         whole = b"".join(bytes(token.get("bytes") or b"") for token in tokens).decode("utf-8", "replace")
         why = "a character split across tokens" if whole == reply else "the tokens read are not the reply's"
-        return None, None, why, None, None
+        return None, None, why, None, None, None
     if not rival and not prefix:
-        return None, None, "no sentence form to read the value at", None, None
+        return None, None, "no sentence form to read the value at", None, None, None
     part = len(os.path.commonprefix([expected, rival])) if rival else len(prefix)
     start = 0
     for index, text in enumerate(texts):
@@ -212,9 +229,9 @@ def margin(tokens, expected, rival=None, prefix="", reply=None):
             break
         start += len(text)
     else:
-        return None, None, "the reply ends before the value", None, None
+        return None, None, "the reply ends before the value", None, None, None
     if "".join(texts)[:start] != expected[:start]:
-        return None, None, "the reply leaves the form before the value", None, None
+        return None, None, "the reply leaves the form before the value", None, None, None
 
     def goes_on(text, rest):
         return rest.startswith(text) or (text.startswith(rest) and not any(c.isalnum() for c in text[len(rest):]))
@@ -231,36 +248,37 @@ def margin(tokens, expected, rival=None, prefix="", reply=None):
         mine = [v for text, v in alternatives
                 if goes_on(text, ours) and not (theirs is not None and goes_on(text, theirs))]
         if theirs is not None:
-            other = [v for text, v in alternatives if goes_on(text, theirs) and not goes_on(text, ours)]
+            other = [(text, v) for text, v in alternatives if goes_on(text, theirs) and not goes_on(text, ours)]
         else:
-            other = [v for text, v in alternatives if not goes_on(text, ours)]
+            other = [(text, v) for text, v in alternatives if not goes_on(text, ours)]
         if not mine and not other:
             return "neither side among the alternatives read"
         floor = min(v for _text, v in alternatives)
         bound = "exact" if mine and other else "at most" if not mine else "at least"
         took = ("expected" if goes_on(texts[at], ours) else
                 "rival" if theirs is not None and goes_on(texts[at], theirs) else "other")
-        return round((max(mine) if mine else floor) - (max(other) if other else floor), 4), bound, texts[at], took
+        against = max(other, key=lambda pair: pair[1]) if other else (None, floor)
+        return round((max(mine) if mine else floor) - against[1], 4), bound, texts[at], took, against[0]
 
     if rival:
         found = step(index, expected[start:], rival[start:])
         if isinstance(found, str):
-            return None, None, found, None, None
-        value, bound, token, took = found
-        return value, bound, None, token, took
+            return None, None, found, None, None, None
+        value, bound, token, took, against = found
+        return value, bound, None, token, took, against
     least, at = None, index
     while at < len(texts) and start < len(expected):
         found = step(at, expected[start:], None)
         if isinstance(found, str):
-            return None, None, found, None, None
+            return None, None, found, None, None, None
         if least is None or found[0] < least[0]:
             least = found
         if found[3] != "expected":
             break
         start += len(texts[at])
         at += 1
-    value, bound, token, took = least
-    return value, bound, None, token, took
+    value, bound, token, took, against = least
+    return value, bound, None, token, took, against
 
 
 def _on_this_machine(endpoint):
@@ -338,8 +356,8 @@ def compose(directory, out, *, rung=None, model=None, ask=True, turns=None, reso
     ``margins``, the number of alternatives read at each token (at most ``MOST_ALTERNATIVES``), the model is asked
     through ``logprobs_asker`` (``fetch`` its post), its own penalties and draft held off (``sampling`` "raw"), and
     each probe carries its ``margin`` (``margin``): the stale statement the probe's expected one retired as its
-    rival, or every other token when none was, the token read and the way the reply went there. 0; 2 refused by
-    name, nothing written."""
+    rival, or every other token when none was, the token read and the way the reply went there, and the token it
+    is read against (``margin_against``). 0; 2 refused by name, nothing written."""
     if resolve is None and str(_REPO) not in sys.path:
         sys.path.insert(0, str(_REPO))
     ab = _drift_ab()
@@ -399,9 +417,10 @@ def compose(directory, out, *, rung=None, model=None, ask=True, turns=None, reso
                                    verdict=next((kind for kind in VERDICTS if read["probes"][kind]), None))
                         if margins:
                             expected, stale, prefix = probe_values(ab.TURNS, turn)
-                            value, bound, why, token, took = margin(tokens, expected, stale, prefix, reply)
+                            value, bound, why, token, took, against = _read_margin(tokens, expected, stale,
+                                                                                   prefix, reply)
                             row.update(margin=value, margin_bound=bound, margin_rival=stale, margin_why=why,
-                                       margin_token=token, margin_took=took)
+                                       margin_token=token, margin_took=took, margin_against=against)
                 handle.write(json.dumps(row) + "\n")
         partial.replace(out)
     except (Refused, ab.RungRefused, OSError, ValueError, KeyError) as exc:
@@ -488,6 +507,28 @@ def compare_margins(before, after):
             "bounded": bounded, "unread": [t for t in asked if t not in both]}
 
 
+def compare_against(before, after):
+    """What the margins of two files ``compose --margins`` wrote over the same states are read against, where they
+    moved: ``{turn: {"before", "after", "delta"}}`` for each probe read exactly on both sides whose margin moved by
+    ``MOVED`` or more, or whose token read against changed -- " Oslo" on one side, "<" on the other, a city of
+    another subject giving way to the copy of the sentence form. None when either file does not say what its margins
+    are read against. Refused as ``compare`` refuses."""
+    first, second, shared = _paired(before, after)
+    asked = [t for t in shared if "verdict" in first[t] and "verdict" in second[t]]
+    if not asked or not all("margin_against" in first[t] and "margin_against" in second[t] for t in asked):
+        return None
+    moved = {}
+    for t in asked:
+        old, new = first[t], second[t]
+        if old["margin"] is None or new["margin"] is None or (old["margin_bound"], new["margin_bound"]) != (
+                "exact", "exact"):
+            continue
+        delta = round(new["margin"] - old["margin"], 4)
+        if abs(delta) >= MOVED or old["margin_against"] != new["margin_against"]:
+            moved[t] = {"before": old["margin_against"], "after": new["margin_against"], "delta": delta}
+    return moved
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -509,7 +550,8 @@ def main(argv=None):
     if args.command == "compare":
         try:
             print(json.dumps(dict(compare(args.before, args.after),
-                                  margins=compare_margins(args.before, args.after)), indent=2))
+                                  margins=compare_margins(args.before, args.after),
+                                  against=compare_against(args.before, args.after)), indent=2))
         except (Refused, OSError, ValueError, KeyError) as exc:
             print(f"refused: {exc}", file=sys.stderr)
             return 2
