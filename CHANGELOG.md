@@ -11,6 +11,28 @@ package costs.
 
 ### Added
 
+- The machine names where its onion is kept. `local.yaml` beside
+  `onion.yaml` takes `onion: {persistence: {path: "onion.db"}}`, a file
+  under the data directory, so turning persistence on changes no tracked
+  file; a path that is anchored -- a root or a drive --, begins with `~`,
+  climbs out by `..`, names no file or holds what UTF-8 cannot carry names
+  none, and the shipped path stands, said once. Whether the file must be
+  encrypted stays `onion.yaml`'s alone: a `require_encryption` in
+  `local.yaml` sets nothing, and is said.
+- Two processes of this build sharing the onion's file never write over each
+  other (a process of an earlier build that holds the file open is restarted
+  after the upgrade). Each save writes the conversation's next generation
+  beside its root, never in it, under a fourth schema brought up by name,
+  every root unchanged; the librarian saves only over the generation it read
+  or last wrote, and a save that finds another process's since is refused by
+  name and writes nothing, as is a save of a state the process no longer
+  holds for the conversation; the next use reads what the other saved in the
+  stale state's place. Each use of a conversation the process holds reads
+  its generation first and, when it moved -- a `/close` or a pin in the
+  terminal that opened it, a second server -- the rows the other process
+  saved, the record of the process's last window kept with them; a
+  conversation the file no longer holds starts over. The counters name what
+  the store did (`store`: `read_again`, `gone`, `stale`).
 - What the librarian read survives a restart. With a persistence path in
   `onion.yaml`, the burst that reads a span saves what it read with the
   state, in a table of the onion store of its own -- the standing spans'
@@ -3248,6 +3270,13 @@ package costs.
 
 ### Fixed
 
+- A load of the onion's file reads its rows and their generation inside one
+  read transaction: a save another process committed between two of its
+  reads tore what it read, and the state was refused as moved. A window a
+  store refuses names both stores that can refuse it, where it named the
+  conversation store alone. A `local.yaml` that does not decode as UTF-8 is
+  said as unreadable, where it stopped the onion's configuration and the run
+  journal's switch.
 - The onion carries any text. A surrogate -- half of a pair, the kind a
   JSON escape decodes into a string, or a pair split in two -- has no form
   in UTF-8, and a span, a peel, a Core entry and the store's root are

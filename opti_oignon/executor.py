@@ -297,7 +297,7 @@ _ONION_REFUSAL_WORDS = {
     "config": "the onion's configuration does not read",
     "document": "the turn's documents or images are over every rung within the model's window",
     "wrap": "no envelope is available for the data the turn brings",
-    "store": "the conversation store does not read",
+    "store": "the conversation store or the onion's store refused this conversation, read or written",
     "model": "no rung of the ladder fits within the model's window",
     "raised": "the window could not be planned or composed",
     "tools": "no tool is offered, or the tools are over every rung within the model's window",

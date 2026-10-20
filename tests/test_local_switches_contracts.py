@@ -22,6 +22,17 @@ tracked file:
     file that does not parse leave it, a key the section does not take is
     said once; set alone, it is neither the onion's switch nor said as
     missing one.
+  * LS5 -- THE ONION'S FILE: ``onion: {persistence: {path: <file>}}``
+    names the onion's file, stripped, under the data directory, over the
+    shipped path, both ways; a path that is anchored, begins with ``~`` or
+    climbs out by ``..`` -- blanks around it or not --, one that names no
+    file or that UTF-8 cannot carry, and a section that is no mapping leave
+    the shipped path, each said once, and so does a file that does not
+    decode; whether the file is encrypted stays the shipped file's alone;
+    set alone, it is not the onion's switch, and no missing one is said.
+  * LS6 -- A FILE THAT DOES NOT DECODE: the run journal's reader of
+    ``local.yaml`` says it cannot be read, once, and its shipped switch
+    stands, as the onion's reader of the same file does.
 
 The onion's modules and the journal are loaded through the shared isolation
 window, their shipped files copied into a temporary directory, where each
@@ -41,6 +52,8 @@ BUDGET_S = {
     "test_ls2_the_run_journals_switch_gives_way_to_the_machines_own_and_never_over_an_unreadable_file": 5.0,
     "test_ls3_git_ignores_the_machines_own_switches": 2.0,
     "test_ls4_the_readings_switch_gives_way_to_the_machines_own": 5.0,
+    "test_ls5_the_onions_file_is_the_machines_to_name_under_the_data_directory": 5.0,
+    "test_ls6_a_local_file_that_does_not_decode_cannot_be_read_by_the_run_journals_reader_either": 5.0,
 }
 
 _MODULES = ("probes", "core_store", "receipts", "composer", "peels", "librarian")
@@ -214,3 +227,129 @@ def test_ls4_the_readings_switch_gives_way_to_the_machines_own(tmp_path, caplog)
     finally:
         restore()
 
+
+def test_ls5_the_onions_file_is_the_machines_to_name_under_the_data_directory(tmp_path, caplog):
+    """LS5: ``onion: {persistence: {path: <file>}}`` in local.yaml names the onion's file, stripped, under the data
+    directory, over the shipped path, both ways; a path that is anchored, begins with ~ or climbs out by .. -- blanks
+    around it or not --, one that names no file or that UTF-8 cannot carry, and a section that is no mapping leave
+    the shipped path, each said once, and so does a file that does not decode; whether the file is encrypted is
+    onion.yaml's alone; set alone, it is not the onion's switch, and no missing one is said."""
+    import types
+
+    data = tmp_path / "data"
+    config_mod = types.ModuleType("opti_oignon.config")
+    config_mod.DATA_DIR = data
+    targets = {f"opti_oignon.memory.{name}": source("memory", f"{name}.py") for name in _MODULES}
+    targets[_WRAPPER] = source("agent", "untrusted_context.py")
+    loaded, restore = isolate(
+        targets=targets,
+        blocked=("opti_oignon.inference_backend", "opti_oignon.db_utils", "opti_oignon.native"),
+        packages=("opti_oignon.memory", "opti_oignon.agent"),
+        seeded={"opti_oignon.config": config_mod},
+    )
+    try:
+        onion = tmp_path / "onion.yaml"
+        onion.write_text(_SHIPPED_ONION.read_text(encoding="utf-8"), encoding="utf-8")
+        for name in (_COMPOSER, _PEELS, _LIBRARIAN):
+            loaded[name]._CONFIG = onion
+        librarian = loaded[_LIBRARIAN]
+        librarian.reset_librarian()
+        shipped = onion.read_text(encoding="utf-8")
+        assert 'persistence:\n  path: ""\n  require_encryption: true\n' in shipped, "shipped unnamed, encrypted"
+        seen = {}
+        for case, text in (
+            ("no local file", None),
+            ("named", "onion:\n  persistence:\n    path: onion.db\n"),
+            ("in a folder, blanks around", "onion:\n  persistence:\n    path: '  memory/onion.db '\n"),
+            ("encryption loosened", "onion:\n  persistence:\n    path: onion.db\n    require_encryption: false\n"),
+            ("absolute", "onion:\n  persistence:\n    path: /tmp/onion.db\n"),
+            ("absolute, blanks around", "onion:\n  persistence:\n    path: '  /tmp/onion.db'\n"),
+            ("a home", "onion:\n  persistence:\n    path: ~/onion.db\n"),
+            ("another's home", "onion:\n  persistence:\n    path: ~root/onion.db\n"),
+            ("climbs out", "onion:\n  persistence:\n    path: memory/../../onion.db\n"),
+            ("climbs out, blanks around", "onion:\n  persistence:\n    path: ' ../onion.db'\n"),
+            ("a surrogate", 'onion:\n  persistence:\n    path: "onion\\ud800.db"\n'),
+            ("no name", "onion:\n  persistence:\n    path: 7\n"),
+            ("blank", "onion:\n  persistence:\n    path: '  '\n"),
+            ("no file, the folder itself", "onion:\n  persistence:\n    path: .\n"),
+            ("a NUL", 'onion:\n  persistence:\n    path: "onion\\0.db"\n'),
+            ("no mapping", "onion:\n  persistence: onion.db\n"),
+            ("the onion's switch only", "onion:\n  enabled: true\n"),
+            ("does not parse", "onion: [\n"),
+        ):
+            _local(tmp_path, text)
+            config = librarian.load_config()
+            seen[case] = (config.persist_path, config.require_encryption)
+        assert seen == {
+            "no local file": ("", True), "named": ("onion.db", True),
+            "in a folder, blanks around": ("memory/onion.db", True), "encryption loosened": ("onion.db", True),
+            "absolute": ("", True), "absolute, blanks around": ("", True), "a home": ("", True),
+            "another's home": ("", True), "climbs out": ("", True), "climbs out, blanks around": ("", True),
+            "a surrogate": ("", True), "no name": ("", True),
+            "blank": ("", True), "no file, the folder itself": ("", True), "a NUL": ("", True),
+            "no mapping": ("", True), "the onion's switch only": ("", True), "does not parse": ("", True),
+        }, ("only a file under the data directory is named, and never the encryption", seen)
+        _local(tmp_path, "onion:\n  persistence:\n    path: onion.db\n")
+        assert librarian._persistence_path(librarian.load_config()) == data / "onion.db", "under the data directory"
+        assert librarian.load_config(onion).persist_path == "", "a path given to the loader is read as it stands"
+        onion.write_text(shipped.replace('persistence:\n  path: ""\n', 'persistence:\n  path: "shipped.db"\n', 1),
+                         encoding="utf-8")
+        assert librarian.load_config().persist_path == "onion.db", "the machine's file over the shipped one"
+        _local(tmp_path, "onion:\n  persistence:\n    path: ../onion.db\n")
+        assert librarian.load_config().persist_path == "shipped.db", "a file outside leaves the shipped one"
+        _local(tmp_path, "onion:\n  persistence:\n    path: '  '\n")
+        assert librarian.load_config().persist_path == "shipped.db", "a blank path names none"
+        _local(tmp_path, None)
+        assert librarian.load_config().persist_path == "shipped.db", "with no local file the shipped path stands"
+        onion.write_text(shipped.replace("  require_encryption: true\n", "  require_encryption: false\n", 1),
+                         encoding="utf-8")
+        _local(tmp_path, "onion:\n  persistence:\n    path: onion.db\n    require_encryption: true\n")
+        assert librarian.load_config().require_encryption is False, "the encryption is the shipped file's, both ways"
+        onion.write_text(shipped, encoding="utf-8")
+        caplog.clear()
+        librarian._LOCAL_SAID.clear()
+        with caplog.at_level(logging.WARNING):
+            for text in ("onion:\n  persistence:\n    path: onion.db\n    require_encryption: false\n    keep: 3\n",
+                         "onion:\n  persistence:\n    path: /tmp/onion.db\n",
+                         "onion:\n  persistence:\n    path: 7\n",
+                         "onion:\n  persistence: onion.db\n"):
+                _local(tmp_path, text)
+                for _ in range(2):
+                    assert librarian.load_config().enabled is False, "the file's section is not the onion's switch"
+            (tmp_path / "local.yaml").write_bytes(b"onion:\n  persistence:\n    path: caf\xe9.db\n")
+            for _ in range(2):
+                assert librarian.load_config().persist_path == "", "a file that does not decode names none"
+        said = sorted(r.getMessage() for r in caplog.records if "local.yaml" in r.getMessage())
+        assert said == sorted([
+            "local.yaml holds onion.persistence.require_encryption, which only onion.yaml sets: the shipped "
+            "require_encryption stands",
+            "local.yaml holds keys onion.persistence does not take (keep): they set nothing",
+            "local.yaml names a file outside the data directory for onion.persistence.path: the shipped persistence "
+            "path stands",
+            "local.yaml holds no file name for onion.persistence.path: the shipped persistence path stands",
+            "local.yaml holds no mapping for onion.persistence: the shipped persistence path stands",
+            "local.yaml cannot be read (UnicodeDecodeError): what the shipped file says stands",
+        ]), ("each reason said once, and no missing onion switch", said)
+    finally:
+        restore()
+
+
+def test_ls6_a_local_file_that_does_not_decode_cannot_be_read_by_the_run_journals_reader_either(tmp_path, caplog):
+    """LS6: a local.yaml that does not decode as UTF-8 cannot be read: the run journal's switch stands as shipped,
+    said once, and nothing raises -- as the onion's reader of the same file says it (LS5)."""
+    loaded, restore = isolate(targets={_RJ: source("run_journal.py")})
+    try:
+        rj = loaded[_RJ]
+        shipped = tmp_path / "run_journal.yaml"
+        shipped.write_text(_SHIPPED_JOURNAL.read_text(encoding="utf-8"), encoding="utf-8")
+        rj.CONFIG_FILE = shipped
+        (tmp_path / "local.yaml").write_bytes(b"run_journal:\n  enabled: true\n# caf\xe9\n")
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            for _ in range(2):
+                got = rj.settings()
+                assert (got["enabled"], got["state"], rj.enabled()) == (False, "off", False), got
+        said = [r.getMessage() for r in caplog.records if "local.yaml" in r.getMessage()]
+        assert said == ["local.yaml cannot be read (UnicodeDecodeError): the shipped switch of run_journal stands"], said
+    finally:
+        restore()

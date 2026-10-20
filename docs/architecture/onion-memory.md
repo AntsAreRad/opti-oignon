@@ -705,6 +705,44 @@ saved root does not cover, where the rest of the state answers to it --
 a process of an older build saved the state since -- are left out, and
 said, never laid.
 
+A machine names the onion's file in its own `local.yaml`, so persisting
+changes no tracked file:
+
+```yaml
+onion:
+  persistence:
+    path: "onion.db"
+```
+
+The path lies under the data directory: one that is anchored -- a root or
+a drive --, begins with `~`, climbs out by `..`, names no file or holds
+what UTF-8 cannot carry names none, judged once its blanks are stripped,
+and the shipped path stands, said once. Whether the file must be encrypted
+is `onion.yaml`'s alone; a `require_encryption` in `local.yaml` sets
+nothing, and is said. Two processes may share the file -- the server, and
+the terminal that opened one of its conversations with `/open`. Each save
+writes the conversation's next generation beside its root, never in it
+(the fourth schema adds it, every root unchanged), and the librarian saves
+only over the generation it read or last wrote: when another process saved
+the conversation since, the save is refused by name and writes nothing,
+and the next use reads what the other saved in the stale state's place; a
+state the process no longer holds for the conversation -- one read again
+in its place, or one of a conversation the file stopped holding, whose
+numbering starts over -- is never written either. Each use of a
+conversation the process holds reads its generation first, and its rows
+only when that moved; what the process alone keeps of it -- its two locks,
+so a burst or a close in flight still holds the conversation, the record
+of its last window, the receipts its blocks folded, the spans a reading
+answered blank -- goes with the state read again, and a conversation the
+file no longer holds starts over. A load reads the rows and their
+generation inside one read transaction, so a save another process commits
+meanwhile is read whole or not at all. A store that cannot be read when a
+use of the conversation asks for its generation is said once in the log
+for the conversation and kind of refusal, as a load's refusal is. A
+process of a build before the fourth schema checks no generation: once one
+process has brought the file up, every process that holds it open is
+restarted, or it writes over what the others saved.
+
 Two verbs work on a whole conversation, and `oo chat` gives them to the
 user as `/close` and `/open`. Closing runs the gate synchronously over
 the entire Flesh, whatever its cap, one span at a time: every span the

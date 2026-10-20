@@ -515,7 +515,7 @@ def _local_section(shipped):
         text = local.read_text(encoding="utf-8")
     except FileNotFoundError:
         return local, None
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         _say_local(local, f"cannot be read ({type(exc).__name__})", shipped_stands)
         return local, None
     try:
@@ -548,20 +548,21 @@ def _local_onion(shipped):
     no name and a key neither section takes set nothing for what they touch,
     each said once for each distinct reason, and what the shipped file says
     stands. The section's ``statements`` is the reading's own switch
-    (``_local_statements``). The twin of this reader lives in
+    (``_local_statements``), and its ``persistence`` names the onion's file
+    (``_local_persistence``). The twin of this reader lives in
     opti_oignon/run_journal.py; both read a switch the same way.
     """
     local, entry = _local_section(shipped)
     if entry is None:
         return None, None
-    unknown = sorted(str(key) for key in entry if key not in ("enabled", "librarian", "statements"))
+    unknown = sorted(str(key) for key in entry if key not in ("enabled", "librarian", "statements", "persistence"))
     if unknown:
         _say_local(local, f"holds keys the onion section does not take ({', '.join(unknown)})", "they set nothing")
     switch = entry.get("enabled")
     if type(switch) is not bool:
         # A switch written but not a boolean is said; one left out is said
         # only when the section sets nothing else either.
-        if "enabled" in entry or (entry.get("librarian") is None and entry.get("statements") is None):
+        if "enabled" in entry or all(entry.get(key) is None for key in ("librarian", "statements", "persistence")):
             _say_local(local, "holds no boolean onion.enabled", "the shipped switch of onion stands")
         switch = None
     return switch, _local_model(local, entry.get("librarian"))
@@ -589,6 +590,56 @@ def _local_statements(shipped):
     return switch
 
 
+def _local_persistence(shipped):
+    """The onion's file the machine names in ``local.yaml`` (``onion: {persistence: {path: "onion.db"}}``), stripped,
+    or None when it names none.
+
+    The file lies under the data directory, as a relative path in
+    ``onion.yaml`` does: a path that is anchored -- a root or a drive --,
+    begins with ``~`` or climbs out by ``..`` names none, nor one that
+    names no file or that UTF-8 cannot carry, all judged once its blanks
+    are stripped; so the onion's file stays beside the rest of the user's
+    data, where the tests' data firewall covers it too.
+    Whether its connection must be encrypted is ``onion.yaml``'s alone: a
+    ``require_encryption`` here sets nothing. A section that is no mapping,
+    a path that names no file, a key the section does not take and the
+    encryption's switch are each said once, and what the shipped file says
+    stands for what they touch.
+    """
+    local, entry = _local_section(shipped)
+    if entry is None or entry.get("persistence") is None:
+        return None
+    said = entry["persistence"]
+    stands = "the shipped persistence path stands"
+    if not isinstance(said, dict):
+        _say_local(local, "holds no mapping for onion.persistence", stands)
+        return None
+    if "require_encryption" in said:
+        _say_local(local, "holds onion.persistence.require_encryption, which only onion.yaml sets",
+                   "the shipped require_encryption stands")
+    unknown = sorted(str(key) for key in said if key not in ("path", "require_encryption"))
+    if unknown:
+        _say_local(local, f"holds keys onion.persistence does not take ({', '.join(unknown)})", "they set nothing")
+    name = said.get("path")
+    name = name.strip() if isinstance(name, str) else ""
+    if not name or "\x00" in name or not _utf8(name) or not Path(name).name:
+        _say_local(local, "holds no file name for onion.persistence.path", stands)
+        return None
+    if Path(name).anchor or name.startswith("~") or ".." in Path(name).parts:
+        _say_local(local, "names a file outside the data directory for onion.persistence.path", stands)
+        return None
+    return name
+
+
+def _utf8(text):
+    """Whether UTF-8 can carry ``text``: a surrogate has no form in it."""
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def _local_model(local, entry):
     """The librarian's model named under ``onion.librarian`` in ``local.yaml``, stripped, or None, said once."""
     if entry is None:
@@ -607,19 +658,22 @@ def _local_model(local, entry):
 def load_config(path=None):
     """The librarian's configuration from ``onion.yaml``, refused when malformed.
 
-    The shipped file's switch and the librarian's model give way to the
-    machine's own in ``local.yaml`` (``onion: {enabled: true, librarian:
-    {model: "<name>"}}``), read only for the shipped file: a path given is
-    read as it stands. The shipped file stays whole either way.
+    The shipped file's switch, the librarian's model and the onion's file
+    give way to the machine's own in ``local.yaml`` (``onion: {enabled:
+    true, librarian: {model: "<name>"}, persistence: {path: "onion.db"}}``),
+    read only for the shipped file: a path given is read as it stands. The
+    shipped file stays whole either way, and whether the onion's file must
+    be encrypted is its alone.
     """
     raw = _read_onion(path or _CONFIG) or {}
     section = raw.get("librarian") or {}
     persistence = raw.get("persistence") or {}
     enabled = bool(raw.get("enabled", False))
-    local_model = None
+    local_model = local_path = None
     if path is None:
         local, local_model = _local_onion(_CONFIG)
         enabled = enabled if local is None else local
+        local_path = _local_persistence(_CONFIG)
     try:
         shipped_model = str(section["model"])
         config = LibrarianConfig(
@@ -629,7 +683,7 @@ def load_config(path=None):
             min_new_turns=int(section["min_new_turns"]),
             temperature=float(section["temperature"]),
             num_predict=int(section.get("num_predict", 256)),
-            persist_path=str(persistence.get("path", "") or ""),
+            persist_path=str(persistence.get("path", "") or "") if local_path is None else local_path,
             require_encryption=persistence.get("require_encryption", True),
             seed=section["seed"],
             max_steps_per_burst=section["max_steps_per_burst"],
@@ -709,7 +763,9 @@ class OnionState:
     takes it without waiting and runs nothing when another holds it; a
     close waits for it; a journal's plan takes it without waiting, under
     the lock, to catch the Flesh up, and when another holds it evicts
-    nothing -- the window lays the overflow over a shadow of its own.
+    nothing -- the window lays the overflow over a shadow of its own. A
+    state read again in place of one another process saved since takes
+    over both (``_current``).
     """
 
     def __init__(self):
@@ -758,6 +814,11 @@ class OnionState:
         # reading's identity: it does not ask them again before a restart, and
         # nothing of the answer is saved.
         self.unanswered = set()
+        # The generation of the store's rows this state was read at or last
+        # written as, 0 for a conversation the store did not hold: a save
+        # writes only over it, and a state another process saved since is
+        # read again in its place (``_current``).
+        self.generation = 0
         self.lock = threading.RLock()
         self.slot = threading.Lock()
 
@@ -939,11 +1000,22 @@ def onion_store(config=None):
         return _store[key]
 
 
+def _said_refused(conversation_id, exc):
+    """Say that the store refused the conversation, once for each conversation and kind of refusal, so a lost memory
+    is never mistaken for a fresh one, and a passing refusal -- a file locked a moment -- does not silence a later
+    one of another kind."""
+    said = (conversation_id, type(exc).__name__)
+    if said not in _refused:
+        _refused.add(said)
+        logger.warning("onion memory for %s refused, not replaced: %s", conversation_id, exc)
+
+
 def _load_state(conversation_id, config):
     """The persisted state of a conversation, None when the store does not know it.
 
     Raises by name when the store refuses; the refusal is logged once per
-    conversation so a lost memory is never mistaken for a fresh one.
+    conversation and kind of refusal (``_said_refused``) so a lost memory is
+    never mistaken for a fresh one.
     """
     try:
         store = onion_store(config)
@@ -951,19 +1023,77 @@ def _load_state(conversation_id, config):
             return None
         return store.load(conversation_id, OnionState())
     except Exception as exc:
-        if conversation_id not in _refused:
-            _refused.add(conversation_id)
-            logger.warning("onion memory for %s refused, not replaced: %s", conversation_id, exc)
+        _said_refused(conversation_id, exc)
         raise
 
 
+def _current(conversation_id, state, config):
+    """``state`` while the store holds the conversation at the generation the state was read or last written at;
+    else what the store holds now, read again in its place, or None when the store no longer holds it.
+
+    Another process sharing the file -- the terminal that opened the
+    conversation, a second server -- may have saved it since: what it saved
+    is read, never written over (``_save_state``). What this process alone
+    keeps of the conversation goes with the state read again: its two locks,
+    so a burst or a close in flight on the state it replaces still holds the
+    conversation, the record of its last window, the receipts its blocks
+    folded and the spans a reading answered blank. A conversation the store
+    no longer holds starts over. With no store nothing is read; with one,
+    its generation, under the state's lock as a save writes it, and the
+    rows only when it moved. A store that cannot be read is said once for
+    the conversation and kind of refusal, as a load's refusal is, and
+    raised.
+    """
+    try:
+        store = onion_store(config)
+        if store is None:
+            return state
+        with state.lock:
+            stored = store.generation(conversation_id)
+            if stored == state.generation:
+                return state
+    except Exception as exc:
+        _said_refused(conversation_id, exc)
+        raise
+    loaded = _load_state(conversation_id, config) if stored else None
+    # What it hands over is taken, and the state read again installed, under the replaced state's lock, which every
+    # writer of those fields holds: nothing written to them in between is lost. The module's lock, a leaf, comes last.
+    with state.lock, _lock:
+        if _states.get(conversation_id, state) is not state:
+            # Another thread read it again first: its reading stands.
+            return _states[conversation_id]
+        if loaded is None:
+            _states.pop(conversation_id, None)
+            _watermark.pop(conversation_id, None)
+        else:
+            loaded.journal, loaded.folded, loaded.unanswered = state.journal, set(state.folded), set(state.unanswered)
+            loaded.lock, loaded.slot = state.lock, state.slot
+            _states[conversation_id] = loaded
+            _watermark[conversation_id] = len(loaded.flesh.turns())
+    _counted("store", "read_again" if loaded is not None else "gone")
+    logger.info("onion memory for %s: saved by another process since this one read it (generation %d, read at %d); "
+                "%s", conversation_id, stored, state.generation,
+                "read again" if loaded is not None else "the store no longer holds it")
+    return loaded
+
+
 def state_for(conversation_id, config=None):
-    """The conversation's state: in memory, else loaded from the store, else new."""
+    """The conversation's state: in memory -- read again when another process saved it since (``_current``) --
+    else loaded from the store, else new."""
     with _lock:
         state = _states.get(conversation_id)
+    if config is None:
+        try:
+            config = load_config()
+        except Exception:  # noqa: BLE001 - no configuration: the state held stands, as peek_state leaves it
+            if state is not None:
+                return state
+            raise
     if state is not None:
-        return state
-    loaded = _load_state(conversation_id, config or load_config())
+        state = _current(conversation_id, state, config)
+        if state is not None:
+            return state
+    loaded = _load_state(conversation_id, config)
     with _lock:
         state = _states.get(conversation_id)
         if state is None:
@@ -1069,15 +1199,16 @@ def _room(budget):
 
 
 def peek_state(conversation_id, config=None):
-    """The conversation's state if it exists, in memory or in the store; None when neither knows it."""
+    """The conversation's state if it exists, in memory or in the store; None when neither knows it. A state in
+    memory another process saved since is read again (``_current``)."""
     with _lock:
         state = _states.get(conversation_id)
-    if state is not None:
-        return state
     try:
         config = config or load_config()
     except Exception:  # noqa: BLE001 - no configuration, no store to ask
-        return None
+        return state
+    if state is not None:
+        return _current(conversation_id, state, config)
     if not config.persist_path:
         return None
     loaded = _load_state(conversation_id, config)
@@ -1090,12 +1221,35 @@ def peek_state(conversation_id, config=None):
 
 
 def _save_state(conversation_id, state, config):
-    """Write the state through the store when one is configured; a failed write is said, not hidden."""
+    """Write the state through the store when one is configured, over the generation it was read or last written
+    at only; a failed write is said, not hidden.
+
+    A conversation another process saved since is never written over: the
+    save is refused by name (``OnionStateStale``) and writes nothing, and
+    the next use of the conversation reads the store's in its place
+    (``_current``), with what this process alone kept of it. Nor is a state
+    this process no longer holds for the conversation -- one read again in
+    its place, or one of a conversation the file stopped holding, whose
+    generation a new state may reach again -- refused the same way.
+    """
     store = onion_store(config)
     if store is None:
         return None
-    with state.lock:
-        return store.save(conversation_id, state)
+    from .onion_store import OnionStateStale
+
+    try:
+        with state.lock:
+            with _lock:
+                holds = _states.get(conversation_id) is state
+            if not holds:
+                raise OnionStateStale(f"onion state {conversation_id}: no longer the one this process holds; not "
+                                      f"written")
+            return store.save(conversation_id, state, generation=state.generation)
+    except OnionStateStale:
+        _counted("store", "stale")
+        logger.warning("onion memory for %s: saved by another process since this one read it; not written over, "
+                       "read again at its next use", conversation_id)
+        raise
 
 
 def reset_librarian():
@@ -3919,7 +4073,8 @@ def open_onion(conversation_id, question=None, *, config=None, budget=None):
     config = config or load_config()
     store = onion_store(config)
     if store is None:
-        raise LibrarianError("no persistence path in onion.yaml: nothing survives the process, so nothing can be opened")
+        raise LibrarianError("no persistence path in onion.yaml or local.yaml: nothing survives the process, so "
+                             "nothing can be opened")
     if str(conversation_id) not in store.conversations():
         raise LibrarianError(f"conversation {conversation_id!r} has nothing persisted: nothing to open")
     state = peek_state(conversation_id, config)

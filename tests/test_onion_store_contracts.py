@@ -90,6 +90,34 @@ is unreachable refuses and creates no file.
     every surrogate, the halves a byte-escaping decoder leaves among them,
     and nothing else: the characters on either side of the range, a NUL,
     marks not composed, blanks at either end, a long text, all as they were.
+  * OS27 -- A SAVE OVER WHAT WAS READ: each save writes the conversation's
+    next generation, beside the root; a save that names the generation it
+    read writes only over it and leaves the new one on the state, and when
+    another writer saved since it is refused by name and writes nothing; a
+    state read as absent is refused once the file holds the conversation,
+    and so is one ahead of the file (a copy restored from before); a save
+    that names none writes as before; a generation that is no whole number
+    from 0 is refused by name.
+  * OS28 -- ONE TRANSACTION EACH WAY: a save reads the generation inside
+    the write transaction it takes first, before any row goes; a load
+    reads the rows and their generation inside one read transaction.
+  * OS29 -- a file of schema 3 is brought up by the generations'
+    migration, by name: the column added, each conversation at generation
+    1, every root unchanged; a second opening changes nothing.
+  * OS30 -- TWO PROCESSES, ONE FILE: a state whose generation the file
+    still holds is used as it is, its rows not read again; one another
+    process saved since is never written over -- the save refused by name,
+    nothing written, said -- and is read again at its next use, by the
+    turn's way and the block's, what this process alone kept going with
+    it, its two locks first; a conversation the file no longer holds starts
+    over, and a state this process no longer holds is never written,
+    whatever its generation; a store that cannot be read at a use is said
+    once for each kind of refusal and raised; on two threads of one
+    process, a use waits for the save the other is making and never reads
+    it as another process's; of two readings again, the first stands; with
+    no store nothing is read, and a configuration that does not read leaves
+    the state as held, by either way to it; a refused window names both
+    stores that can refuse it.
 
 Local-only (the public distribution ships no tests). Loaded through the
 shared isolation window from source; the connection seam is blocked, so a
@@ -103,6 +131,7 @@ import json
 import logging
 import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -1123,6 +1152,344 @@ def test_os26_every_way_a_summary_becomes_a_peel_keeps_a_surrogate_as_the_replac
         assert probes.storable(edges) == chr(0xD7FF) + shown * 6 + chr(0xE000)
         sample = "  e" + chr(0x301) + " " + chr(0) + chr(0x1F600) + " Caf" + chr(0xE9) + " " * 3 + "x" * 5000 + "  "
         assert probes.storable(sample) == sample, "a text that holds none, as it was"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# OS27-OS30 -- two processes, one file
+# ---------------------------------------------------------------------------
+class _Recording:
+    """A connection that says each statement it is handed, and each attribute set on it, in ``said``."""
+
+    def __init__(self, conn, said):
+        object.__setattr__(self, "_conn", conn)
+        object.__setattr__(self, "_said", said)
+
+    def execute(self, sql, *args):
+        self._said.append(" ".join(sql.split())[:40])
+        return self._conn.execute(sql, *args)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __setattr__(self, name, value):
+        self._said.append(f"set {name}={value!r}")
+        setattr(self._conn, name, value)
+
+
+def _active(state):
+    return [e.text for e in state.core.active()]
+
+
+def test_os27_a_save_that_names_the_generation_it_read_writes_only_over_it_and_a_later_one_is_refused(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        core_store = loaded["opti_oignon.memory.core_store"]
+        state = _plain_state(loaded, "c1")
+        path = tmp_path / "onion.db"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        assert store.generation("c1") == 0 and state.generation == 0, "a conversation the file does not hold: 0"
+        store.save("c1", state, generation=0)
+        assert store.generation("c1") == 1 and state.generation == 1, "the next generation, left on the state"
+        # Another process reads it, pins, and saves over what it read.
+        other = store.load("c1", lib.OnionState())
+        assert other.generation == 1, "a load leaves the generation it read"
+        other.core.add("Pinned elsewhere.", actor=core_store.USER)
+        other_root = store.save("c1", other, generation=1)
+        assert store.generation("c1") == 2 and other.generation == 2
+        # The first is stale: refused by name, nothing written.
+        state.core.add("Pinned here.", actor=core_store.USER)
+        before = path.read_bytes()
+        with pytest.raises(store_mod.OnionStateStale, match="saved by another writer since it was read"):
+            store.save("c1", state, generation=1)
+        assert path.read_bytes() == before and state.generation == 1, "nothing written, the generation it read kept"
+        back = store.load("c1", lib.OnionState())
+        assert "Pinned elsewhere." in _active(back) and "Pinned here." not in _active(back)
+        assert store_mod.onion_root(store_mod.snapshot_of(back)) == other_root and back.generation == 2
+        # A state read as absent is refused once the file holds the conversation, and so is one ahead of the file.
+        with pytest.raises(store_mod.OnionStateStale):
+            store.save("c1", lib.OnionState(), generation=0)
+        with pytest.raises(store_mod.OnionStateStale):
+            store.save("c1", state, generation=store.generation("c1") + 1)
+        # A save that names no generation writes as before, and raises the generation too.
+        assert store.save("c1", state) == store_mod.onion_root(store_mod.snapshot_of(state))
+        assert store.generation("c1") == 3 and state.generation == 1, "written; the state's generation untouched"
+        for wrong in (-1, True, 1.0, "3"):
+            with pytest.raises(TypeError, match="a generation is a whole number from 0"):
+                store.save("c1", state, generation=wrong)
+        assert store.generation("c1") == 3, "nothing written by a refused generation"
+    finally:
+        restore()
+
+
+def test_os28_a_save_and_a_load_each_read_the_generation_inside_one_transaction(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        state = _plain_state(loaded, "c1")
+        said = []
+        store = store_mod.OnionStore(tmp_path / "onion.db", connect=lambda p: _Recording(sqlite3.connect(str(p)), said),
+                                     require_encryption=False)
+        store.save("c1", state, generation=0)
+        said.clear()
+        store.save("c1", state, generation=1)
+        begin = said.index("BEGIN IMMEDIATE")
+        read = next(i for i, sql in enumerate(said) if sql.startswith("SELECT generation FROM onion_cursor"))
+        delete = next(i for i, sql in enumerate(said) if sql.startswith("DELETE FROM"))
+        assert "set isolation_level=None" in said[:begin], "the driver's own transactions off, whichever it is"
+        assert begin < read < delete, "the generation read inside the write transaction, before any row goes"
+        assert said[-1] == "COMMIT", ("closed by name", said[-3:])
+        said.clear()
+        back = store.load("c1", lib.OnionState())
+        assert back.generation == 2
+        begin, end = said.index("BEGIN"), said.index("ROLLBACK")
+        selects = [i for i, sql in enumerate(said) if sql.startswith("SELECT")]
+        assert "set isolation_level=None" in said[:begin], "the driver's own transactions off"
+        assert begin < selects[0] and selects[-1] < end, ("every row and the generation read in one transaction", said)
+        assert any(said[i].startswith("SELECT generation FROM onion_cursor") for i in selects)
+        said.clear()
+        with pytest.raises(store_mod.OnionStateStale):
+            store.save("c1", state, generation=1)
+        assert "ROLLBACK" in said and not any(sql.startswith(("DELETE", "INSERT")) for sql in said), said
+    finally:
+        restore()
+
+
+def test_os29_a_file_of_schema_three_is_brought_up_by_the_generations_migration_every_root_unchanged(tmp_path):
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        path = tmp_path / "onion.db"
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        roots = {cid: store.save(cid, _plain_state(loaded, cid)) for cid in ("c1", "c2")}
+        conn = sqlite3.connect(str(path))
+        conn.execute("ALTER TABLE onion_cursor DROP COLUMN generation")
+        conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+        assert "generation" not in {row[1] for row in conn.execute("PRAGMA table_info(onion_cursor)")}, "control"
+        conn.close()
+        store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        assert (4, "generations") in [(target, name) for target, name, _step in store_mod._MIGRATIONS]
+        assert _version(path) == store_mod.SCHEMA_VERSION >= 4, "the file says the schema it is now of"
+        conn = sqlite3.connect(str(path))
+        assert dict(conn.execute("SELECT conversation, root FROM onion_cursor")) == roots, "every root unchanged"
+        assert dict(conn.execute("SELECT conversation, generation FROM onion_cursor")) == {"c1": 1, "c2": 1}, (
+            "each conversation as saved once")
+        conn.close()
+        back = store.load("c1", lib.OnionState())
+        assert back.generation == 1 and store_mod.onion_root(store_mod.snapshot_of(back)) == roots["c1"]
+        store.save("c1", back, generation=1)
+        assert (store.generation("c1"), store.generation("c2")) == (2, 1)
+        before = path.read_bytes()
+        store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        assert path.read_bytes() == before, "a second opening changes nothing"
+    finally:
+        restore()
+
+
+def test_os30_a_process_reads_what_another_saved_since_and_never_writes_over_it(tmp_path, caplog):
+    from dataclasses import replace
+
+    loaded, restore = _open()
+    try:
+        lib, store_mod = loaded["opti_oignon.memory.librarian"], loaded["opti_oignon.memory.onion_store"]
+        core_store = loaded["opti_oignon.memory.core_store"]
+        path = tmp_path / "onion.db"
+        lib._store[(str(path), False)] = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        config = replace(lib.load_config(), persist_path=str(path), require_encryption=False)
+        store = lib.onion_store(config)
+        reads, asked = [], []
+        load, generation = store.load, store.generation
+        store.load = lambda cid, state: reads.append(cid) or load(cid, state)
+        store.generation = lambda cid: asked.append(cid) or generation(cid)
+        # This process mirrors the conversation and saves it; what it alone keeps of it besides.
+        state = lib.state_for("c1", config)
+        with state.lock:
+            state.mirror(_messages(4))
+        lib._save_state("c1", state, config)
+        assert state.generation == 1 and generation("c1") == 1
+        reads.clear()
+        record = object()
+        state.journal, state.folded, state.unanswered = record, {"k1"}, {("k2", "reader")}
+        assert lib.state_for("c1", config) is state and lib.peek_state("c1", config) is state and reads == [], (
+            "a state whose generation the file holds is used as it is, its rows not read again")
+        # Another process -- the terminal that opened it -- pins, and saves over what it read.
+        other_store = store_mod.OnionStore(path, connect=_plain, require_encryption=False)
+        other = other_store.load("c1", lib.OnionState())
+        other.core.add("Pinned in the terminal.", actor=core_store.USER)
+        other_store.save("c1", other, generation=other.generation)
+        # This process's state is stale: its save is refused by name and writes nothing.
+        with state.lock:
+            state.mirror(_messages(6))
+        caplog.set_level(logging.WARNING)
+        before = path.read_bytes()
+        with pytest.raises(store_mod.OnionStateStale, match="saved by another writer since it was read"):
+            lib._save_state("c1", state, config)
+        assert path.read_bytes() == before, "nothing written over the terminal's"
+        assert any("saved by another process since this one read it; not written over" in r.getMessage()
+                   for r in caplog.records), "said"
+        # Its next use reads what the terminal saved, with what this process alone kept.
+        again = lib.state_for("c1", config)
+        assert again is not state and reads == ["c1"] and lib._states["c1"] is again, "read again in its place"
+        assert _active(again) == ["Pinned in the terminal."] and again.generation == 2
+        assert (again.journal, again.folded, again.unanswered) == (record, {"k1"}, {("k2", "reader")})
+        assert again.lock is state.lock and again.slot is state.slot, "its locks go with it"
+        assert lib._watermark["c1"] == len(again.flesh.turns()), "its growth counted from what it holds"
+        # What this process saves now keeps the terminal's.
+        lib.pin("c1", "Pinned in the server.", actor=core_store.USER, config=config)
+        assert _active(other_store.load("c1", lib.OnionState())) == ["Pinned in the terminal.", "Pinned in the server."]
+        # The block's way to the state reads again too.
+        other = other_store.load("c1", lib.OnionState())
+        other.core.add("Pinned in the terminal again.", actor=core_store.USER)
+        other_store.save("c1", other, generation=other.generation)
+        assert _active(lib.peek_state("c1", config))[-1] == "Pinned in the terminal again."
+        # A file that no longer holds the conversation: it starts over.
+        conn = sqlite3.connect(str(path))
+        for table in store_mod.TABLES:
+            conn.execute(f"DELETE FROM {table} WHERE conversation = 'c1'")
+        conn.commit()
+        conn.close()
+        assert lib.peek_state("c1", config) is None and "c1" not in lib._states, "neither knows it"
+        assert "c1" not in lib._watermark, "nor its growth"
+        fresh = lib.state_for("c1", config)
+        assert fresh.core.all() == [] and fresh.generation == 0 and fresh.journal is None
+        assert lib.counters()["store"] == {"stale": 1, "read_again": 2, "gone": 1}, lib.counters()["store"]
+        # With no store nothing is read.
+        asked.clear()
+        plain = replace(config, persist_path="")
+        held = lib.state_for("c2", plain)
+        assert lib.state_for("c2", plain) is held and lib.peek_state("c2", plain) is held and asked == []
+        load_config = lib.load_config
+        lib.load_config = lambda *args, **kwargs: (_ for _ in ()).throw(ValueError("unreadable"))
+        try:
+            assert lib.peek_state("c2") is held, "a configuration that does not read leaves the state as held"
+            assert lib.state_for("c2") is held, "by either way to it"
+        finally:
+            lib.load_config = load_config
+        # A store that cannot be read at a use is said once for the conversation, and raised.
+        lib.state_for("c3", config)
+        store.generation = lambda cid: (_ for _ in ()).throw(sqlite3.OperationalError("database is locked"))
+        caplog.clear()
+        for _ in range(2):
+            with pytest.raises(sqlite3.OperationalError):
+                lib.state_for("c3", config)
+        assert [r.getMessage() for r in caplog.records if "refused, not replaced" in r.getMessage()] == [
+            "onion memory for c3 refused, not replaced: database is locked"], "said once"
+        # A refusal of another kind is said too: a passing one does not silence it.
+        reading = store.load
+        store.generation = lambda cid: 1
+        store.load = lambda cid, state: (_ for _ in ()).throw(store_mod.OnionIntegrityError("a row moved"))
+        try:
+            with pytest.raises(store_mod.OnionIntegrityError):
+                lib.state_for("c3", config)
+        finally:
+            store.load = reading
+        assert [r.getMessage() for r in caplog.records if "refused, not replaced" in r.getMessage()] == [
+            "onion memory for c3 refused, not replaced: database is locked",
+            "onion memory for c3 refused, not replaced: a row moved"], "each kind said once"
+        store.generation = generation
+        # One process, two threads: a use waits for the save the other thread is making, and never reads it as
+        # another process's.
+        arrived, release = threading.Event(), threading.Event()
+
+        class Paused(lib.OnionState):
+            pause = False
+
+            @property
+            def generation(self):
+                return self.__dict__.get("_generation", 0)
+
+            @generation.setter
+            def generation(self, value):
+                if self.pause:
+                    arrived.set()
+                    release.wait(10)
+                self.__dict__["_generation"] = value
+
+        class Watched:
+            """The state's lock, saying when a thread waits for it."""
+
+            def __init__(self):
+                self.inner, self.waiting = threading.RLock(), threading.Event()
+
+            def __enter__(self):
+                if not self.inner.acquire(blocking=False):
+                    self.waiting.set()
+                    self.inner.acquire()
+                return self
+
+            def __exit__(self, *exc_info):
+                self.inner.release()
+
+        paused = Paused()
+        paused.lock = Watched()
+        lib._states["c4"] = paused
+        with paused.lock:
+            paused.mirror(_messages(2))
+        lib._save_state("c4", paused, config)
+        paused.pause = True
+        saving = threading.Thread(target=lib._save_state, args=("c4", paused, config))
+        saving.start()
+        assert arrived.wait(10), "control: the save reached the generation it leaves"
+        used = []
+        using = threading.Thread(target=lambda: used.append(lib.state_for("c4", config)))
+        using.start()
+        while using.is_alive() and not paused.lock.waiting.wait(0.01):
+            pass
+        release.set()
+        saving.join(10)
+        using.join(10)
+        paused.pause = False
+        assert len(used) == 1 and used[0] is paused and paused.generation == 2, "its own save, not another's"
+        # Two threads reading it again: the first one's reading stands.
+        mine = lib.state_for("c5", config)
+        with mine.lock:
+            mine.mirror(_messages(2))
+        lib._save_state("c5", mine, config)
+        theirs = other_store.load("c5", lib.OnionState())
+        other_store.save("c5", theirs, generation=theirs.generation)
+        first, load_state = lib.OnionState(), lib._load_state
+
+        def raced(cid, cfg):
+            loaded = load_state(cid, cfg)
+            lib._states[cid] = first
+            return loaded
+
+        lib._load_state = raced
+        try:
+            assert lib.state_for("c5", config) is first and lib._states["c5"] is first, "the first reading stands"
+        finally:
+            lib._load_state = load_state
+        assert lib.counters()["store"] == {"stale": 1, "read_again": 2, "gone": 1}, lib.counters()["store"]
+        # A state this process no longer holds is never written, whatever its generation: a conversation the file
+        # stopped holding starts its numbering over.
+        old = lib.state_for("c6", config)
+        with old.lock:
+            old.mirror(_messages(2))
+        lib._save_state("c6", old, config)
+        conn = sqlite3.connect(str(path))
+        for table in store_mod.TABLES:
+            conn.execute(f"DELETE FROM {table} WHERE conversation = 'c6'")
+        conn.commit()
+        conn.close()
+        renewed = lib.state_for("c6", config)
+        renewed.core.add("Pinned after the reset.", actor=core_store.USER)
+        lib._save_state("c6", renewed, config)
+        assert renewed is not old and renewed.generation == old.generation == 1, "control: the numbering started over"
+        with pytest.raises(store_mod.OnionStateStale, match="no longer the one this process holds"):
+            lib._save_state("c6", old, config)
+        assert _active(other_store.load("c6", lib.OnionState())) == ["Pinned after the reset."], "nothing written"
+        assert lib.counters()["store"] == {"stale": 2, "read_again": 2, "gone": 2}, lib.counters()["store"]
+        # A refused window names both stores that can refuse it.
+        words = {}
+        for node in ast.parse(source("executor.py").read_text(encoding="utf-8")).body:
+            named = isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "_ONION_REFUSAL_WORDS"
+                                                         for t in node.targets)
+            if named:
+                words = ast.literal_eval(node.value)
+        assert "onion's store" in words["store"] and "conversation store" in words["store"], words["store"]
     finally:
         restore()
 

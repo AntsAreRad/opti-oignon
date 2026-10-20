@@ -357,7 +357,7 @@ def _local_switch(shipped, section):
         text = local.read_text(encoding="utf-8")
     except FileNotFoundError:
         return None
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         reason = f"cannot be read ({type(exc).__name__})"
     else:
         try:

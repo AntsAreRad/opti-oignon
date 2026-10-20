@@ -685,17 +685,27 @@ librarian:
 # and read back -- re-hashed row by row against a root -- when the process
 # next sees the conversation. Empty: the onion lives in the process and a
 # restart starts it over. A relative path resolves under the data directory.
+# A machine names its own file in local.yaml (onion: {persistence: {path:
+# "onion.db"}}), under the data directory: no root or drive, no ~, no "..",
+# and a name that names a file.
+# Processes that share the file -- the server, the terminal that opened one
+# of its conversations -- each read what another saved since at their next
+# use of the conversation, and never write over it: a save that finds a
+# later one is refused by name and writes nothing.
 # The table holds conversation text, so an unencrypted connection is a
-# refusal by name unless require_encryption is set to false here.
+# refusal by name unless require_encryption is set to false here -- here
+# only: local.yaml does not set it.
 persistence:
   path: ""
   require_encryption: true
 
 # What the queue counted -- bursts, evictions by rung, refusals by motive,
 # spans it asked its librarian nothing about and why, the memory block,
-# proposals, the mirror, the residence -- and the native
-# core's share, kept across processes in a file of aggregates: names and
-# numbers, never a word of a conversation nor its id. The status route and
+# proposals, the mirror, the residence, the store -- a conversation read
+# again or gone since another process saved it, a stale save refused --
+# and the native core's share, kept across processes in a file of
+# aggregates: names and numbers, never a word of a conversation nor its
+# id. The status route and
 # the terminal's /status show them. They are written at the end of each
 # burst and close, after each decision on a proposal and each listing that
 # opens deferred ones, when the terminal session ends by /quit, the end of

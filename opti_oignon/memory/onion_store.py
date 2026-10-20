@@ -43,6 +43,15 @@ keep exactly as it was is not laid, for its span to be read again; a
 reading of a span the file does not hold standing is refused by name, and
 readings the saved root does not cover -- a build that knew none saved the
 state since -- are left out, and said.
+
+Two processes may share the file: the server, and the terminal that opened
+one of its conversations. Each save writes the conversation's next
+generation, beside its root and never in it. A save that names the
+generation its caller read the conversation at -- the librarian's -- writes
+only over that one: when another writer saved the conversation since, it is
+refused by name (``OnionStateStale``) and writes nothing. A load reads the
+rows and their generation inside one read transaction, so a save another
+process commits meanwhile is read whole or not at all.
 """
 
 import hashlib
@@ -114,7 +123,8 @@ CREATE TABLE IF NOT EXISTS onion_cursor (
     conversation TEXT PRIMARY KEY,
     seen INTEGER NOT NULL,
     root TEXT NOT NULL,
-    saved_at TEXT NOT NULL
+    saved_at TEXT NOT NULL,
+    generation INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS onion_receipt_marks (
     conversation TEXT NOT NULL,
@@ -179,6 +189,11 @@ class PlaintextRefused(OnionStoreError):
 
 class OnionIntegrityError(OnionStoreError):
     """A saved row no longer answers to the id it was saved under."""
+
+
+class OnionStateStale(OnionStoreError):
+    """A save refused, nothing written: the file holds a later generation of the conversation than the one the
+    state was read or written at -- another writer sharing the file saved it since."""
 
 
 def _canonical(value):
@@ -401,83 +416,140 @@ class OnionStore:
 
     # -- save --------------------------------------------------------------
 
-    def save(self, conversation_id, state):
-        """Replace the conversation's rows with the state's, under one transaction."""
+    def save(self, conversation_id, state, *, generation=None):
+        """Replace the conversation's rows with the state's, under one write transaction; the root they answer to.
+
+        Each save writes the conversation's next generation. ``generation``,
+        when given, is the one the caller read or wrote the conversation at,
+        0 for one the file did not hold: the save then writes only over that
+        one, and when another writer saved the conversation since it is
+        refused by name (``OnionStateStale``) and writes nothing; written, it
+        leaves the new generation on ``state.generation``. The generation is
+        read inside the transaction that writes, taken first: two writers
+        saving at once write one after the other, and the second finds the
+        first's generation.
+        """
         cid = str(conversation_id)
         if not cid:
             raise OnionStoreError("a conversation id is required to save an onion state")
+        if generation is not None and (type(generation) is not int or generation < 0):
+            raise TypeError(f"a generation is a whole number from 0, not {generation!r}")
         snapshot = snapshot_of(state)
         root = onion_root(snapshot)
         with self._lock, self._conn() as conn:
-            for table in TABLES:
-                conn.execute(f"DELETE FROM {table} WHERE conversation = ?", (cid,))
-            conn.executemany(
-                "INSERT INTO onion_core (conversation, seq, id, text, superseded_by) VALUES (?, ?, ?, ?, ?)",
-                [(cid, i, e_id, text, sup) for i, (e_id, text, sup) in enumerate(snapshot.core)],
-            )
-            conn.executemany(
-                "INSERT INTO onion_cellar (conversation, seq, key, span) VALUES (?, ?, ?, ?)",
-                [(cid, i, key, _canonical(span)) for i, (key, span) in enumerate(snapshot.cellar)],
-            )
-            conn.executemany(
-                "INSERT INTO onion_receipts (conversation, seq, key, stub, turn_ids, resolved) VALUES (?, ?, ?, ?, ?, ?)",
-                [(cid, i, key, stub, _canonical(list(ids)), 1 if resolved else 0)
-                 for i, (key, stub, ids, resolved) in enumerate(snapshot.receipts)],
-            )
-            conn.executemany(
-                "INSERT INTO onion_peels (conversation, seq, id, text, level, sources, children, source_digest, "
-                "probes_passed, probes_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(cid, i, p_id, text, level, _canonical(list(sources)), _canonical(list(children)), digest, passed, total)
-                 for i, (p_id, text, level, sources, children, digest, passed, total) in enumerate(snapshot.peels)],
-            )
-            conn.executemany(
-                "INSERT INTO onion_flesh (conversation, seq, turn) VALUES (?, ?, ?)",
-                [(cid, i, _canonical(turn)) for i, turn in enumerate(snapshot.flesh)],
-            )
-            conn.executemany(
-                "INSERT INTO onion_receipt_marks (conversation, seq, kind, anchors) VALUES (?, ?, ?, ?)",
-                [(cid, int(seq), kind, _canonical([list(anchor) for anchor in anchors]))
-                 for seq, kind, anchors in snapshot.receipt_marks],
-            )
-            conn.executemany(
-                "INSERT INTO onion_peel_marks (conversation, id, rung, stitched, residual, refs, dropped) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [(cid, p_id, rung, _canonical([list(unit) for unit in stitched]),
-                  _canonical([list(probe) for probe in residual]), _canonical([list(ref) for ref in refs]),
-                  _canonical([list(entry) for entry in dropped]))
-                 for p_id, rung, stitched, residual, refs, dropped in map(_mark_parts, snapshot.peel_marks)],
-            )
-            conn.executemany(
-                "INSERT INTO onion_lineage (conversation, turn_id, lineage) VALUES (?, ?, ?)",
-                [(cid, turn_id, _canonical(list(entries))) for turn_id, entries in snapshot.lineage],
-            )
-            conn.executemany(
-                "INSERT INTO onion_proposals (conversation, seq, id, span_key, turn_id, start, stop, origin, made_on, "
-                "status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                [(cid, i, *row) for i, row in enumerate(snapshot.proposals)],
-            )
-            conn.executemany(
-                "INSERT INTO onion_refusals (conversation, span_key, mark) VALUES (?, ?, ?)",
-                [(cid, key, mark) for key, mark in snapshot.refusals],
-            )
-            conn.executemany(
-                "INSERT INTO onion_statements (conversation, seq, span_key, reader, statements) VALUES (?, ?, ?, ?, ?)",
-                [(cid, i, key, reader, _canonical([list(row) for row in found]))
-                 for i, (key, reader, found) in enumerate(snapshot.statements)],
-            )
-            conn.execute(
-                "INSERT INTO onion_cursor (conversation, seen, root, saved_at) VALUES (?, ?, ?, ?)",
-                (cid, snapshot.seen, root, _now()),
-            )
-            conn.commit()
+            # The transaction is this method's, named in SQL, as the schema's is.
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                stored = _generation(conn, cid)
+                if generation is not None and stored != generation:
+                    raise OnionStateStale(
+                        f"onion state {cid}: saved by another writer since it was read (generation {stored}, read "
+                        f"at {generation}); not written over"
+                    )
+                for table in TABLES:
+                    conn.execute(f"DELETE FROM {table} WHERE conversation = ?", (cid,))
+                conn.executemany(
+                    "INSERT INTO onion_core (conversation, seq, id, text, superseded_by) VALUES (?, ?, ?, ?, ?)",
+                    [(cid, i, e_id, text, sup) for i, (e_id, text, sup) in enumerate(snapshot.core)],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_cellar (conversation, seq, key, span) VALUES (?, ?, ?, ?)",
+                    [(cid, i, key, _canonical(span)) for i, (key, span) in enumerate(snapshot.cellar)],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_receipts (conversation, seq, key, stub, turn_ids, resolved) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    [(cid, i, key, stub, _canonical(list(ids)), 1 if resolved else 0)
+                     for i, (key, stub, ids, resolved) in enumerate(snapshot.receipts)],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_peels (conversation, seq, id, text, level, sources, children, source_digest, "
+                    "probes_passed, probes_total) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(cid, i, p_id, text, level, _canonical(list(sources)), _canonical(list(children)), digest,
+                      passed, total)
+                     for i, (p_id, text, level, sources, children, digest, passed, total) in enumerate(snapshot.peels)],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_flesh (conversation, seq, turn) VALUES (?, ?, ?)",
+                    [(cid, i, _canonical(turn)) for i, turn in enumerate(snapshot.flesh)],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_receipt_marks (conversation, seq, kind, anchors) VALUES (?, ?, ?, ?)",
+                    [(cid, int(seq), kind, _canonical([list(anchor) for anchor in anchors]))
+                     for seq, kind, anchors in snapshot.receipt_marks],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_peel_marks (conversation, id, rung, stitched, residual, refs, dropped) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [(cid, p_id, rung, _canonical([list(unit) for unit in stitched]),
+                      _canonical([list(probe) for probe in residual]), _canonical([list(ref) for ref in refs]),
+                      _canonical([list(entry) for entry in dropped]))
+                     for p_id, rung, stitched, residual, refs, dropped in map(_mark_parts, snapshot.peel_marks)],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_lineage (conversation, turn_id, lineage) VALUES (?, ?, ?)",
+                    [(cid, turn_id, _canonical(list(entries))) for turn_id, entries in snapshot.lineage],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_proposals (conversation, seq, id, span_key, turn_id, start, stop, origin, "
+                    "made_on, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    [(cid, i, *row) for i, row in enumerate(snapshot.proposals)],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_refusals (conversation, span_key, mark) VALUES (?, ?, ?)",
+                    [(cid, key, mark) for key, mark in snapshot.refusals],
+                )
+                conn.executemany(
+                    "INSERT INTO onion_statements (conversation, seq, span_key, reader, statements) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    [(cid, i, key, reader, _canonical([list(row) for row in found]))
+                     for i, (key, reader, found) in enumerate(snapshot.statements)],
+                )
+                conn.execute(
+                    "INSERT INTO onion_cursor (conversation, seen, root, saved_at, generation) VALUES (?, ?, ?, ?, ?)",
+                    (cid, snapshot.seen, root, _now(), stored + 1),
+                )
+                conn.execute("COMMIT")
+            except BaseException:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:  # noqa: BLE001 - the engine may have rolled back already: the first error is told
+                    pass
+                raise
+        if generation is not None:
+            state.generation = stored + 1
         return root
 
     # -- load --------------------------------------------------------------
 
     def load_snapshot(self, conversation_id):
-        """The saved rows of a conversation, or None when the file does not know it."""
+        """The saved rows of a conversation and its saved root, ``(None, None)`` when the file does not know it;
+        read inside one read transaction."""
+        snapshot, root, _found = self._read(str(conversation_id))
+        return snapshot, root
+
+    def _read(self, cid):
+        """The rows of ``cid``, its saved root and its generation, read inside one read transaction: a save another
+        process commits meanwhile is read whole or not at all. ``(None, None, 0)`` when the file does not hold it."""
         with self._lock, self._conn() as conn:
-            return _read_snapshot(conn, str(conversation_id))
+            conn.isolation_level = None
+            conn.execute("BEGIN")
+            try:
+                snapshot, root = _read_snapshot(conn, cid)
+                found = _generation(conn, cid)
+            finally:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:  # noqa: BLE001 - a read has nothing to roll back: the first error is told
+                    pass
+        return snapshot, root, found
+
+    def generation(self, conversation_id):
+        """The conversation's generation in the file, which each save raises by one; 0 when the file does not hold
+        it. A conversation a file held before generations were kept reads 1."""
+        with self._lock, self._conn() as conn:
+            return _generation(conn, str(conversation_id))
 
     def load(self, conversation_id, state):
         """Rebuild ``state`` (an empty librarian state) from the file, proving every row.
@@ -491,12 +563,14 @@ class OnionStore:
         are left out, and said: no reading is ever laid that the root does
         not cover. Each reading is then checked again in the Cellar
         (``_restore_readings``): one the checks no longer keep as it was is
-        left out, and said.
+        left out, and said. The rows and their generation are read inside
+        one read transaction, and the generation is left on
+        ``state.generation``: a save that names it writes only over it.
         """
         from dataclasses import replace
 
         cid = str(conversation_id)
-        snapshot, saved_root = self.load_snapshot(cid)
+        snapshot, saved_root, generation = self._read(cid)
         if snapshot is None:
             return None
         root = onion_root(snapshot)
@@ -513,11 +587,18 @@ class OnionStore:
         if stale:
             logger.warning("onion state %s: %d span reading(s) no longer borne out as kept, left for the spans to be "
                            "read again", cid, len(stale))
+        state.generation = generation
         return state
 
     def conversations(self):
         with self._lock, self._conn() as conn:
             return [r[0] for r in conn.execute("SELECT conversation FROM onion_cursor ORDER BY conversation").fetchall()]
+
+
+def _generation(conn, cid):
+    """The generation of conversation ``cid`` on an open connection: 0 when the file does not hold it."""
+    row = conn.execute("SELECT generation FROM onion_cursor WHERE conversation = ?", (cid,)).fetchone()
+    return 0 if row is None else int(row[0])
 
 
 def _read_snapshot(conn, cid):
@@ -708,6 +789,21 @@ def _statements(conn):
     """
 
 
+def _generations(conn):
+    """Schema 4, "generations": each conversation's cursor holds its generation, which each save raises by one.
+
+    The column is added to the cursor of a file written before it, every
+    conversation the file holds at generation 1, as saved once: no root
+    covers the cursor, so every root the file holds still answers to its
+    rows and nothing is written again. A build of an older schema then
+    refuses the file by name, rather than save over a conversation without
+    raising its generation.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(onion_cursor)").fetchall()}
+    if "generation" not in columns:
+        conn.execute("ALTER TABLE onion_cursor ADD COLUMN generation INTEGER NOT NULL DEFAULT 1")
+
+
 # The schema a file was written with, in SQLite's ``user_version``: 0 for
 # every file written before versions existed. Each migration brings a file
 # to its version, in order and once, inside one transaction with the tables
@@ -717,6 +813,7 @@ _MIGRATIONS = (
     (1, "typed-receipts", _typed_receipts),
     (2, "references", _references),
     (3, "statements", _statements),
+    (4, "generations", _generations),
 )
 SCHEMA_VERSION = _MIGRATIONS[-1][0]
 _SCHEMA_STATEMENTS = tuple(statement.strip() for statement in _SCHEMA.split(";") if statement.strip())
