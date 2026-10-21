@@ -90,7 +90,7 @@ This scenario demonstrates the RAG-powered project system for contextual convers
    - A data description document (e.g., `methods.md`)
    - A CSV data file (e.g., `species_counts.csv`)
 
-   Files are validated against allowed extensions and size limits (configurable in `projects.yaml`). Each file is automatically indexed into a per-project ChromaDB collection.
+   Files are validated against allowed extensions and size limits (configurable in `projects.yaml`). Each file is automatically indexed into a per-project collection of the knowledge base's encrypted vector store.
 
 4. **Link a conversation** — Go back to the chat page. The Project Context Badge appears in the chat header. Click it and select "Bioacoustics Analysis" to link the current conversation to the project.
 
@@ -285,4 +285,3 @@ This scenario walks through the first-run experience with system presets.
 - Preset apply updates all relevant YAML config files
 - Workshop > Models and inference reflects the applied preset
 - Skip button works (closes overlay without applying)
-

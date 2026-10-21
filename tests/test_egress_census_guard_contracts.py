@@ -746,6 +746,11 @@ RETIRED = {
     # A second launcher of the plugin worker, imported by nothing, gone: a
     # worker starts only through the one that builds its walls.
     "opti_oignon/async_plugin_subprocess.py": {"process": 1},
+    # The memory's vector layer and the RAG store keep their collections in the
+    # knowledge base's store, which computes no vector and sends nothing: no
+    # default embedding model left to download, no client telemetry.
+    "opti_oignon/memory/vector_store.py": {"chromadb": 1},
+    "opti_oignon/rag_store.py": {"chromadb": 4},
 }
 
 

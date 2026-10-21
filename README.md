@@ -17,7 +17,7 @@ Opti-Oignon is in active development. The list below is an honest picture of wha
 - Accounts: registration, login, and optional 2FA (TOTP and WebAuthn).
 - Two security modes. Daily is the normal mode; Bulbe is a hardened mode enforced at the socket layer (the backend binds to `127.0.0.1` only and accepts cookie-based auth only), with a guarded, human-confirmed downgrade ceremony and fail-secure behavior when the mode cannot be determined.
 - Encryption at rest via SQLCipher.
-- Projects with RAG context (ChromaDB).
+- Projects with RAG context, in an encrypted vector store.
 
 **Implemented and unit-tested, still maturing**: the wider intelligence surface (smart routing, multi-model consensus, cascading inference, semantic cache), the sandboxed agent loop, the benchmark and performance dashboards, the resource governor, the red team engine, RBAC and multi-user isolation, and the encrypted Notes tab. The code is present and covered by the test suite, but a fresh install is not guaranteed to exercise every one of these paths end to end yet.
 
@@ -87,7 +87,7 @@ graph TB
     subgraph Backend["Backend -- FastAPI"]
         API[REST + WebSocket API]
         SEC[Security layer -- auth, RBAC, Daily/Bulbe, encryption at rest]
-        RAGB[Projects + RAG -- ChromaDB]
+        RAGB[Projects + RAG -- encrypted vectors]
         ROUTE[Routing + pipelines]
     end
 
@@ -199,4 +199,4 @@ included, was published under the MIT License, which still applies to it.
 
 ## Acknowledgments
 
-Built with [Ollama](https://ollama.com), [FastAPI](https://fastapi.tiangolo.com), [SvelteKit](https://kit.svelte.dev), and [ChromaDB](https://www.trychroma.com).
+Built with [Ollama](https://ollama.com), [FastAPI](https://fastapi.tiangolo.com), [SvelteKit](https://kit.svelte.dev), and [SQLCipher](https://www.zetetic.net/sqlcipher/).

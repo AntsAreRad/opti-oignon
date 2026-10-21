@@ -254,12 +254,10 @@ LEDGER = {
     "opti_oignon/context_manager.py": {"process": 2},
     "opti_oignon/core_client.py": {"urllib": 1},
     "opti_oignon/dep_monitor.py": {"process": 1},
-    "opti_oignon/memory/vector_store.py": {"chromadb": 1},
     "opti_oignon/model_lifecycle.py": {"ollama": 5, "requests": 2},
     "opti_oignon/network_hardening.py": {"socket": 1},
     "opti_oignon/plugin_subprocess.py": {"process": 1},
     "opti_oignon/rag_external.py": {"pinecone": 12, "qdrant_client": 1, "weaviate": 2},
-    "opti_oignon/rag_store.py": {"chromadb": 4},
     "opti_oignon/sandbox_manager.py": {"process": 3},
     "opti_oignon/token_counter.py": {"urllib": 1},
     "opti_oignon/ui.py": {"process": 3, "urllib": 3, "webbrowser": 1},
@@ -293,8 +291,10 @@ LIBRARIES = {
     "chromadb": (
         "fetches on first use",
         "its default embedding function downloads a model, and its client sends telemetry unless "
-        "told not to; both are sinks this census counts, owed in the two vector stores",
-        ("opti_oignon/rag_store.py", "opti_oignon/memory/vector_store.py"),
+        "told not to; both are sinks this census counts. The package imports it only to read "
+        "ChromaDB's stores in the offline migration into the knowledge base's store, its "
+        "telemetry off and no embedding asked of it (vd11)",
+        ("opti_oignon/chroma_migration.py", "vd11"),
     ),
     "click": ("offline", "the command line's argument parser", ()),
     "cryptography": ("offline", "keys, signatures and ciphers, computed in process", ()),

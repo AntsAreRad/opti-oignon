@@ -44,6 +44,11 @@ opti_oignon/data/*.db-journal
 # second name for the store's plaintext. The next run names each.
 *.db.encrypting
 *.db.restoring
+# The folders of plaintext copies the offline commands keep in the data directories (encrypt, and
+# migrate, which keeps ChromaDB's whole folders there: texts, metadata and vectors in plaintext), to
+# delete once the platform reads its stores again.
+data/**/plaintext-*/
+opti_oignon/data/**/plaintext-*/
 # Plugins' private data folders: whatever a plugin keeps is the user's.
 opti_oignon/data/plugin_data/
 

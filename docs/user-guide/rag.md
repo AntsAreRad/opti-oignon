@@ -4,7 +4,11 @@
 
 Opti-Oignon's RAG system lets you ingest documents into project-specific
 collections and query them during conversations. Documents are chunked,
-embedded locally (via Ollama), and stored in ChromaDB vector collections.
+embedded locally (via Ollama), and stored, texts and vectors alike, in the
+knowledge base's vector store (`opti_oignon/data/rag/vectors.db`), encrypted
+at rest like every database of the platform. A ChromaDB store left by an
+earlier version is moved into it by
+`python3 -m opti_oignon.db_encryption migrate`, with the platform stopped.
 
 All processing stays local -- no data leaves your machine. The one
 exception is ingesting a web page by URL, which fetches that page.

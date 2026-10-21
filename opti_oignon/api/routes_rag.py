@@ -327,7 +327,12 @@ def list_collections() -> dict:
 def create_collection(request: CollectionCreateRequest) -> dict:
     """Create a new collection."""
     store = _get_store()
-    info = store.create_collection(name=request.name, description=request.description)
+    try:
+        info = store.create_collection(name=request.name, description=request.description)
+    except RuntimeError as exc:
+        # The knowledge base waits for its migration, or its store does not
+        # open: said as it is, nothing created.
+        raise HTTPException(status_code=503, detail=str(exc))
     return CollectionResponse(
         name=info.name,
         description=info.description,
@@ -342,7 +347,12 @@ def create_collection(request: CollectionCreateRequest) -> dict:
 def delete_collection(name: str) -> dict:
     """Delete a collection and all its documents, chunks, and citations."""
     store = _get_store()
-    deleted = store.delete_collection(name)
+    try:
+        deleted = store.delete_collection(name)
+    except RuntimeError as exc:
+        # The knowledge base waits for its migration: said as it is, nothing
+        # deleted.
+        raise HTTPException(status_code=503, detail=str(exc))
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Collection '{name}' not found")
     return CollectionDeleteResponse(deleted=True, name=name)
@@ -833,7 +843,12 @@ def list_documents(
 def delete_document(doc_id: str) -> dict:
     """Delete a document and its chunks from the vector store."""
     store = _get_store()
-    deleted = store.delete_document(doc_id)
+    try:
+        deleted = store.delete_document(doc_id)
+    except RuntimeError as exc:
+        # The knowledge base waits for its migration, or its store does not
+        # open: said as it is, nothing deleted.
+        raise HTTPException(status_code=503, detail=str(exc))
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
     return DocumentDeleteResponse(deleted=True, doc_id=doc_id)

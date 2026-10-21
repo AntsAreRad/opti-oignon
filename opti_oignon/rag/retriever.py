@@ -16,13 +16,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import chromadb
-from chromadb.config import Settings
-
+from .. import vector_db
 from .config import RAGConfig, get_config
 from .embeddings import OllamaEmbeddings
 
 logger = logging.getLogger(__name__)
+
+# The namespace of the knowledge base's store the documents' index lives in.
+VECTOR_NAMESPACE = "documents"
 
 
 @dataclass
@@ -81,23 +82,20 @@ class DocumentRetriever:
 
         Args:
             config: Configuration RAG
-            collection_name: Nom de la collection ChromaDB
+            collection_name: Name of the collection in the knowledge base's store
         """
         self.config = config or get_config()
         self.collection_name = collection_name
 
-        # Client ChromaDB
-        self.chroma_client = chromadb.PersistentClient(
-            path=str(self.config.chroma_dir),
-            settings=Settings(anonymized_telemetry=False)
-        )
+        # The knowledge base's store, encrypted like every store
+        self.vector_client = vector_db.Client(self.config.vectors_db, VECTOR_NAMESPACE, legacy=self.config.chroma_dir)
 
         # Retrieve collection (don't create if it doesn't exist)
         try:
-            self.collection = self.chroma_client.get_collection(collection_name)
+            self.collection = self.vector_client.get_collection(collection_name)
         except Exception:
             logger.warning(f"Collection '{collection_name}' not found. Creating...")
-            self.collection = self.chroma_client.get_or_create_collection(
+            self.collection = self.vector_client.get_or_create_collection(
                 name=collection_name
             )
 
@@ -144,7 +142,7 @@ class DocumentRetriever:
         # Construire les filtres
         where_filter = self._build_filter(file_types, source_files, exclude_files)
 
-        # ChromaDB query
+        # Query the knowledge base's store
         try:
             results = self.collection.query(
                 query_embeddings=[query_embedding],
@@ -167,10 +165,9 @@ class DocumentRetriever:
         distances = results['distances'][0]
 
         for doc, meta, dist in zip(documents, metadatas, distances):
-            # Convert distance to score (ChromaDB returns distances)
-            # For normalized embeddings, distance = 2 - 2*cosine_similarity
-            # Donc score = 1 - distance/2
-            score = max(0, 1 - dist / 2)
+            # The similarity the distance stands for in the collection's own
+            # space: squared L2 when it names none, as ChromaDB did.
+            score = max(0, self.collection.similarity(dist))
 
             # Filtrer par score minimum
             min_s = min_score if min_score is not None else self.config.retriever.min_score
@@ -203,7 +200,7 @@ class DocumentRetriever:
         source_files: list[str] | None,
         exclude_files: list[str] | None
     ) -> dict | None:
-        """Build the ChromaDB filter."""
+        """Build the metadata filter."""
         conditions = []
 
         # Filtre par type

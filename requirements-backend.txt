@@ -17,7 +17,9 @@ requests>=2.31.0
 # LLM inference
 ollama>=0.1.0
 
-# Vector store (RAG)
+# Read only by `python3 -m opti_oignon.db_encryption migrate`, which moves
+# ChromaDB's stores into the knowledge base's encrypted store; the platform
+# itself no longer imports it.
 chromadb>=0.4.0
 
 # Data processing

@@ -1,17 +1,19 @@
 """Vector layer for Opti-Oignon personal memory.
 
-A ChromaDB collection named ``oo_memories`` in cosine space
-(``hnsw:space = cosine``), kept distinct from the RAG collection so personal
+A collection named ``oo_memories`` in cosine space (``hnsw:space = cosine``),
+in the namespace ``memory`` of the knowledge base's store
+(``opti_oignon.vector_db``), which keeps the facts' texts and vectors
+encrypted like every store; kept distinct from the RAG collections so personal
 memory and document retrieval never bleed into each other. Embeddings are
 precomputed by the embedding client shared with the RAG pipeline
 (``opti_oignon.rag.embeddings.OllamaEmbeddings``), so memory adds no new
-embedding dependency.
+embedding dependency, and the store computes none of its own.
 
 The layer mirrors the canonical CRUD (add / update / delete / get / count) and
 exposes ``find_similar`` for the dedup cosine check and for hybrid retrieval.
 Per-user isolation is carried in the metadata ``user_id`` and enforced on every
-read. The ChromaDB client/collection and the embedder are injectable so the
-module loads and tests in isolation without chromadb or ollama installed.
+read. The client/collection and the embedder are injectable so the module loads
+and tests in isolation without the store or ollama.
 """
 
 from __future__ import annotations
@@ -27,16 +29,14 @@ logger = logging.getLogger(__name__)
 checkpoint_before_apply = True
 FEATURE_AVAILABLE = True
 
-# Guarded ChromaDB import (same posture as rag_store.py).
+# Guarded import of the knowledge base's store (same posture as rag_store.py).
 try:
-    import chromadb
-    from chromadb.config import Settings as ChromaSettings
+    from .. import vector_db
 
-    _HAS_CHROMADB = True
+    _HAS_VECTOR_STORE = True
 except Exception:
-    chromadb = None  # type: ignore[assignment]
-    ChromaSettings = None  # type: ignore[assignment]
-    _HAS_CHROMADB = False
+    vector_db = None  # type: ignore[assignment]
+    _HAS_VECTOR_STORE = False
 
 # Guarded shared embedding client (no new embedding dependency).
 try:
@@ -48,6 +48,8 @@ except Exception:
     _HAS_EMBEDDER = False
 
 COLLECTION_NAME = "oo_memories"
+# The namespace of the knowledge base's store the memory's collection lives in.
+VECTOR_NAMESPACE = "memory"
 COLLECTION_METADATA = {
     "hnsw:space": "cosine",
     "description": "Opti-Oignon personal memory (oo_memories), distinct from RAG",
@@ -59,7 +61,7 @@ DEFAULT_LOCAL_USER = "local"
 class SimilarMemory:
     """A neighbour returned by find_similar.
 
-    similarity is cosine similarity in [-1, 1], derived from the ChromaDB cosine
+    similarity is cosine similarity in [-1, 1], derived from the store's cosine
     distance as ``1 - distance``.
     """
 
@@ -69,18 +71,13 @@ class SimilarMemory:
     metadata: dict[str, Any] | None = None
 
 
-def _default_chroma_dir() -> Path:
-    try:
-        from ..rag.config import get_config
+def _default_vectors_db() -> tuple[Path, Path]:
+    """(the knowledge base's store, the folder ChromaDB kept the memory's
+    collection in before it): the documents' index's, which it shared."""
+    from ..rag.config import get_config
 
-        return Path(get_config().chroma_dir)
-    except Exception:
-        try:
-            from ..config import DATA_DIR
-
-            return Path(DATA_DIR) / "chroma"
-        except Exception:
-            return Path("data") / "chroma"
+    config = get_config()
+    return Path(config.vectors_db), Path(config.chroma_dir)
 
 
 def _default_embedder() -> Any | None:
@@ -93,7 +90,7 @@ def _default_embedder() -> Any | None:
 
 
 def _clean_metadata(md: dict[str, Any]) -> dict[str, Any]:
-    """ChromaDB metadata must be str/int/float/bool and non-null."""
+    """The store's metadata is str/int/float/bool and non-null."""
     cleaned: dict[str, Any] = {}
     for key, val in md.items():
         if val is None:
@@ -106,44 +103,48 @@ def _clean_metadata(md: dict[str, Any]) -> dict[str, Any]:
 
 
 class MemoryVectorStore:
-    """The oo_memories ChromaDB layer, mirroring the canonical store."""
+    """The oo_memories layer of the knowledge base's store, mirroring the canonical store."""
 
     COLLECTION_NAME = COLLECTION_NAME
 
     def __init__(
         self,
         *,
-        chroma_dir: Path | str | None = None,
+        vectors_db: Path | str | None = None,
         embedder: Any | None = None,
         collection: Any | None = None,
         client: Any | None = None,
     ) -> None:
         self._embedder = embedder if embedder is not None else _default_embedder()
         self._warned_no_embedder = False
+        self._unavailable = "the knowledge base's store could not be opened"
         if collection is not None:
             self._collection = collection
         else:
-            self._collection = self._build_collection(chroma_dir, client)
+            self._collection = self._build_collection(vectors_db, client)
 
-    def _build_collection(self, chroma_dir: Path | str | None, client: Any | None) -> Any:
-        if not _HAS_CHROMADB:
+    def _build_collection(self, vectors_db: Path | str | None, client: Any | None) -> Any:
+        if not _HAS_VECTOR_STORE:
             logger.warning(
-                "chromadb not installed; memory vector store unavailable "
-                "(canonical keyword/recency recall only)"
+                "the knowledge base's store does not import; memory vector store "
+                "unavailable (canonical keyword/recency recall only)"
             )
             return None
         try:
             if client is None:
-                path = str(chroma_dir if chroma_dir is not None else _default_chroma_dir())
-                client = chromadb.PersistentClient(
-                    path=path, settings=ChromaSettings(anonymized_telemetry=False)
-                )
+                if vectors_db is not None:
+                    client = vector_db.Client(Path(vectors_db), VECTOR_NAMESPACE)
+                else:
+                    path, legacy = _default_vectors_db()
+                    client = vector_db.Client(path, VECTOR_NAMESPACE, legacy=legacy)
             return client.get_or_create_collection(
                 name=COLLECTION_NAME, metadata=dict(COLLECTION_METADATA)
             )
         except Exception as exc:  # noqa: BLE001 - a broken backend degrades, never crashes
+            if vector_db is not None and isinstance(exc, vector_db.MigrationPending):
+                self._unavailable = f"the knowledge base's store could not be opened: {exc}"
             logger.warning(
-                "chromadb collection unavailable (%s); memory vector store "
+                "memory collection unavailable (%s); memory vector store "
                 "degraded to canonical recall only", exc
             )
             return None
@@ -177,15 +178,15 @@ class MemoryVectorStore:
         embeddings flow; "degraded" means an embedder is configured but not
         returning vectors (e.g. Ollama down or the embed model missing);
         "unavailable" means no embedder is configured, or the vector backend
-        (chromadb) is absent. In every non-ok case the canonical (keyword/recency)
-        tier still works -- recall is degraded, not down.
+        (the knowledge base's store) cannot be opened. In every non-ok case the
+        canonical (keyword/recency) tier still works -- recall is degraded, not
+        down.
         """
         if self._collection is None:
             return {
                 "status": "unavailable",
                 "available": False,
-                "detail": "vector store unavailable (chromadb not installed); "
-                "canonical recall only",
+                "detail": f"vector store unavailable ({self._unavailable}); canonical recall only",
             }
         if self._embedder is None:
             return {
@@ -233,7 +234,7 @@ class MemoryVectorStore:
         source: str = "",
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        # Degraded (no chromadb): the fact lives in the canonical store; the
+        # Degraded (no vector store): the fact lives in the canonical store; the
         # vector mirror is a no-op. Short-circuit before computing an embedding.
         if self._collection is None:
             return fact_id
@@ -283,10 +284,15 @@ class MemoryVectorStore:
             emb = recomputed if recomputed is not None else existing.get("embedding")
         else:
             emb = existing.get("embedding")
+        if emb is None:
+            # The store computes no vector of its own: an update with none is refused.
+            raise RuntimeError(
+                "no embedding available for the update: pass one explicitly or configure an embedder"
+            )
 
         self._collection.upsert(
             ids=[fact_id],
-            embeddings=[emb] if emb is not None else None,
+            embeddings=[emb],
             documents=[new_text],
             metadatas=[_clean_metadata(md)],
         )

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-INDEXER - Indexation des documents dans ChromaDB
-=================================================
-Parcourt les dossiers, chunke les fichiers et les stocke avec leurs embeddings.
+INDEXER - Document indexing into the knowledge base's store
+===========================================================
+Walks folders, chunks the files and stores them with their embeddings, in the
+namespace ``documents`` of the knowledge base's store (opti_oignon.vector_db).
 
 Features:
 - Recursive folder indexing
@@ -18,14 +19,15 @@ import logging
 from datetime import datetime
 from pathlib import Path
 
-import chromadb
-from chromadb.config import Settings
-
+from .. import vector_db
 from .chunkers import get_chunker
 from .config import RAGConfig, get_config
 from .embeddings import OllamaEmbeddings
 
 logger = logging.getLogger(__name__)
+
+# The namespace of the knowledge base's store the documents' index lives in.
+VECTOR_NAMESPACE = "documents"
 
 
 class DocumentIndexer:
@@ -48,19 +50,16 @@ class DocumentIndexer:
 
         Args:
             config: Configuration RAG (utilise la config globale si non fourni)
-            collection_name: Nom de la collection ChromaDB
+            collection_name: Name of the collection in the knowledge base's store
         """
         self.config = config or get_config()
         self.collection_name = collection_name
 
-        # Initialiser ChromaDB en mode persistant
-        self.chroma_client = chromadb.PersistentClient(
-            path=str(self.config.chroma_dir),
-            settings=Settings(anonymized_telemetry=False)
-        )
+        # The knowledge base's store, encrypted like every store
+        self.vector_client = vector_db.Client(self.config.vectors_db, VECTOR_NAMESPACE, legacy=self.config.chroma_dir)
 
         # Create or retrieve the collection
-        self.collection = self.chroma_client.get_or_create_collection(
+        self.collection = self.vector_client.get_or_create_collection(
             name=collection_name,
             metadata={"description": "Documents RAG personnels"}
         )
@@ -373,7 +372,7 @@ class DocumentIndexer:
             logger.warning(f"No valid embedding for {filepath}")
             return (0, 1)
 
-        # Add to ChromaDB
+        # Add to the knowledge base's store
         self.collection.add(
             ids=[c.chunk_id for c in valid_chunks],
             embeddings=valid_embeddings,
@@ -525,8 +524,8 @@ class DocumentIndexer:
         """
         try:
             # Delete and recreate collection
-            self.chroma_client.delete_collection(self.collection_name)
-            self.collection = self.chroma_client.create_collection(
+            self.vector_client.delete_collection(self.collection_name)
+            self.collection = self.vector_client.create_collection(
                 name=self.collection_name,
                 metadata={"description": "Documents RAG personnels"}
             )
@@ -562,7 +561,7 @@ class DocumentIndexer:
                 "total_files": len(self._index_cache),
                 "files_by_type": type_counts,
                 "collection_name": self.collection_name,
-                "storage_path": str(self.config.chroma_dir),
+                "storage_path": str(self.config.vectors_db),
                 "embedding_model": self.config.embedding.model
             }
         except Exception as e:

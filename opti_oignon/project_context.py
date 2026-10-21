@@ -4,12 +4,13 @@ PROJECT CONTEXT -- Indexation + RAG Retrieval for Projects
 ================================================================
 
 Provides two main classes:
-- ProjectIndexer: indexes project files into per-project ChromaDB collections
+- ProjectIndexer: indexes project files into per-project collections of the
+  namespace ``projects`` of the knowledge base's store (opti_oignon.vector_db),
   using the existing RAG chunker/embeddings infrastructure.
 - ProjectContextBuilder: retrieves relevant chunks from a project's collection
   and builds a context string within a token budget for injection into LLM calls.
 
-Graceful degradation: if ChromaDB or Ollama embeddings are unavailable,
+Graceful degradation: if the store or Ollama embeddings are unavailable,
 indexation is skipped but system_instructions are still injected.
 
 Author: Leon
@@ -28,15 +29,13 @@ logger = logging.getLogger(__name__)
 # CONDITIONAL IMPORTS
 # =============================================================================
 
-# ChromaDB
+# The knowledge base's store
 try:
-    import chromadb
-    from chromadb.config import Settings as ChromaSettings
-    CHROMADB_AVAILABLE = True
+    from opti_oignon import vector_db
+    VECTOR_STORE_AVAILABLE = True
 except ImportError:
-    CHROMADB_AVAILABLE = False
-    chromadb = None
-    ChromaSettings = None
+    VECTOR_STORE_AVAILABLE = False
+    vector_db = None
 
 # RAG chunkers
 try:
@@ -79,7 +78,20 @@ except ImportError:
 
 _CONFIG_DIR = Path(__file__).parent / "config"
 _DATA_DIR = Path(__file__).parent / "data"
+# Where ChromaDB kept the projects' collections before the knowledge base's
+# store: never made, never read here (``db_encryption migrate`` moves them).
 _DEFAULT_CHROMA_BASE = _DATA_DIR / "project_chroma"
+# The knowledge base's store, and the namespace the projects' collections live in.
+_DEFAULT_VECTORS_DB = _DATA_DIR / "rag" / "vectors.db"
+_VECTOR_NAMESPACE = "projects"
+
+
+def _vector_client(vectors_db: Path | None) -> Any:
+    """One client of the projects' namespace: the default store's waits while
+    ChromaDB's projects folder holds a store (``vector_db.MigrationPending``)."""
+    if vectors_db is None:
+        return vector_db.Client(_DEFAULT_VECTORS_DB, _VECTOR_NAMESPACE, legacy=_DEFAULT_CHROMA_BASE)
+    return vector_db.Client(vectors_db, _VECTOR_NAMESPACE)
 
 # Collection name pattern for per-project collections
 _COLLECTION_PREFIX = "project_"
@@ -155,7 +167,7 @@ class IndexResult:
 
 @dataclass
 class RetrievedChunk:
-    """A chunk retrieved from the project's ChromaDB collection."""
+    """A chunk retrieved from the project's collection."""
 
     content: str = ""
     score: float = 0.0
@@ -190,17 +202,16 @@ def _estimate_tokens(text: str) -> int:
 def _l2_normalize(vec: Any) -> list[float]:
     """L2-normalize an embedding vector.
 
-    The per-project collections are created in ChromaDB's default l2 space
-    and the retrieval score is computed as 1 - distance/2, which is only
-    correct for unit-normalized vectors (squared L2 = 2 - 2*cos). The
-    modern Ollama /api/embed endpoint normalizes server-side, so this is
-    an idempotent no-op there; on the legacy /api/embeddings fallback
-    (RST-01) vectors are unnormalized, every score collapsed to 0 below
-    min_relevance_score, and project retrieval silently returned nothing.
-    Normalizing at both seams (index and query) makes the score correct in
-    both modes, with no migration needed for modern-endpoint data. The
-    cosine-space alignment with rag_store (plus reindex) is recorded for
-    the RAG cycle (PCX-03).
+    The retrieval score is the similarity a distance stands for in its
+    collection's space (``Collection.similarity``): the cosine similarity
+    in a cosine collection, whatever the vectors' length, and in a squared
+    L2 collection -- ChromaDB's default before its 1.0, which a migrated
+    collection may keep -- only for unit-normalized vectors (squared L2 =
+    2 - 2*cos). The modern Ollama /api/embed endpoint normalizes
+    server-side, so this is an idempotent no-op there; on the legacy
+    /api/embeddings fallback (RST-01) vectors are unnormalized. Normalizing
+    at both seams (index and query) keeps the score correct in both spaces
+    and both modes.
     """
     norm = math.sqrt(sum(x * x for x in vec))
     if norm <= 0.0:
@@ -331,31 +342,32 @@ def _load_context_config() -> dict[str, Any]:
 # =============================================================================
 
 class ProjectIndexer:
-    """Indexes project files into per-project ChromaDB collections.
+    """Indexes project files into per-project collections of the knowledge base's store.
 
-    Each project gets its own ChromaDB collection named 'project_{id}'.
+    Each project gets its own collection named 'project_{id}'.
     Uses the existing RAG chunkers and OllamaEmbeddings for processing.
     After indexing, updates the ProjectFile record in SQLite with
     indexed=True, chunk_count, summary, and key_terms.
 
-    Graceful degradation: if ChromaDB or embeddings are unavailable,
+    Graceful degradation: if the store or embeddings are unavailable,
     returns an error IndexResult without crashing.
     """
 
     def __init__(
         self,
-        chroma_base: Path | None = None,
+        vectors_db: Path | None = None,
         store: Any | None = None,
     ):
         """Initialize the project indexer.
 
         Args:
-            chroma_base: Base directory for per-project ChromaDB storage.
+            vectors_db: The knowledge base's store (its default when None).
             store: ProjectStore instance (uses global singleton if None).
         """
         self._config = _load_context_config()
-        self._chroma_base = chroma_base or _DEFAULT_CHROMA_BASE
-        self._chroma_base.mkdir(parents=True, exist_ok=True)
+        self._vectors_db = Path(vectors_db) if vectors_db is not None else _DEFAULT_VECTORS_DB
+        self._client = (_vector_client(None if vectors_db is None else Path(vectors_db))
+                        if VECTOR_STORE_AVAILABLE else None)
         self._store = store if store is not None else project_store
         self._embedder: Any | None = None
 
@@ -364,8 +376,8 @@ class ProjectIndexer:
 
     @property
     def available(self) -> bool:
-        """Whether indexation is possible (ChromaDB + chunkers + embeddings)."""
-        return CHROMADB_AVAILABLE and CHUNKERS_AVAILABLE and EMBEDDINGS_AVAILABLE
+        """Whether indexation is possible (store + chunkers + embeddings)."""
+        return VECTOR_STORE_AVAILABLE and CHUNKERS_AVAILABLE and EMBEDDINGS_AVAILABLE
 
     def _get_embedder(self) -> Any | None:
         """Get or create the OllamaEmbeddings instance (lazy init)."""
@@ -386,29 +398,25 @@ class ProjectIndexer:
             return None
 
     def _get_collection(self, project_id: str) -> Any | None:
-        """Get or create the ChromaDB collection for a project.
+        """Get or create the collection for a project.
 
         Args:
             project_id: The project identifier.
 
         Returns:
-            ChromaDB collection, or None if unavailable.
+            The collection, or None if unavailable.
         """
-        if not CHROMADB_AVAILABLE:
+        if not VECTOR_STORE_AVAILABLE:
             return None
 
         try:
-            client = chromadb.PersistentClient(
-                path=str(self._chroma_base),
-                settings=ChromaSettings(anonymized_telemetry=False),
-            )
             collection_name = f"{_COLLECTION_PREFIX}{project_id}"
-            return client.get_or_create_collection(
+            return self._client.get_or_create_collection(
                 name=collection_name,
                 metadata={"project_id": project_id},
             )
         except Exception as e:
-            logger.error("Failed to get ChromaDB collection for project %s: %s", project_id, e)
+            logger.error("Failed to get the collection for project %s: %s", project_id, e)
             return None
 
     def _read_file_content(self, file_path: str, filename: str) -> str | None:
@@ -492,7 +500,7 @@ class ProjectIndexer:
         project_id: str,
         file_id: str,
     ) -> IndexResult:
-        """Index a single project file into ChromaDB.
+        """Index a single project file into its project's collection.
 
         Reads the file, chunks it, generates embeddings, stores in
         the per-project collection, and updates the SQLite record.
@@ -509,8 +517,8 @@ class ProjectIndexer:
         # Check dependencies
         if not self.available:
             missing = []
-            if not CHROMADB_AVAILABLE:
-                missing.append("chromadb")
+            if not VECTOR_STORE_AVAILABLE:
+                missing.append("vector store")
             if not CHUNKERS_AVAILABLE:
                 missing.append("chunkers")
             if not EMBEDDINGS_AVAILABLE:
@@ -542,10 +550,10 @@ class ProjectIndexer:
             result.error = "File is empty or too short to index"
             return result
 
-        # Get ChromaDB collection
+        # Get the project's collection
         collection = self._get_collection(project_id)
         if collection is None:
-            result.error = "ChromaDB collection unavailable"
+            result.error = "Project collection unavailable"
             return result
 
         # Get embedder
@@ -597,7 +605,7 @@ class ProjectIndexer:
         # Normalize before storing (see _l2_normalize).
         valid_embeddings = [_l2_normalize(e) for e in valid_embeddings]
 
-        # Store in ChromaDB
+        # Store in the knowledge base's store
         try:
             # Use project-scoped chunk IDs to avoid collisions
             chunk_ids = [
@@ -612,7 +620,7 @@ class ProjectIndexer:
                 metadatas=metadatas,
             )
         except Exception as e:
-            result.error = f"ChromaDB insertion failed: {e}"
+            result.error = f"Insertion into the knowledge base's store failed: {e}"
             return result
 
         # Extract summary and key terms
@@ -643,7 +651,7 @@ class ProjectIndexer:
         return result
 
     def remove_file_from_index(self, project_id: str, file_id: str) -> bool:
-        """Remove a file's chunks from the project's ChromaDB collection.
+        """Remove a file's chunks from the project's collection.
 
         Args:
             project_id: The project ID.
@@ -652,7 +660,7 @@ class ProjectIndexer:
         Returns:
             True if removal succeeded.
         """
-        if not CHROMADB_AVAILABLE:
+        if not VECTOR_STORE_AVAILABLE:
             return False
 
         if self._store is None:
@@ -714,7 +722,7 @@ class ProjectIndexer:
         return results
 
     def delete_project_index(self, project_id: str) -> bool:
-        """Delete the entire ChromaDB collection for a project.
+        """Delete the entire collection of a project.
 
         Args:
             project_id: The project ID.
@@ -722,17 +730,14 @@ class ProjectIndexer:
         Returns:
             True if deletion succeeded.
         """
-        if not CHROMADB_AVAILABLE:
+        if not VECTOR_STORE_AVAILABLE:
             return False
 
         try:
-            client = chromadb.PersistentClient(
-                path=str(self._chroma_base),
-                settings=ChromaSettings(anonymized_telemetry=False),
-            )
+            client = self._client
             collection_name = f"{_COLLECTION_PREFIX}{project_id}"
             client.delete_collection(collection_name)
-            logger.info("Deleted ChromaDB collection for project %s", project_id)
+            logger.info("Deleted the collection of project %s", project_id)
             return True
         except Exception as e:
             logger.warning("Failed to delete project index: %s", e)
@@ -789,7 +794,7 @@ class ProjectIndexer:
 class ProjectContextBuilder:
     """Builds context from a project's indexed files for LLM injection.
 
-    Retrieves relevant chunks from ChromaDB based on a query,
+    Retrieves relevant chunks from the knowledge base's store based on a query,
     assembles them within a token budget, and prepends the project's
     system_instructions.
 
@@ -799,17 +804,19 @@ class ProjectContextBuilder:
 
     def __init__(
         self,
-        chroma_base: Path | None = None,
+        vectors_db: Path | None = None,
         store: Any | None = None,
     ):
         """Initialize the context builder.
 
         Args:
-            chroma_base: Base directory for ChromaDB storage.
+            vectors_db: The knowledge base's store (its default when None).
             store: ProjectStore instance (uses global singleton if None).
         """
         self._config = _load_context_config()
-        self._chroma_base = chroma_base or _DEFAULT_CHROMA_BASE
+        self._vectors_db = Path(vectors_db) if vectors_db is not None else _DEFAULT_VECTORS_DB
+        self._client = (_vector_client(None if vectors_db is None else Path(vectors_db))
+                        if VECTOR_STORE_AVAILABLE else None)
         self._store = store if store is not None else project_store
         self._embedder: Any | None = None
         self._embedder_checked = False
@@ -817,7 +824,7 @@ class ProjectContextBuilder:
     @property
     def available(self) -> bool:
         """Whether RAG retrieval is possible."""
-        return CHROMADB_AVAILABLE and EMBEDDINGS_AVAILABLE
+        return VECTOR_STORE_AVAILABLE and EMBEDDINGS_AVAILABLE
 
     def _get_embedder(self) -> Any | None:
         """Get or create the OllamaEmbeddings instance."""
@@ -838,17 +845,13 @@ class ProjectContextBuilder:
             return None
 
     def _get_collection(self, project_id: str) -> Any | None:
-        """Get the ChromaDB collection for a project (read-only)."""
-        if not CHROMADB_AVAILABLE:
+        """Get the collection of a project (read-only)."""
+        if not VECTOR_STORE_AVAILABLE:
             return None
 
         try:
-            client = chromadb.PersistentClient(
-                path=str(self._chroma_base),
-                settings=ChromaSettings(anonymized_telemetry=False),
-            )
             collection_name = f"{_COLLECTION_PREFIX}{project_id}"
-            return client.get_collection(collection_name)
+            return self._client.get_collection(collection_name)
         except Exception:
             return None
 
@@ -903,7 +906,7 @@ class ProjectContextBuilder:
             logger.warning("Query embedding failed: %s", e)
             return []
 
-        # Query ChromaDB
+        # Query the knowledge base's store
         try:
             results = collection.query(
                 query_embeddings=[query_embedding],
@@ -911,7 +914,7 @@ class ProjectContextBuilder:
                 include=["documents", "metadatas", "distances"],
             )
         except Exception as e:
-            logger.warning("ChromaDB query failed: %s", e)
+            logger.warning("Project collection query failed: %s", e)
             return []
 
         if not results or not results.get("documents"):
@@ -923,8 +926,8 @@ class ProjectContextBuilder:
 
         chunks = []
         for doc, meta, dist in zip(documents, metadatas, distances):
-            # Convert distance to similarity score
-            score = max(0, 1 - dist / 2)
+            # The similarity the distance stands for in the collection's space
+            score = max(0, collection.similarity(dist))
             if score < min_score:
                 continue
 
@@ -1039,7 +1042,7 @@ class ProjectContextBuilder:
     def build_system_instructions_only(self, project_id: str) -> ProjectContext:
         """Build a context with only system_instructions (no RAG).
 
-        Used as fallback when ChromaDB is unavailable or when trigger
+        Used as fallback when the store is unavailable or when trigger
         detection determines the query is not project-relevant.
 
         Args:

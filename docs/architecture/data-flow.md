@@ -63,7 +63,7 @@ flowchart LR
         D[Document] --> C[Chunker]
         C --> S[RAGSanitizer]
         S --> E[Embeddings]
-        E --> V[(ChromaDB)]
+        E --> V[(vectors.db, SQLCipher)]
     end
 
     subgraph Query
@@ -76,7 +76,8 @@ flowchart LR
 ```
 
 During ingestion, documents are chunked, sanitized (injection markers
-stripped), embedded via Ollama, and stored in ChromaDB. Parallel
+stripped), embedded via Ollama, and stored in the knowledge base's
+encrypted vector store. Parallel
 ingestion uses a thread pool for concurrent processing.
 
 During query, the user's question is embedded, similar chunks are
@@ -132,7 +133,7 @@ auto-escalates to larger models on repeated failures.
 |------|---------|------------|
 | Conversations | SQLite (per-user) | SQLCipher when available |
 | User accounts | SQLite | bcrypt passwords, SQLCipher DB |
-| RAG vectors | ChromaDB | Collection-level isolation |
+| RAG vectors | SQLite (`vectors.db`) | SQLCipher: texts, metadata and vectors; one namespace per index |
 | RAG metadata | SQLite | SQLCipher when available |
 | Audit chain | SQLite | SQLCipher; SHA-512 hash chain, HMAC-SHA256 anchor |
 | Plugin config | SQLite | Per-user, SQLCipher |

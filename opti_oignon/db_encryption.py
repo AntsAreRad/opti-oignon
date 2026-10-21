@@ -434,6 +434,10 @@ _LEFT_BESIDE = (".db.restoring", ".db.encrypting")
 _SAID_AT_MOST = 10
 # The command that encrypts every store, the platform stopped.
 ENCRYPT_COMMAND = "python3 -m opti_oignon.db_encryption encrypt"
+# The command that moves ChromaDB's stores into the knowledge base's store, the platform stopped
+# (``chroma_migration``), and the folders it knows, each with the namespace of the store its collections go to.
+MIGRATE_COMMAND = "python3 -m opti_oignon.db_encryption migrate"
+_CHROMA_FOLDERS = {"chroma_v2": "knowledge", "chroma_db": "documents", "project_chroma": "projects"}
 # Where the system shows each process's command line and open files.
 _PROC = Path("/proc")
 # The signals that ask the process to end: a run notes them, and stops at its next safe point, everything put back.
@@ -685,10 +689,11 @@ def _followed_dirs() -> list:
 
 
 def _relative_followed() -> list:
-    """The ``_FOLLOWED`` variables set to a relative path, each with its value: below whatever directory the
+    """The ``_FOLLOWED`` variables set to a relative path -- an empty one included, which the platform reads as the
+    directory it starts in --, each with its value (an empty one said ``''``): below whatever directory the
     platform starts in, never walked here."""
-    return [(name, os.environ[name]) for name in _FOLLOWED
-            if os.environ.get(name) and not Path(os.environ[name]).is_absolute()]
+    return [(name, os.environ[name] or "''") for name in _FOLLOWED
+            if name in os.environ and not Path(os.environ[name]).is_absolute()]
 
 
 def _plain_regular(path: Path) -> Any:
@@ -1426,14 +1431,136 @@ def _drop(copies: list) -> list:
     return kept
 
 
+def _in_a_kept_copy(folder: Path, places: Any = None) -> bool:
+    """Whether ``folder`` lies in a folder of plaintext copies a run kept: a ``plaintext-*`` folder at or below the
+    place, or the followed directory, it lies in -- never one above them, wherever the repository sits."""
+    roots = [Path(place) for place in (_places() if places is None else places)]
+    roots += _followed_dirs() if places is None else []
+    for root in roots:
+        if root in Path(folder).parents:
+            return any(part.startswith("plaintext-") for part in Path(folder).relative_to(root).parts)
+    return False
+
+
+def _migration_hint(path: Path) -> Any:
+    """The line that says what moves the ChromaDB store at ``path`` -- one in a folder ``migrate`` knows, outside a
+    folder of plaintext copies --, or None."""
+    folder = Path(path).parent
+    if Path(path).name != _CHROMA_FILE or folder.name not in _CHROMA_FOLDERS or _in_a_kept_copy(folder):
+        return None
+    return (f"{folder}: `{MIGRATE_COMMAND}`, the platform stopped, moves its collections into the knowledge base's "
+            "store, encrypted with the other stores")
+
+
+def _say_others(paths: list) -> None:
+    """Say each file of ``plaintext_others``, and, for a ChromaDB store ``migrate`` moves, the command that moves it."""
+    for path in paths:
+        print(_plaintext_said(path))
+        line = _migration_hint(path)
+        if line is not None:
+            print(line)
+
+
+def _migrate_said() -> int:
+    """``migrate``: ChromaDB's stores moved into the knowledge base's store, said; 1 when it is refused, 3 when a
+    folder could not be moved once the store had committed."""
+    from opti_oignon import chroma_migration
+
+    try:
+        done = chroma_migration.migrate_all()
+    except EncryptionRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    except EncryptionStuck as exc:
+        # What the store took before the run stopped -- written, kept, removed -- is said before where it stopped.
+        done = getattr(exc, "done", None)
+        if done is not None:
+            _said_first(_migration_summary, done)
+            if done.get("signal"):
+                print(f"signal {done['signal']} came after the commit: the run went on", file=sys.stderr)
+        print(f"stopped part way: {exc}", file=sys.stderr)
+        return 3
+    _said_first(_migration_summary, done)
+    if done["signal"]:
+        print(f"signal {done['signal']} came after the commit: the run finished", file=sys.stderr)
+    return 0
+
+
+def _said_first(say: Any, done: dict) -> None:
+    """``say(done)`` on stdout, flushed before anything follows on stderr, so one log of both reads in order. A
+    stdout that cannot be written -- a pipe closed early --, an error or an interrupt while it is said costs only
+    what is left of it, said on stderr, never the lines that follow nor the exit code: stdout then points at the
+    null device, which the interpreter's last flush cannot fail on."""
+    try:
+        say(done)
+        sys.stdout.flush()
+    except (OSError, KeyboardInterrupt) as exc:
+        try:
+            null = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(null, sys.stdout.fileno())
+            finally:
+                os.close(null)
+        except (OSError, ValueError):
+            pass
+        try:
+            print(f"what this run did is said only up to here ({type(exc).__name__}{': ' if str(exc) else ''}{exc})",
+                  file=sys.stderr)
+        except OSError:
+            pass
+
+
+def _migration_summary(done: dict) -> None:
+    """What a run of ``migrate`` did, said: each folder moved, or committed and left where it is, with what each of
+    its collections brought; the memory's facts left with no vector of their text; the store."""
+    unmoved = done.get("unmoved", [])
+    print("places: " + ", ".join(str(place) for place in _places()))
+    if not done["moved"] and not unmoved:
+        print("no ChromaDB store to move")
+    for moved in done["moved"]:
+        print(f"{moved['folder']}: {len(moved['collections'])} collection(s) moved into the knowledge base's store")
+        for entry in moved["collections"]:
+            print(_collection_said(entry))
+        print(f"its folder is kept in {moved['kept_in']}: delete it once the platform reads its knowledge base again")
+    for left in unmoved:
+        print(f"{left['folder']}: {len(left['collections'])} collection(s) written into the knowledge base's store, "
+              "the folder not moved: the next run of migrate moves it")
+        for entry in left["collections"]:
+            print(_collection_said(entry))
+    if done.get("facts_without_vector"):
+        print(f"{done['facts_without_vector']} active fact(s) of the memory hold no vector of their text as it reads "
+              "now: recall finds them by their words")
+    if done.get("facts_uncounted"):
+        print(f"the active facts of the memory that hold no vector of their text: not counted, the store did not read "
+              f"back ({done['facts_uncounted']}); recall finds such facts by their words")
+    for folder in done["unknown"]:
+        print(f"{folder}: a ChromaDB store in a folder this command does not know: left as it is")
+    if done["moved"] or unmoved:
+        state = ("encrypted under the key that loads" if done["encrypted"] else
+                 "in plaintext: no key loads, as every store of the platform")
+        print(f"the knowledge base's store: {done['target']}, {state}")
+    _say_unchecked(unchecked_entries())
+
+
+def _collection_said(entry: dict) -> str:
+    """One collection of a ChromaDB folder, with what the store took of it."""
+    left = (f", {entry['left_out']} left out: no active fact of the memory holds them as they read now"
+            if entry["left_out"] else "")
+    gone = (f", {entry['removed']} removed: the store held them with a text no active fact of the memory holds now"
+            if entry["removed"] else "")
+    return (f"  {entry['name']}, into the namespace {entry['namespace']}: {entry['written']} item(s) written, "
+            f"{entry['kept']} already there kept{left}{gone}")
+
+
 def main(argv: Any = None) -> int:
-    """``python3 -m opti_oignon.db_encryption check|encrypt``: each store's state, or every store encrypted."""
+    """``python3 -m opti_oignon.db_encryption check|encrypt|migrate``: each store's state, every store encrypted, or
+    ChromaDB's stores moved into the knowledge base's store (``chroma_migration``)."""
     import argparse
 
     parser = argparse.ArgumentParser(prog="python3 -m opti_oignon.db_encryption",
-                                     description="Say the state of every store, or encrypt them all, the platform "
-                                                 "stopped.")
-    parser.add_argument("action", choices=("check", "encrypt"))
+                                     description="Say the state of every store, encrypt them all, or move ChromaDB's "
+                                                 "stores into the knowledge base's store, the platform stopped.")
+    parser.add_argument("action", choices=("check", "encrypt", "migrate"))
     action = parser.parse_args(argv).action
     for stream in (sys.stdout, sys.stderr):
         # A file name the locale cannot write is said escaped, never a crash after the work is done.
@@ -1470,8 +1597,7 @@ def main(argv: Any = None) -> int:
         for path in other_databases():
             print(f"{path}: no store of the platform, left as it is")
         others, unchecked = _scan(None)
-        for path in others:
-            print(_plaintext_said(path))
+        _say_others(others)
         _say_unchecked(unchecked)
         for problem in _sandbox_problems():
             print(f"sandbox: {problem}; encrypt refuses until then")
@@ -1485,6 +1611,8 @@ def main(argv: Any = None) -> int:
         print(f"{len(stores)} store(s), {len(plaintext_stores())} in plaintext; SQLCipher "
               f"{'installed' if SQLCIPHER_AVAILABLE else 'missing'}; a key {'loads' if key else 'does not load'}")
         return 0
+    if action == "migrate":
+        return _migrate_said()
     try:
         done = encrypt_all_stores()
     except EncryptionRefused as exc:
@@ -1512,8 +1640,7 @@ def main(argv: Any = None) -> int:
               "and the key is kept safe elsewhere")
     for path in done["left"]:
         print(f"{path}: no store of the platform, left as it is")
-    for path in done["plaintext_others"]:
-        print(_plaintext_said(Path(path)))
+    _say_others([Path(path) for path in done["plaintext_others"]])
     _say_unchecked([(Path(path), why) for path, why in done["unchecked"]])
     for name, value in _relative_followed():
         print(f"{name} is {value}, below whatever directory the platform starts in: not checked")

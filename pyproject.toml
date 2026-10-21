@@ -47,6 +47,9 @@ dependencies = [
     "httpx>=0.25.0",
     "requests>=2.31.0",
     "ollama>=0.1.0",
+    # Read only by `python3 -m opti_oignon.db_encryption migrate`, which moves
+    # ChromaDB's stores into the knowledge base's encrypted store; the
+    # platform itself no longer imports it.
     "chromadb>=0.4.0",
     "numpy>=1.24.0",
     "pandas>=2.0.0",
@@ -1056,6 +1059,23 @@ fail_under = 0
 # but for the schema, this build's, the table of readings among the file's,
 # and no reading in it. It stays in the tree word for word.
 #
+# The knowledge base's collections now live in its own store
+# (opti_oignon/vector_db.py), encrypted like every store, which computes no
+# vector: ChromaDB embedded what it was handed without one, with a model it
+# downloaded. a19 and a20 of tests/test_rag_store_contracts.py pinned chunks
+# stored with no vector when every embedding failed or no embedder was there;
+# a15 pinned its score floor on a query by text. They give way to vd12 of
+# tests/test_vector_db_contracts.py: such an ingestion is refused by name,
+# nothing stored, a query with no embedding searches nothing, and the floor
+# holds on a query that has one. The health contract of
+# tests/test_vector_store_health.py named chromadb as what the memory lacks,
+# and its three contracts of the degraded memory forced it through
+# _HAS_CHROMADB, a name the module no longer reads: in a sweep where an
+# earlier test has left the store's module loaded, they build a real store.
+# All four give way to vd13 of the same new file, which forces the degraded
+# memory through _HAS_VECTOR_STORE, names the knowledge base's store and
+# keeps their other assertions. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1436,4 +1456,11 @@ addopts = """
     --deselect=tests/test_executor_onion_tool_window_contracts.py::test_jw43_each_request_carries_the_windows_label_and_its_results_and_the_answer_their_union
     --deselect=tests/test_executor_onion_tool_window_contracts.py::test_jw44_the_answer_reads_back_as_a_flesh_turn_with_its_label_and_a_withdrawal_reaches_it
     --deselect=tests/test_peel_record_contracts.py::test_pc19_a_file_of_schema_one_is_brought_to_two_in_one_transaction_and_its_peels_read_as_saved
+    --deselect=tests/test_rag_store_contracts.py::test_a15_query_score_floor_is_never_negative
+    --deselect=tests/test_rag_store_contracts.py::test_a19_store_chunks_all_failed_embeddings_stores_without_vectors
+    --deselect=tests/test_rag_store_contracts.py::test_a20_store_chunks_without_embedder_uses_default_embedding
+    --deselect=tests/test_vector_store_health.py::test_health_unavailable_without_collection
+    --deselect=tests/test_vector_store_health.py::test_construct_without_chromadb_does_not_raise
+    --deselect=tests/test_vector_store_health.py::test_crud_are_safe_noops_without_collection
+    --deselect=tests/test_vector_store_health.py::test_find_similar_empty_without_collection
 """

@@ -3,15 +3,19 @@
 RAG VECTOR STORE -- Collection management, ingestion & retrieval.
 
 Provides:
-- ChromaDB collection CRUD (create, list, delete, stats)
-- Document ingestion pipeline: file/text -> RAGChunker -> embeddings -> ChromaDB
+- Collection CRUD (create, list, delete, stats)
+- Document ingestion pipeline: file/text -> RAGChunker -> embeddings -> the
+  knowledge base's store
 - Retrieval: query -> embedding -> top-k nearest -> optional reranking
 - Citation tracking: SQLite-backed log of which chunk answered which query
 - Metadata filtering (by source, date, collection)
 - Configurable embedding model (Ollama embeddings)
 
-Each collection maps to a ChromaDB collection.  Documents are tracked in
-a SQLite ``rag_documents.db`` so they can be listed and deleted cleanly.
+Each collection maps to a collection of the namespace ``knowledge`` of the
+knowledge base's store (``opti_oignon.vector_db``), which keeps the chunks'
+texts, metadata and vectors encrypted like every other store. Documents are
+tracked in a SQLite ``rag_documents.db`` so they can be listed and deleted
+cleanly.
 """
 
 import bisect
@@ -39,16 +43,25 @@ except ImportError:
 
 # -- Feature flags for optional deps ---------------------------------------
 
-CHROMADB_AVAILABLE = False
+VECTOR_STORE_AVAILABLE = False
 try:
-    import chromadb
-    from chromadb.config import Settings as ChromaSettings
-    CHROMADB_AVAILABLE = True
+    from opti_oignon import vector_db
+    VECTOR_STORE_AVAILABLE = True
 except ImportError:
-    chromadb = None  # type: ignore[assignment]
-    ChromaSettings = None  # type: ignore[assignment,misc]
+    vector_db = None  # type: ignore[assignment]
 
-RAG_STORE_AVAILABLE = CHROMADB_AVAILABLE
+RAG_STORE_AVAILABLE = VECTOR_STORE_AVAILABLE
+# The namespace of the knowledge base's store this store's collections live in.
+VECTOR_NAMESPACE = "knowledge"
+
+
+def _waits(exc: BaseException) -> bool:
+    """Whether ``exc`` says the knowledge base waits for its migration."""
+    return vector_db is not None and isinstance(exc, vector_db.MigrationPending)
+
+
+class EmbeddingsUnavailable(RuntimeError):
+    """No chunk of an ingestion has an embedding: nothing was stored."""
 
 
 # =========================================================================
@@ -57,7 +70,7 @@ RAG_STORE_AVAILABLE = CHROMADB_AVAILABLE
 
 @dataclass
 class CollectionInfo:
-    """Metadata about a ChromaDB collection."""
+    """Metadata about a collection of the knowledge base."""
     name: str
     description: str
     document_count: int
@@ -507,7 +520,7 @@ class WebIngestionDisabled(RuntimeError):
 
 class RAGVectorStore:
     """
-    ChromaDB-backed vector store with collection management,
+    The knowledge base's vector store, with collection management,
     document ingestion, retrieval, and citation tracking.
 
     Usage::
@@ -539,29 +552,23 @@ class RAGVectorStore:
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
+        # Where ChromaDB kept this store's collections before the knowledge
+        # base's store: never made, never read (``db_encryption migrate``
+        # moves them).
         self.chroma_dir = self.data_dir / "chroma_v2"
-        self.chroma_dir.mkdir(parents=True, exist_ok=True)
 
         # SQLite tracking DB
         self.db = _RAGDatabase(self.data_dir / "rag_documents.db")
 
-        # ChromaDB client.
-        # ChromaDB has no native at-rest encryption, so
-        # the ingested chunk text and embedding vectors persisted under
-        # chroma_dir are PLAINTEXT on disk. The RAG metadata DB above is
-        # encrypted via safe_connect, but this vector store is not. Full-disk
-        # encryption (LUKS) is a deployment requirement for a sensitive RAG
-        # corpus (see SECURITY.md). Application-layer encryption of the chunk
-        # text before upsert (decrypt on retrieval) is a planned cycle
-        # (the RAG-at-rest cycle).
-        if CHROMADB_AVAILABLE:
-            self._chroma = chromadb.PersistentClient(
-                path=str(self.chroma_dir),
-                settings=ChromaSettings(anonymized_telemetry=False),
-            )
+        # The chunks' texts, metadata and vectors: the namespace ``knowledge``
+        # of the knowledge base's store, beside the tracking DB, opened like
+        # it through safe_connect (encrypted under the platform's key).
+        if VECTOR_STORE_AVAILABLE:
+            self.vectors_path = self.data_dir / vector_db.FILENAME
+            self._chroma = vector_db.Client(self.vectors_path, VECTOR_NAMESPACE, legacy=self.chroma_dir)
         else:
             self._chroma = None
-            logger.warning("chromadb not installed -- vector store disabled")
+            logger.warning("the knowledge base's store does not import -- vector store disabled")
 
         # Embedding config (lazy: embedder created on first use)
         self._embedding_model = embedding_model
@@ -647,10 +654,18 @@ class RAGVectorStore:
             self._chunker = RAGChunker()
         return self._chunker
 
+    def _gate(self) -> None:
+        """Refuse, before anything is written, while the knowledge base waits
+        for its migration (``vector_db.MigrationPending``). A client with
+        ChromaDB's interface alone has no migration to wait for."""
+        ready = getattr(self._chroma, "ready", None)
+        if ready is not None:
+            ready()
+
     def _get_collection(self, name: str):
-        """Get or create a ChromaDB collection."""
+        """Get or create a collection of the knowledge base."""
         if not self._chroma:
-            raise RuntimeError("ChromaDB not available")
+            raise RuntimeError("the knowledge base's store is not available")
         return self._chroma.get_or_create_collection(
             name=name,
             metadata={"hnsw:space": "cosine"},
@@ -665,7 +680,7 @@ class RAGVectorStore:
     ) -> CollectionInfo:
         """Create a new collection."""
         if not self._chroma:
-            raise RuntimeError("ChromaDB not available")
+            raise RuntimeError("the knowledge base's store is not available")
         self._chroma.get_or_create_collection(
             name=name,
             metadata={"hnsw:space": "cosine"},
@@ -697,16 +712,25 @@ class RAGVectorStore:
         return results
 
     def delete_collection(self, name: str) -> bool:
-        """Delete a collection and all its documents/chunks."""
+        """Delete a collection and all its documents/chunks.
+
+        While the knowledge base waits for its migration nothing is deleted
+        (``vector_db.MigrationPending``): the chunks still in ChromaDB's store
+        would come back with it.
+        """
         try:
             if self._chroma:
                 try:
                     self._chroma.delete_collection(name)
-                except Exception:
-                    pass  # Collection may not exist in ChromaDB
+                except Exception as exc:
+                    if _waits(exc):
+                        raise
+                    # Collection may not exist in the knowledge base's store
             self.db.delete_collection(name)
             return True
         except Exception as exc:
+            if _waits(exc):
+                raise
             logger.error("Failed to delete collection %s: %s", name, exc)
             return False
 
@@ -743,7 +767,8 @@ class RAGVectorStore:
         metadata: dict[str, Any] | None = None,
     ) -> IngestedDocument:
         """
-        Ingest a file: extract text -> chunk -> embed -> store in ChromaDB.
+        Ingest a file: extract text -> chunk -> embed -> store in the
+        knowledge base's store.
 
         Args:
             filepath: Path to the file.
@@ -766,7 +791,7 @@ class RAGVectorStore:
         metadata: dict[str, Any] | None = None,
     ) -> IngestedDocument:
         """
-        Store a file already chunked: embed its chunks into ChromaDB and
+        Store a file already chunked: embed its chunks into the store and
         record the document. The storage half of ingest_file, for a job
         whose chunking ran elsewhere (a background worker).
 
@@ -783,6 +808,7 @@ class RAGVectorStore:
         doc_id = result.doc_id
 
         # Ensure collection exists
+        self._gate()
         self.db.create_collection(collection)
 
         if not result.chunks:
@@ -800,7 +826,7 @@ class RAGVectorStore:
             self.db.insert_document(doc)
             return doc
 
-        # Store chunks in ChromaDB
+        # Store chunks in the knowledge base's store
         self._store_chunks(result.chunks, collection)
         self.db.touch_collection(collection)
 
@@ -847,6 +873,7 @@ class RAGVectorStore:
         collection = collection or self.DEFAULT_COLLECTION
         doc_id = doc_id or uuid.uuid4().hex[:12]
 
+        self._gate()
         self.db.create_collection(collection)
 
         chunker = self._get_chunker()
@@ -870,9 +897,15 @@ class RAGVectorStore:
         return doc
 
     def _store_chunks(self, chunks: list, collection_name: str) -> None:
-        """Embed and store chunks in ChromaDB."""
+        """Embed and store chunks in the knowledge base's store.
+
+        A chunk whose embedding fails is dropped and counted; when no chunk has
+        an embedding -- the embedder is missing, or every embedding failed --
+        nothing is stored and the ingestion is refused by name: the store
+        computes no vector of its own.
+        """
         if not self._chroma:
-            raise RuntimeError("ChromaDB not available")
+            raise RuntimeError("the knowledge base's store is not available")
 
         coll = self._get_collection(collection_name)
         embedder = self._get_embedder()
@@ -888,31 +921,35 @@ class RAGVectorStore:
             metadatas.append(chunk.metadata)
 
         # Generate embeddings
-        if embedder:
-            embeddings = embedder.embed(
-                documents, show_progress=False
+        if not embedder:
+            raise EmbeddingsUnavailable(
+                f"no embedder for the {len(ids)} chunk(s) of collection '{collection_name}': "
+                "nothing was stored (the store computes no vector of its own)"
             )
-            # Filter out None embeddings
-            valid = [
-                (i, doc, meta, emb)
-                for i, doc, meta, emb in zip(ids, documents, metadatas, embeddings)
-                if emb is not None
-            ]
-            if valid:
-                v_ids, v_docs, v_metas, v_embs = zip(*valid)
-                coll.upsert(
-                    ids=list(v_ids),
-                    documents=list(v_docs),
-                    metadatas=list(v_metas),
-                    embeddings=list(v_embs),
-                )
-            else:
-                logger.warning("All embeddings failed -- storing without vectors")
-                coll.upsert(ids=ids, documents=documents, metadatas=metadatas)
-        else:
-            # No embedder: store documents only (ChromaDB default embedding)
-            logger.warning("No embedder available -- using ChromaDB default embedding")
-            coll.upsert(ids=ids, documents=documents, metadatas=metadatas)
+        embeddings = embedder.embed(
+            documents, show_progress=False
+        )
+        # Filter out None embeddings
+        valid = [
+            (i, doc, meta, emb)
+            for i, doc, meta, emb in zip(ids, documents, metadatas, embeddings)
+            if emb is not None
+        ]
+        if not valid:
+            raise EmbeddingsUnavailable(
+                f"every embedding failed for the {len(ids)} chunk(s) of collection "
+                f"'{collection_name}': nothing was stored"
+            )
+        if len(valid) < len(ids):
+            logger.warning("%d of %d chunk(s) dropped: their embedding failed",
+                           len(ids) - len(valid), len(ids))
+        v_ids, v_docs, v_metas, v_embs = zip(*valid)
+        coll.upsert(
+            ids=list(v_ids),
+            documents=list(v_docs),
+            metadatas=list(v_metas),
+            embeddings=list(v_embs),
+        )
 
     # -----------------------------------------------------------------
     # DOCUMENT MANAGEMENT
@@ -932,12 +969,29 @@ class RAGVectorStore:
         return self.db.get_document(doc_id)
 
     def delete_document(self, doc_id: str) -> bool:
-        """Delete a document and its chunks from ChromaDB + SQLite."""
+        """Delete a document and its chunks from the knowledge base's store + SQLite.
+
+        While the knowledge base waits for its migration nothing is deleted
+        (``vector_db.MigrationPending``): the chunks still in ChromaDB's store
+        would come back with it.
+        """
+        record = self.db.get_document(doc_id)
+        if record is None:
+            return False
+        # The collection is opened first: a knowledge base that waits for its
+        # migration refuses here, before the document's row goes. Any other
+        # failure is said below, where the chunks are removed.
+        if self._chroma:
+            try:
+                self._chroma.get_collection(record.collection_name)
+            except Exception as exc:
+                if _waits(exc):
+                    raise
         info = self.db.delete_document(doc_id)
         if not info:
             return False
 
-        # Remove chunks from ChromaDB
+        # Remove chunks from the knowledge base's store
         if self._chroma:
             try:
                 coll_name = info["collection_name"]
@@ -950,7 +1004,7 @@ class RAGVectorStore:
                 if results and results.get("ids"):
                     coll.delete(ids=results["ids"])
             except Exception as exc:
-                logger.error("Error removing chunks from ChromaDB: %s", exc)
+                logger.error("Error removing chunks from the knowledge base's store: %s", exc)
 
         return True
 
@@ -992,39 +1046,42 @@ class RAGVectorStore:
 
         try:
             coll = self._chroma.get_collection(collection)
-        except Exception:
+        except Exception as exc:
+            if _waits(exc):
+                logger.warning("nothing searched: %s", exc)
             return QueryResponse(query=query_text, results=[], citations=[], total_results=0)
 
         if coll.count() == 0:
             return QueryResponse(query=query_text, results=[], citations=[], total_results=0)
 
-        # Generate query embedding
+        # Generate query embedding: without one there is nothing to search
+        # with, as the store computes no vector of its own.
         embedder = self._get_embedder()
         query_embedding = None
         if embedder:
             query_embedding = embedder.embed_single(query_text)
+        if not query_embedding:
+            logger.warning("no embedding for the query: nothing searched in collection '%s'", collection)
+            return QueryResponse(query=query_text, results=[], citations=[], total_results=0)
 
-        # Build ChromaDB filter
+        # Build the metadata filter
         where_filter = self._build_where(source_filter, file_type_filter)
 
-        # Query ChromaDB
+        # Query the knowledge base's store
         try:
             fetch_n = min(n_results * 3, 50)  # Fetch extra for filtering
             query_kwargs: dict[str, Any] = {
                 "n_results": fetch_n,
                 "include": ["documents", "metadatas", "distances"],
+                "query_embeddings": [query_embedding],
             }
-            if query_embedding:
-                query_kwargs["query_embeddings"] = [query_embedding]
-            else:
-                query_kwargs["query_texts"] = [query_text]
 
             if where_filter:
                 query_kwargs["where"] = where_filter
 
             raw = coll.query(**query_kwargs)
         except Exception as exc:
-            logger.error("ChromaDB query failed: %s", exc)
+            logger.error("knowledge base query failed: %s", exc)
             return QueryResponse(query=query_text, results=[], citations=[], total_results=0)
 
         if not raw or not raw.get("documents") or not raw["documents"][0]:
@@ -1106,7 +1163,7 @@ class RAGVectorStore:
         source_filter: str | None,
         file_type_filter: str | None,
     ) -> dict | None:
-        """Build a ChromaDB where filter."""
+        """Build a metadata where filter."""
         conditions: list[dict] = []
         if source_filter:
             conditions.append({"source_file": {"$eq": source_filter}})
@@ -1201,6 +1258,9 @@ class RAGVectorStore:
         web_cfg = self._load_web_config()
         if web_cfg.get("enabled", True) is not True:
             raise WebIngestionDisabled()
+
+        # Nothing is fetched while the knowledge base waits for its migration.
+        self._gate()
 
         # Fetch page
         page = self._fetch_page(url, web_cfg)

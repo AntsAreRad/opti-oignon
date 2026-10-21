@@ -11,7 +11,7 @@ locally on your hardware.
 
 - **Smart routing** -- ML-based model selection with cascading inference and
   speculative generation
-- **RAG projects** -- ChromaDB-backed retrieval with prompt injection defense
+- **RAG projects** -- retrieval from an encrypted vector store, with prompt injection defense
 - **Coding agent** -- sandboxed autonomous code execution with self-correction
 - **Plugin ecosystem** -- hook-based architecture with subprocess isolation
 - **Security by default** -- six defense layers, 2FA (WebAuthn + TOTP),

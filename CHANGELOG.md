@@ -11,6 +11,43 @@ package costs.
 
 ### Added
 
+- [SECURITY] The knowledge base is encrypted at rest. The RAG store's
+  chunks, the memory's facts, and the projects' and the documents' indexes
+  -- their texts, their metadata and their embedding vectors, which give a
+  text back -- live in one database of their own,
+  `opti_oignon/data/rag/vectors.db`, opened through `safe_connect` and
+  encrypted with SQLCipher like every other database, its journals with it,
+  its temporary tables in memory, what a deletion frees overwritten.
+  ChromaDB, which kept them in plaintext files of its own (RS-01), is no
+  longer read: the store speaks the part of its interface the five modules
+  used -- a collection with no space named is measured in squared L2, as
+  ChromaDB's are --, searches exactly, every vector the filter keeps
+  measured, ties in the order the items were added, refuses by name any
+  filter it does not read, never gives an id twice, and keeps each vector
+  with the encoder that made it, a query reading only its collection's
+  active encoder. With the platform stopped,
+  `python3 -m opti_oignon.db_encryption migrate` moves ChromaDB's stores
+  into it, all of them or none: every collection read through chromadb, its
+  telemetry off, written in one transaction and proved before it commits --
+  documents, metadata and vectors bit for bit, and ChromaDB's distances
+  found again in the space it measured them in --, then each ChromaDB
+  folder kept in a `plaintext-<time>` folder, which git ignores, to delete
+  once the platform reads its knowledge base again. Until then the
+  namespace waits: nothing of it is read, written or ingested, each call
+  refused by name with the command, so nothing the platform deletes
+  meanwhile comes back with the migration. The platform and the command
+  read one test of what waits, and the command refuses a folder the
+  platform would wait on that it cannot move -- a symbolic link, a folder
+  it cannot look at, a store its walk could not reach, a relative
+  `RAG_HOME`. A memory vector is moved only when an active fact of the
+  memory holds it with the text it was made of -- a resumed run removes a
+  copy whose fact no longer reads as it was made, from whichever folder it
+  came --, and the active facts left with no vector of their text are
+  counted. An item the store holds already is kept, and counted; a signal
+  before the commit writes nothing; a folder that cannot be moved after it
+  is said, with what the store took, and the next run moves it. chromadb
+  itself rewrites some of its own files as it reads them. `check` names the
+  command beside each ChromaDB store it moves.
 - [SECURITY] Every database encrypted at rest in one offline command:
   `python3 -m opti_oignon.db_encryption encrypt`, with the platform stopped,
   takes every `*.db` of the repository's `data/` and of `opti_oignon/data/`,
@@ -2006,6 +2043,17 @@ package costs.
 
 ### Changed
 
+- [SECURITY] The knowledge base computes no vector of its own. ChromaDB
+  embedded what it was handed without a vector, with a model it downloaded
+  on first use: the RAG store stored chunks that way when every embedding
+  failed or no embedder was there, and queried by text without an
+  embedding. Such an ingestion is now refused by name, nothing stored; a
+  query with no embedding searches nothing; the memory refuses an update
+  with no vector. The egress census owes ChromaDB nothing more. The
+  documents' retriever and the project context builder score a result by
+  the similarity its collection's own space gives the distance, no longer
+  by the squared-L2 formula alone.
+
 - The onion's librarian is no longer given the user's words its peel will
   show as written beside the summary -- each whole segment the user typed
   that holds an order: a turn they fill is left out of the turns it is
@@ -3332,6 +3380,7 @@ package costs.
   folder of their own, keeps its record.
 
 ### Fixed
+
 
 - [SECURITY] Encryption setup no longer makes a key while a database is
   kept in plaintext: once a key loads, every connection keys its

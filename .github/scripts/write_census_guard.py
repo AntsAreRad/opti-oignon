@@ -819,6 +819,9 @@ OUTSIDE = {
     "opti_oignon/benchmark_judge.py": "the judge's scores; its prompt is built from its arguments, never from the store",
     "opti_oignon/benchmark_recommendations.py": f"benchmark recommendations for the dashboard; {_UNREAD}",
     "opti_oignon/benchmark_runner.py": f"benchmark runs for the dashboard; {_UNREAD}",
+    "opti_oignon/chroma_migration.py": (
+        "the offline move of ChromaDB's stores into the knowledge base's store, the platform stopped: it copies "
+        "what the houses wrote there, unchanged, and proves the copy"),
     "opti_oignon/context_ledger.py": f"the per-request routing ledger for the dashboard; {_UNREAD}",
     "opti_oignon/feedback.py": f"the user's ratings; read by the dashboard and an offline export; {_UNREAD}",
     "opti_oignon/fine_tune_tracker.py": f"fine-tune variants and comparisons; {_UNREAD}",
@@ -871,11 +874,14 @@ HELPERS = {
     "opti_oignon/db_utils.py": "the connection helper every store opens its database through",
     "opti_oignon/connection_pool.py": "the connection pool the stores borrow connections from",
     "opti_oignon/db_encryption.py": "the encrypted connection the stores open their database with",
+    "opti_oignon/vector_db.py": (
+        "the knowledge base's store, which its houses open their collections through: it writes only what a "
+        "house hands it"),
 }
 
 _DATABASE_LIBRARIES = frozenset({"sqlite3", "chromadb", "pysqlcipher3", "sqlcipher3", "aiosqlite", "qdrant_client",
                                  "weaviate", "pinecone", "lancedb", "duckdb"})
-_HELPER_MODULES = frozenset({"db_utils", "connection_pool", "db_encryption"})
+_HELPER_MODULES = frozenset({"db_utils", "connection_pool", "db_encryption", "vector_db"})
 
 _GATE_KINDS = frozenset({"verdict", "approval", "raises", "filter", "decision", "acceptance", "house"})
 _AUTHORITY = frozenset({"approval", "acceptance", "house"})

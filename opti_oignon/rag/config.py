@@ -26,6 +26,14 @@ CHROMA_DIR = RAG_HOME / "chroma_db"
 CACHE_DIR = RAG_HOME / "cache"
 LOGS_DIR = RAG_HOME / "logs"
 
+# The knowledge base's store (opti_oignon.vector_db), where the documents'
+# index keeps its chunks, texts and vectors. It is a store: it lies in the
+# package's place of data, which no environment variable moves. CHROMA_DIR is
+# only where ChromaDB kept them before it, never made and never read here
+# (``python3 -m opti_oignon.db_encryption migrate`` moves them).
+STORE_DIR = _MODULE_DIR.parent / "data" / "rag"
+VECTORS_DB = STORE_DIR / "vectors.db"
+
 
 @dataclass
 class ChunkingConfig:
@@ -121,6 +129,7 @@ class RAGConfig:
     # Paths
     rag_home: Path = RAG_HOME
     chroma_dir: Path = CHROMA_DIR
+    vectors_db: Path = VECTORS_DB
     cache_dir: Path = CACHE_DIR
     logs_dir: Path = LOGS_DIR
 
@@ -202,7 +211,6 @@ class RAGConfig:
     def __post_init__(self):
         """Create necessary directories."""
         self.rag_home.mkdir(parents=True, exist_ok=True)
-        self.chroma_dir.mkdir(parents=True, exist_ok=True)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -236,7 +244,7 @@ def set_config(config: RAGConfig) -> None:
 if __name__ == "__main__":
     config = get_config()
     print(f"RAG Home: {config.rag_home}")
-    print(f"ChromaDB: {config.chroma_dir}")
+    print(f"Knowledge base's store: {config.vectors_db}")
     print(f"Embedding model: {config.embedding.model}")
     print(f"Chunk size: {config.chunking.max_chunk_size}")
     print(f"Supported types: {len(config.file_type_mapping)} extensions")

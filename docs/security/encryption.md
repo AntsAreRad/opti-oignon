@@ -138,10 +138,59 @@ writes next. `POST /api/security/db-encryption/migrate` answers 409,
 and `POST /api/security/encryption/setup` makes no key -- 409 -- while
 a database is kept in plaintext.
 
-The RAG vector store (ChromaDB) is not encrypted at rest: chunk text and
-embedding vectors are stored in plaintext files. Full-disk encryption is
-required for a sensitive corpus; see `SECURITY.md`. `check` names each
-of its `chroma.sqlite3` files.
+The knowledge base -- the RAG store's chunks, the memory's facts, the
+projects' and the documents' indexes, their texts, metadata and vectors --
+lives in `opti_oignon/data/rag/vectors.db`, a database of the `rag/`
+folder that `encrypt` takes like every other. ChromaDB, which kept it
+before in plaintext files, is no longer read. With the platform stopped,
+`python3 -m opti_oignon.db_encryption migrate` moves every ChromaDB store
+below the data directories -- `rag/chroma_v2/`, `rag/chroma_db/` (below
+`RAG_HOME` when it is set) and `project_chroma/`, each into a namespace of
+its own -- into it, all of them or none: each collection is read through
+chromadb, its telemetry off, and written in one transaction, which commits
+only once every item's document, metadata and vector read back as they
+were, and once the distances ChromaDB measures, on a sample of each
+collection, are found again in the space it measured them in. Then each
+ChromaDB folder is kept in a `plaintext-<time>` folder beside it, which
+git ignores, to delete once the platform reads its knowledge base again.
+Until a folder has moved, its namespace of the store is closed: the
+platform reads and writes nothing of it, each call refused by name with
+the command, so nothing it deletes meanwhile comes back with the
+migration. A folder waits when it holds ChromaDB's database, when it, or
+that file, is a symbolic link, or when it cannot be looked at; `migrate`
+reads the same test, and refuses while a folder of the platform's modules
+waits in a way it cannot move -- a link, a folder it cannot look at,
+ChromaDB's store in a folder its walk could not list, the documents' and
+the memory's folder under a relative `RAG_HOME` (an empty one included,
+which the platform reads as its own directory) --, so the platform never
+waits on what the command says it has nothing to move. It runs where the
+platform runs: a `RAG_HOME` the platform has and the command's shell has
+not names a folder the command never sees, and the platform names it as it
+waits. A vector of the memory is moved only when an active fact of the
+memory holds it with the very text the vector was made of: a fact deleted
+or rewritten while the migration waited keeps no stale vector -- a run
+that resumes one that committed and could not move its folders removes,
+for each fact a folder still names, a copy the store holds with a text the
+fact no longer reads, whichever folder it came from, and keeps one with
+the text the fact reads, whoever wrote it --, and the active facts left
+without a vector of their text -- those too, and those added meanwhile --
+are counted and found by their words. It refuses, writing nothing and
+moving nothing, while another run of `encrypt` or `migrate` is under way,
+while a process holds the store or a ChromaDB file or runs the platform --
+read again before the commit --, when chromadb does not import or does not
+read a store, when a key file does not load here, when the store is in
+plaintext while a key loads (`encrypt` first) or does not open, when the
+memory's facts cannot be read, when a collection's space or dimension
+differs from that of a collection the store holds with items in it -- an
+empty one takes the source's --, and when a collection does not read
+whole; an item the store holds already is kept, and counted, and a store
+or a folder the run made is removed again. chromadb itself rewrites some
+of its own files as it reads them. A signal before the commit stops the
+run, nothing written; a folder that cannot be moved once the store has
+committed is said, with what the store took from every folder, the command
+ends with 3, and the next run moves it. `check` names the command beside
+each ChromaDB store it moves; a ChromaDB store in another folder is named
+and left.
 
 
 ### Field-level encryption (AES-256-GCM)

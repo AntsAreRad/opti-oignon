@@ -68,19 +68,24 @@ prevent key material
 from being swapped to disk, with memset wipe on deallocation and a
 SIGTERM handler that wipes all tracked key instances.
 
-Known exception (RS-01): the RAG vector store (ChromaDB, under
-`data/chroma_v2/`) is NOT encrypted at rest. ChromaDB has no native
-at-rest encryption, so the ingested chunk text and embedding vectors
-are stored in plaintext SQLite and index files. The RAG metadata
-database (collections, documents, citations) is encrypted via
-`safe_connect`, but the vector store is not. For a corpus of
-sensitive documents this is a confidentiality gap against a second
-local user, a copied backup, or a disk read without full-disk
-encryption. Full-disk encryption (LUKS) is therefore a deployment
-requirement for the RAG corpus (see Deployment Recommendations).
-Application-layer encryption of the vector store (encrypt the chunk
-text before storing, decrypt on retrieval) is a planned cycle
-(planned RAG-at-rest hardening cycle).
+Closed exception (RS-01): the knowledge base -- the RAG store's
+chunks, the memory's facts, the projects' and the documents' indexes --
+is encrypted at rest. Its texts, its metadata and its embedding vectors,
+which give most of a short text back, live in one database of their own,
+`opti_oignon/data/rag/vectors.db`, opened through `safe_connect` and
+encrypted with SQLCipher like every other database, its journals with
+it. ChromaDB, which kept them in plaintext files with no at-rest
+encryption, is no longer read. A ChromaDB store left by an earlier
+version stays in plaintext until
+`python3 -m opti_oignon.db_encryption migrate`, with the platform
+stopped, moves its collections into the encrypted store, proved before
+it commits, and keeps the ChromaDB folders in a `plaintext-<time>`
+folder, which git ignores, to delete once the platform reads its
+knowledge base again; until then the platform reads and writes nothing
+of the part of the knowledge base that waits, so nothing deleted
+meanwhile comes back with the migration.
+`python3 -m opti_oignon.db_encryption check` names each such store and
+the command that moves it.
 
 Known exception (MP-01): enforcement of the model provenance seal at
 load is wired on the `llama_cpp` backend only. The Ollama backend (the
@@ -253,11 +258,13 @@ posture. It enables all six defense layers without compromise:
 - LUKS full-disk encryption integration (advisory detection)
 - No Docker daemon root trade-off
 
-Full-disk encryption requirement for RAG: if the RAG corpus holds
-sensitive documents, LUKS full-disk encryption is required (not merely
-advisory), because the ChromaDB vector store keeps ingested chunk text
-and vectors in plaintext at rest (RS-01). On Linux the application
-detects LUKS and warns when it is absent.
+Full-disk encryption for RAG: the knowledge base is encrypted at rest
+since RS-01 was closed, so LUKS is no longer required for it, and stays
+advisable. What the platform decrypts in memory -- conversations,
+retrieved chunks, the knowledge base's vectors, which its search keeps in
+memory -- may be written to a swap device in plaintext: a swap kept in
+memory (zram) or an encrypted swap keeps it off the disk. On Linux the
+application detects LUKS and warns when it is absent.
 
 ### Optional: Docker deployment
 
