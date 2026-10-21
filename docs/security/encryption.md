@@ -40,21 +40,49 @@ python3 -m opti_oignon.db_encryption encrypt   # all of them, or none
 ```
 
 `encrypt` takes every `*.db` of the repository's `data/` and of
-`opti_oignon/data/`, of the knowledge base's `rag/` folder, and the
-sandbox's audit log where `config/sandbox.yaml` puts it. A plugin's own
-databases (`plugin_data/<plugin>/`) are left in plaintext: the plugin
-opens them in its own process, without the platform's key. Any other
-`*.db` below the data directories -- a file added to a project, say --
-is named and left as it is.
+`opti_oignon/data/`, of the knowledge base's `rag/` folder -- followed
+when it is a symbolic link --, and the sandbox's audit log where its
+manager opens it: `audit_db_path` joined to `workspace_base`, from
+`config/sandbox.yaml`. A plugin's own databases (`plugin_data/<plugin>/`)
+are left in plaintext: the plugin opens them in its own process, without
+the platform's key. Any other `*.db` below the data directories -- a file
+added to a project, say -- is named and left as it is, and so is every
+other file there that begins as a plaintext SQLite database --
+ChromaDB's `chroma.sqlite3`, say --, and every such file, a `*.db`
+included, below `RAG_HOME` when it is set to an absolute path (a relative
+one is said, not walked): `check` and `encrypt` name each one, never
+encrypted by this command, and name what they could not check -- a
+symbolic link, never followed, and an entry they could not read.
+
+A contract reads the package's sources: every binding of a directory of
+databases (`DATA_DIR`, `DB_DIR` or `STORE_DIR`, with or without a leading
+`_` or `DEFAULT_`) made in a module or a class, in every branch, is one
+of these places or their `rag/` folder, and no environment variable moves
+one; every ChromaDB directory and `RAG_HOME` lies below a place, and a
+directory an environment variable moves counts only when the command
+follows that variable -- it follows `RAG_HOME`. A binding made inside a
+function is not read.
 
 It refuses, changing nothing -- but each plaintext database's
 write-ahead log folded into it -- while another run is under way, while
 a process holds a database or runs the platform (read from `/proc`; the
 shell that started the command, naming it, is not counted), when a key
 file exists and does not load here (set `OPTI_KEYFILE_PASSPHRASE`), when
-a database does not open under the key, or when an interrupted run left
-something to look at first. A new key is held in memory while every
-database is copied, encrypted, beside itself; each copy is proved before
+`OPTI_ENCRYPTION_KEY` is set and is no key -- 32 bytes, base64-encoded
+with its padding: 44 characters ending in a single `=` -- (the platform
+would pass over it to the key file), when a database does not open
+under the key, when a
+directory of databases is there and cannot be read or searched, when
+the sandbox's audit log is configured below wherever the platform starts
+or lies at the manager's default path while its configuration names
+another (the manager opens that one only when its configuration does not
+build), or when an interrupted run left something to look at first.
+`check` says what it can see of these -- the processes, the key, the
+directories it cannot read, the sandbox's log, what an interrupted run
+left --; it does not see another run under way.
+
+A new key is held in memory while every database is copied, encrypted,
+beside itself; each copy is proved before
 anything moves -- its integrity checked, its objects, each table's rows
 in order and a digest of them, its `user_version`, `application_id` and
 `auto_vacuum`, its file mode. (The implicit row ids of a table without
@@ -77,7 +105,9 @@ A run killed outright (`kill -9`, `Ctrl-\`) still leaves every database
 whole under its name, plaintext or encrypted under the key file: run the
 command again before starting the platform. It finishes, or first names
 what the killed run left -- a second name for a plaintext, a key file's
-temp -- and what to do with it.
+temp -- and what to do with it; `check` names them too. Git ignores
+each of these where the platform keeps them, as it ignores the key file
+and the databases of the `plaintext-<time>` folders.
 
 The command ends with 0 once every database is encrypted, 1 when it
 refused and changed nothing, and 3 when a database could not be put
@@ -93,7 +123,14 @@ then they are the plaintext. `check` lists every such folder, and
 `OPTI_KEYFILE_PASSPHRASE`, needs that variable set wherever the platform
 starts. Field-level encryption and the sealing of the run journal follow
 when encryption is set up in the security settings once the command has
-run: setup then takes the existing key and makes no new one.
+run: setup then takes the existing key and makes no new one. The
+settings say so: with a key here -- a key file, or
+`OPTI_ENCRYPTION_KEY` -- they offer only to enable it and ask for no
+passphrase, the server saying why when it cannot open it; a success
+says whether the key was the one already here or made, where, whether
+its key file is wrapped (the answer's `key`, `existing` or `made`, and
+`wrapped`), and how many databases are still kept in plaintext
+(`plaintext_stores`); a refusal shows the server's reason.
 
 The server never does this itself: it holds its databases open, and a
 database moved under an open connection loses what that connection
@@ -103,7 +140,8 @@ a database is kept in plaintext.
 
 The RAG vector store (ChromaDB) is not encrypted at rest: chunk text and
 embedding vectors are stored in plaintext files. Full-disk encryption is
-required for a sensitive corpus; see `SECURITY.md`.
+required for a sensitive corpus; see `SECURITY.md`. `check` names each
+of its `chroma.sqlite3` files.
 
 
 ### Field-level encryption (AES-256-GCM)

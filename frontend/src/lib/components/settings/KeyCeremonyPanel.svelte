@@ -3,13 +3,18 @@
   Encryption key ceremony UI for first-time setup.
 
   Features:
-    - Step-by-step wizard: choose method, set passphrase, confirm, success
+    - Step-by-step wizard: choose method, set passphrase, confirm, success;
+      a key already here is enabled as it is, the server saying why when it
+      cannot open it (lib/settings/keySetup.ts)
     - Passphrase strength meter (client-side, zxcvbn-style)
     - Key status display (algorithm, KDF, SecureBytes, mlock)
     - PQC backup signature status and key generation
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { Button } from '$lib/ds';
+	import { httpRefusal } from '$lib/switches/serverSwitch';
+	import { KEY_SETUP_TEXT, keySetupFailed, keySetupStart, keySetupSucceeded } from '$lib/settings/keySetup';
 	import {
 		getEncryptionStatus,
 		setupEncryptionPassphrase,
@@ -73,6 +78,7 @@
 	$: strength = scorePassphrase(passphrase);
 	$: canProceedPassphrase = strength.score >= 1 && passphrase.length >= 8;
 	$: passphraseMatch = passphrase === passphraseConfirm && passphraseConfirm.length > 0;
+	$: start = keySetupStart(encStatus);
 
 	// -- Wizard actions -------------------------------------------------------
 
@@ -84,6 +90,7 @@
 		setupError = '';
 	}
 
+	// A key in place is enabled whatever the mode; random asks for no passphrase.
 	async function startRandom() {
 		setupMode = 'random';
 		setupError = '';
@@ -93,12 +100,12 @@
 			if (result.setup) {
 				encStatus = result.status;
 				wizardStep = 'success';
-				successMessage = 'Encryption configured with a random key. The key is stored in your keyfile.';
+				successMessage = keySetupSucceeded('random', result);
 			} else {
 				setupError = result.detail || 'Setup failed';
 			}
 		} catch (e: unknown) {
-			setupError = e instanceof Error ? e.message : 'Setup failed';
+			setupError = keySetupFailed(httpRefusal(e), e);
 		} finally {
 			setupInProgress = false;
 		}
@@ -118,12 +125,12 @@
 			if (result.setup) {
 				encStatus = result.status;
 				wizardStep = 'success';
-				successMessage = 'Encryption configured with your passphrase. Remember it - you will need it to access your data.';
+				successMessage = keySetupSucceeded('passphrase', result);
 			} else {
 				setupError = result.detail || 'Setup failed';
 			}
 		} catch (e: unknown) {
-			setupError = e instanceof Error ? e.message : 'Setup failed';
+			setupError = keySetupFailed(httpRefusal(e), e);
 		} finally {
 			setupInProgress = false;
 			passphrase = '';
@@ -221,15 +228,20 @@
 			{/if}
 		</div>
 
-		<!-- Setup Wizard (only if not yet configured) -->
-		{#if !encStatus?.enabled}
+		<!-- Setup Wizard (only if not yet configured), and what a setup just did -->
+		{#if !encStatus?.enabled || wizardStep === 'success'}
 			<div class="rounded-lg p-4" style="background-color: var(--oo-card-bg); border: 1px solid var(--oo-bd-subtle);">
 				<h4 class="text-sm font-semibold mb-3" style="color: var(--oo-fg-primary);">Key Setup Ceremony</h4>
 
-				{#if wizardStep === 'choose'}
+				{#if wizardStep === 'choose' && start === 'existing'}
+					<p class="key-note text-xs mb-4">{KEY_SETUP_TEXT.existing}</p>
+					<Button variant="primary" size="sm" loading={setupInProgress} on:click={startRandom}>
+						Enable the key in place
+					</Button>
+
+				{:else if wizardStep === 'choose'}
 					<p class="text-xs mb-4" style="color: var(--oo-fg-muted);">
-						Choose how to generate your encryption key. A passphrase-derived key lets you recover
-						your data if the keyfile is lost. A random key is stronger but requires a keyfile backup.
+						{KEY_SETUP_TEXT.new}
 					</p>
 					<div class="flex gap-3">
 						<button
@@ -459,3 +471,9 @@
 	{/if}
 
 </div>
+
+<style>
+	.key-note {
+		color: var(--oo-fg-muted);
+	}
+</style>

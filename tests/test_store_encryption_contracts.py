@@ -81,16 +81,92 @@ while one is kept in plaintext.
     nothing it does; a hang-up the command was started with ignored (nohup)
     stays ignored, unsaid; with standard error closed, the notice lands in
     no file that took its number.
+  * SE9 -- THE SANDBOX'S LOG, WHERE ITS MANAGER OPENS IT: for the shipped
+    configuration and each shape its manager reads -- one with a value that
+    does not build among them, where the manager opens its defaults --, the
+    command names the audit log at the path the manager joins from it, and
+    a manager built on a base of the test's opens its log there; the
+    command reads the manager's own configuration file, names the
+    configured log whether it holds anything or not, and takes it once it
+    does -- never importing the manager, whose import builds one; a log
+    configured below wherever the platform starts, or one at the manager's
+    default path while the configuration names another, is said by check
+    and refuses encrypt, nothing changed, taken by neither -- with advice
+    that never writes over the configured log, given only from what the
+    command can see of it; the default path under another spelling is the
+    same file; a relative log is never resolved from where the command
+    runs, so never taken for the default by a path that leads there from
+    there.
+  * SE10 -- EVERY DATA DIRECTORY OF THE PACKAGE IS A PLACE: read from the
+    sources, every binding of a directory of databases (DATA_DIR, DB_DIR,
+    STORE_DIR, with or without a leading _ or DEFAULT_) made in a module
+    or a class -- in every branch, by ``/=``, unpacked, imported from the
+    package, or set on an object -- is a place of the command or its store
+    folder, and every ChromaDB directory and RAG_HOME lies below a place;
+    one an environment variable moves counts only when the command follows
+    that variable; each place is bound, and each store folder joined to a
+    data directory, by some module; a binding the census cannot read, or
+    one below whatever directory the platform starts in, is named, never
+    passed over. Not read: a binding made inside a function. The plugins'
+    folders aside: each plugin keeps its own stores, in plaintext. The
+    census looks at no directory on disk, and walks none named data.
+  * SE11 -- WHAT STAYS IN PLAINTEXT IS SAID, AND WHAT WAS NOT CHECKED: every
+    file below the places, and below RAG_HOME when it is set, that begins
+    as a SQLite file no cipher wrote and is no ``*.db`` -- ChromaDB's
+    vector store, a database under another name, one whose name the locale
+    cannot write, said escaped -- is named by ``check`` and by ``encrypt``,
+    in one order, and never encrypted or moved; a symbolic link is never
+    followed and an entry that cannot be read is never passed over: both
+    are said, not checked; a pipe is never read; the folders of plaintext
+    copies beside the stores are passed over, a folder of that name
+    elsewhere is not; what an interrupted run left is said by ``check`` as
+    such; below RAG_HOME a ``*.db`` is named too; a relative RAG_HOME is
+    said, never walked; one above a place walks the place once, as a place;
+    one that cannot be looked at is said; one reached through a link inside
+    a place is walked, the link never said unchecked.
+  * SE12 -- GIT NEVER TAKES WHAT A RUN LEFT: each leftover of a run killed
+    outright, as the command names it -- a second name for a store's
+    plaintext, a copy whose store is missing, a key file's temp --, the
+    databases of the folders of plaintext copies and their sidecars, and
+    the key file are ignored by git where the platform keeps them.
+  * SE13 -- NO KEY, NO DATA DIRECTORY FROM THE SHELL: the suites'
+    configuration drops OPTI_ENCRYPTION_KEY, OPTI_KEYFILE_PASSPHRASE and
+    RAG_HOME from the environment when it is imported, before any suite or
+    child process -- every variable the command follows to a directory
+    among them, so a contract never walks a real one.
+  * SE14 -- THE SERVER SAYS WHICH KEY: setup answers ``key: "existing"``
+    when a key here loads -- a key file the command wrote, no key made,
+    the key file as it was, a passphrase sent not used; OPTI_ENCRYPTION_KEY,
+    no key file written -- and ``"made"`` when it makes one; ``wrapped``
+    says whether the key file it made is wrapped, under the passphrase
+    sent or under the server's OPTI_KEYFILE_PASSPHRASE; ``plaintext_stores``
+    counts the stores still kept in plaintext.
+  * SE15 -- A FOLDER OF STORES THAT CANNOT BE READ: a place, a store folder
+    or the sandbox's folder that is there and cannot be read or searched is
+    said by check, never a trace, and refuses encrypt, nothing changed; a
+    store folder that is a symbolic link is followed as its stores are
+    taken through it, never said unchecked, what stays in plaintext and any
+    other *.db below it named, and RAG_HOME at its real target walks it no
+    second time; one linked to another folder of its own place is one
+    store folder, its plaintext copies never said as other databases.
+  * SE16 -- A KEY VARIABLE THAT IS NO KEY: an OPTI_ENCRYPTION_KEY that is
+    set and does not decode to a key refuses encrypt -- even when a key file
+    loads -- and is said by check, no key file made, check reading the
+    stores under the key file the platform passes over to, or saying that
+    key file does not load here either; the server's setup answers 409
+    naming it, no key made, nothing saved.
 
 Local-only (the public distribution ships no tests). The real
 ``db_encryption.py`` and ``encryption.py`` -- and ``api/routes_security.py``
-for SE6 -- are loaded through the shared isolation window; SQLCipher is the
+for SE6 and SE14, a byte-exact copy of ``sandbox_manager.py`` for SE9 --
+are loaded through the shared isolation window; SQLCipher is the
 installed ``sqlcipher3``; the two places, the key file, the process table
 and security.yaml are the test's own, under its temporary directory.
-OPTI_ENCRYPTION_KEY and OPTI_KEYFILE_PASSPHRASE are cleared unless a clause
-sets them.
+OPTI_ENCRYPTION_KEY, OPTI_KEYFILE_PASSPHRASE and RAG_HOME are cleared unless a
+clause sets them.
 """
 
+import ast
 import asyncio
 import base64
 import fcntl
@@ -104,6 +180,7 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import types
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -112,6 +189,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from _allium_census import modules as package_modules  # noqa: E402
 from _isolation import isolate, source  # noqa: E402
 
 _PLAIN = b"SQLite format 3\x00"
@@ -133,7 +211,7 @@ held = open(taken, "wb") if taken != "-" else None
 if held is not None:
     print("taken", held.fileno(), flush=True)
 sys.path.insert(0, repo)
-for name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE"):
+for name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME"):
     os.environ.pop(name, None)
 from opti_oignon import db_encryption as dbe, encryption as enc
 assert dbe.__file__.startswith(repo) and enc.__file__.startswith(repo), (dbe.__file__, enc.__file__)
@@ -198,7 +276,7 @@ sys.exit(code)
 def _window(tmp_path, monkeypatch, *, routes=False):
     """The real modules in a window, the places, the key file, the process table and security.yaml redirected."""
     pytest.importorskip("sqlcipher3")
-    for name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE"):
+    for name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME"):
         monkeypatch.delenv(name, raising=False)
     targets = {"opti_oignon.encryption": source("encryption.py"),
                "opti_oignon.db_encryption": source("db_encryption.py")}
@@ -1086,5 +1164,814 @@ def test_se8_a_run_killed_at_any_step_leaves_every_store_whole_and_one_ended_put
                                                                                          closed.stdout)
         assert taken.read_bytes() == b"", ("no notice in it", taken.read_bytes()[:120])
         assert _tree(root / "data", root / "package", root / "keys") == snapshot, "everything put back"
+    finally:
+        world.restore()
+
+
+# ---------------------------------------------------------------------------
+# SE9 -- the sandbox's audit log, where its manager opens it
+# ---------------------------------------------------------------------------
+def _sandbox_window(tmp_path):
+    """The real ``sandbox_manager.py``, copied byte for byte beside a configuration that keeps its import-time manager
+    off (that one would make the configured folders), in the shared window; its keyed connection a plain one."""
+    package = tmp_path / "sandbox_copy"
+    (package / "config").mkdir(parents=True)
+    (package / "config" / "sandbox.yaml").write_text("enabled: false\n", encoding="utf-8")
+    copy = package / "sandbox_manager.py"
+    copy.write_bytes(source("sandbox_manager.py").read_bytes())
+    db_utils = types.ModuleType("opti_oignon.db_utils")
+    db_utils.safe_connect = lambda path, *args, **kwargs: sqlite3.connect(path)
+    loaded, restore = isolate(targets={"opti_oignon.sandbox_manager": copy}, seeded={"opti_oignon.db_utils": db_utils})
+    sm = loaded["opti_oignon.sandbox_manager"]
+    if sm.sandbox_manager is not None:
+        restore()
+        raise AssertionError("the import-time manager must stay off in this window")
+    return sm, restore
+
+
+def _sandbox_shapes(root):
+    """Configurations of the sandbox, by name: the shipped one, the shapes its manager reads, one with a value that
+    does not build (the manager then opens its defaults), one with a base relative to where the platform starts."""
+    return {
+        "shipped": source("config", "sandbox.yaml").read_text(encoding="utf-8"),
+        "defaults": "",
+        "a base": f"workspace_base: {root / 'base'}\n",
+        "a base and a relative log": f"workspace_base: {root / 'base'}\naudit_db_path: audit/log.db\n",
+        "an absolute log": f"audit_db_path: {root / 'elsewhere' / 'log.db'}\n",
+        "turned off": f"enabled: false\nworkspace_base: {root / 'off'}\n",
+        "a value that does not build": f"workspace_base: {root / 'unbuilt'}\nhost_share_roots: 5\n",
+        "a relative base": "workspace_base: sandboxes\n",
+    }
+
+
+def test_se9_the_sandboxs_audit_log_is_taken_where_its_manager_opens_it(tmp_path, monkeypatch, capsys):
+    files = {}
+    for index, (name, text) in enumerate(_sandbox_shapes(tmp_path).items()):
+        files[name] = tmp_path / f"sandbox-{index}.yaml"
+        files[name].write_text(text, encoding="utf-8")
+    sm, restore = _sandbox_window(tmp_path)
+    try:
+        opened = {}
+        for name, path in files.items():
+            sm._CONFIG_PATH = str(path)
+            config = sm._load_config()
+            opened[name] = os.path.join(config.workspace_base, config.audit_db_path)
+        default = sm.SandboxConfig()
+        assert opened["defaults"] == opened["a value that does not build"] == os.path.join(
+            default.workspace_base, default.audit_db_path), ("control: the manager falls back to its defaults", opened)
+        assert not os.path.isabs(opened["a relative base"]), opened["a relative base"]
+        # The manager opens its log at that join: built on a base of the test's, a relative log and an absolute one.
+        sm._detect_bwrap = lambda: (False, "no bubblewrap in this contract")
+        (tmp_path / "logs").mkdir()
+        logs = []
+        for audit in ("audit.db", str(tmp_path / "logs" / "audit.db")):
+            config = sm.SandboxConfig(isolation_backend="auto", strict_mode=False, require_degraded_confirmation=False,
+                                      workspace_base=str(tmp_path / "built"), audit_db_path=audit,
+                                      reconcile_on_start=False)
+            logs.append((sm.SandboxManager(config)._audit._db_path,
+                         os.path.join(config.workspace_base, config.audit_db_path)))
+        assert all(got == want for got, want in logs), logs
+    finally:
+        restore()
+    world = _window(tmp_path, monkeypatch)
+    try:
+        dbe = world.dbe
+        bound = _census_module(source("sandbox_manager.py"))[0]
+        assert os.path.realpath(bound["_CONFIG_PATH"][0]) == os.path.realpath(dbe._SANDBOX_CONFIG), (
+            "the command reads the manager's own configuration", bound.get("_CONFIG_PATH"), dbe._SANDBOX_CONFIG)
+        dbe._LONE_STORES = None
+        for name, path in files.items():
+            dbe._SANDBOX_CONFIG = path
+            configured, default = dbe._sandbox_logs()
+            assert default == opened["defaults"], ("the command's default is the manager's", name, default)
+            if name == "a value that does not build":
+                assert configured != opened[name] == default, ("the manager fell back to its defaults", configured)
+            else:
+                assert configured == opened[name], (name, configured, opened[name])
+            assert dbe._lone_store_paths() == ([Path(configured)] if os.path.isabs(configured) else []), name
+        # From here the command runs: its default base is the test's, never the real one, which it would read.
+        dbe._SANDBOX_DEFAULT = str(tmp_path / "default-base")
+        data = world.places[0]
+        _store(data / "auth.db", 2)
+        # A log configured below wherever the platform starts: said by check, and encrypt refuses, nothing changed.
+        dbe._SANDBOX_CONFIG = files["a relative base"]
+        assert dbe.main(["check"]) == 0
+        said = capsys.readouterr().out
+        assert ("sandbox: the sandbox's audit log is configured below whatever directory the platform starts in "
+                "(sandboxes/sandbox_audit.db): set an absolute workspace_base in config/sandbox.yaml; encrypt refuses "
+                "until then") in said, said
+        snapshot = _tree(*world.places, world.keydir)
+        assert dbe.main(["encrypt"]) == 1
+        refused = capsys.readouterr().err
+        assert "set an absolute workspace_base" in refused and _tree(*world.places, world.keydir) == snapshot, refused
+        # A log at the manager's default path while the configuration names another: taken by neither, refused.
+        dbe._SANDBOX_CONFIG = files["a base"]
+        stale = tmp_path / "default-base" / "sandbox_audit.db"
+        stale.parent.mkdir()
+        _store(stale, 1)
+        kept = stale.read_bytes()
+        assert stale not in dbe.store_files() and len(dbe._sandbox_problems()) == 1, dbe._sandbox_problems()
+        assert dbe.main(["check"]) == 0
+        assert (f"sandbox: {stale} holds a sandbox audit log at the manager's default path while its configuration "
+                f"names {opened['a base']}") in capsys.readouterr().out
+        assert dbe.main(["encrypt"]) == 1
+        refused = capsys.readouterr().err
+        assert "holds a sandbox audit log" in refused and "move it there, as no log is there yet" in refused, refused
+        assert stale.read_bytes() == kept and _tree(*world.places, world.keydir) == snapshot, "nothing changed"
+        # The configured log there too: this one is stale, and moving it would write over the live one.
+        Path(opened["a base"]).parent.mkdir(parents=True)
+        _store(Path(opened["a base"]), 1)
+        assert "the configured log is there too, so this one is stale" in dbe._sandbox_problems()[0], (
+            dbe._sandbox_problems())
+        Path(opened["a base"]).unlink()
+        # Where the configured log lies cannot be looked at -- its folder not searchable, or relative: no advice to move.
+        os.chmod(Path(opened["a base"]).parent, 0o600)
+        try:
+            assert "cannot be looked at from here: look at both before moving anything" in dbe._sandbox_problems()[0], (
+                dbe._sandbox_problems())
+        finally:
+            os.chmod(Path(opened["a base"]).parent, 0o700)
+        dbe._SANDBOX_CONFIG = files["a relative base"]
+        assert len(dbe._sandbox_problems()) == 2 and "cannot be looked at from here" in dbe._sandbox_problems()[1], (
+            dbe._sandbox_problems())
+        # Never resolved from where the command runs, which need not be where the platform starts: from here its
+        # spelling leads to the default path, and the log there is still said.
+        (tmp_path / "start").mkdir()
+        (tmp_path / "start" / "sandboxes").symlink_to(stale.parent, target_is_directory=True)
+        monkeypatch.chdir(tmp_path / "start")
+        assert os.path.realpath(dbe._sandbox_logs()[0]) == os.path.realpath(stale), "control: from here it leads there"
+        assert len(dbe._sandbox_problems()) == 2 and "cannot be looked at from here" in dbe._sandbox_problems()[1], (
+            "a relative log taken for the default because of where the command runs", dbe._sandbox_problems())
+        dbe._SANDBOX_CONFIG = files["a base"]
+        # The default path under another spelling is the same file: nothing to say.
+        same = tmp_path / "sandbox-same.yaml"
+        same.write_text(f"workspace_base: {tmp_path / 'default-base'}\naudit_db_path: ./sandbox_audit.db\n",
+                        encoding="utf-8")
+        dbe._SANDBOX_CONFIG = same
+        assert dbe._sandbox_problems() == [], dbe._sandbox_problems()
+        dbe._SANDBOX_CONFIG = files["a base"]
+        stale.unlink()
+        # Named whether it holds anything or not; taken once it does.
+        log = Path(opened["a base"])
+        assert dbe._lone_store_paths() == [log] and log not in dbe.store_files(), "named, not taken: it is not there"
+        _store(log, 2)
+        assert dbe.store_files()[-1] == log and log in dbe.plaintext_stores(), "taken once it holds something"
+    finally:
+        world.restore()
+
+
+# ---------------------------------------------------------------------------
+# SE10 -- every data directory the package binds is a place of the command
+# ---------------------------------------------------------------------------
+# The names a module binds a directory of stores to: each must be a place or a store folder of one.
+_STORE_BINDING = re.compile(r"^_?(?:DEFAULT_)?(?:DATA|DB|STORE)_DIR$")
+# The names a module binds a directory of other data to (ChromaDB's, the knowledge base's): each must lie below a
+# place, where the command looks for what stays in plaintext.
+_WALK_BINDING = re.compile(r"^_?(?:DEFAULT_)?CHROMA_(?:DIR|BASE)$|^RAG_HOME$")
+# The package's folders the census passes over: each plugin keeps its own stores, in plaintext.
+_NOT_THE_PLATFORMS = ("plugins",)
+
+
+class _Unread(Exception):
+    """An expression the census cannot read."""
+
+
+def _evaluate(node, names, here):
+    """(the path ``node`` names in the module at ``here``, the environment variables it depends on), its names bound
+    so far in ``names`` as such pairs: a string, a name bound before, ``__file__``, ``Path(...)``, ``.parent``,
+    ``.resolve()``, ``.absolute()``, the ``/`` operator, ``os.path.join``, ``dirname`` and ``abspath``,
+    ``Path.home()``, and ``os.environ.get`` or ``os.getenv`` of a named variable with a default -- read as that
+    default, the variable counted. Anything else is unread."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value, frozenset()
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return str(here), frozenset()
+        if names.get(node.id) is not None and names[node.id][0] is not None:
+            return names[node.id]
+        raise _Unread(node.id)
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        value, needs = _evaluate(node.value, names, here)
+        return Path(value).parent, needs
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        (left, first), (right, second) = _evaluate(node.left, names, here), _evaluate(node.right, names, here)
+        return Path(left) / right, first | second
+    if isinstance(node, ast.Call) and not node.keywords:
+        call, args = ast.unparse(node.func), node.args
+        if call in ("Path", "pathlib.Path") and len(args) == 1:
+            value, needs = _evaluate(args[0], names, here)
+            return Path(value), needs
+        if call in ("Path.home", "pathlib.Path.home") and not args:
+            return Path.home(), frozenset()
+        if isinstance(node.func, ast.Attribute) and node.func.attr in ("resolve", "absolute") and not args:
+            value, needs = _evaluate(node.func.value, names, here)
+            return Path(os.path.abspath(value)), needs
+        if call == "os.path.join" and args:
+            parts = [_evaluate(arg, names, here) for arg in args]
+            return os.path.join(*(str(value) for value, _ in parts)), frozenset().union(*(n for _, n in parts))
+        if call in ("os.path.dirname", "os.path.abspath") and len(args) == 1:
+            value, needs = _evaluate(args[0], names, here)
+            return getattr(os.path, call.rsplit(".", 1)[1])(str(value)), needs
+        if (call in ("os.environ.get", "os.getenv") and len(args) == 2 and isinstance(args[0], ast.Constant)
+                and isinstance(args[0].value, str)):
+            value, needs = _evaluate(args[1], names, here)
+            return value, needs | {args[0].value}
+    raise _Unread(ast.unparse(node))
+
+
+def _module_file(here, node):
+    """The package's source file an ``import from`` in the module at ``here`` names, or None."""
+    package = source()
+    if node.level:
+        base = Path(here).parent
+        for _ in range(node.level - 1):
+            base = base.parent
+        parts = node.module.split(".") if node.module else []
+    elif node.module and node.module.split(".")[0] == package.name:
+        base, parts = package.parent, node.module.split(".")
+    else:
+        return None
+    target = base.joinpath(*parts)
+    for candidate in (target.with_suffix(".py"), target / "__init__.py"):
+        if candidate.is_file() and package in candidate.resolve().parents:
+            return candidate
+    return None
+
+
+def _census_module(path, *, cache=None):
+    """(names, bindings) of the module at ``path``. ``names``: each name it binds at module level, to its last
+    (value, environment variables) -- value None when unread --, a name imported from the package followed to its
+    module. ``bindings``: every binding, in order, as (label, name, value, variables): each branch of an ``if``, a
+    ``try`` or a ``with``, a ``/=``, a tuple unpacked, a class's attribute, an attribute of an object assigned at
+    module level. Not read: a binding inside a function (``global`` included), a loop's, a ``with``'s, a ``match``'s
+    or an assignment expression's target. A name of a directory imported from elsewhere, unpacked from what is no
+    tuple, or a ``/=`` on an object's attribute, is unread."""
+    cache = {} if cache is None else cache
+    path = Path(path)
+    if path in cache:
+        return cache[path]
+    names, bindings = {}, []
+    cache[path] = (names, bindings)
+
+    def read(node, scope):
+        try:
+            return _evaluate(node, scope, path)
+        except _Unread:
+            return None, frozenset()
+
+    def bind(label, name, pair, scope, *, named=True):
+        """Record a binding; a name -- not an object's attribute -- also binds in its scope, module or class."""
+        bindings.append((label, name, *pair))
+        if named:
+            scope[name] = pair
+
+    def assign(target, value, scope, prefix):
+        """Bind what ``target`` names to what ``value`` reads -- a name in its scope, an object's attribute recorded
+        only, a tuple matched element by element, recursively -- or, where the two do not match, as unread."""
+        if isinstance(target, (ast.Tuple, ast.List)):
+            if (value is not None and isinstance(value, (ast.Tuple, ast.List)) and len(target.elts) == len(value.elts)
+                    and not any(isinstance(elt, ast.Starred) for elt in target.elts)):
+                for each, part in zip(target.elts, value.elts):
+                    assign(each, part, scope, prefix)
+            else:
+                for each in target.elts:
+                    assign(each, None, scope, prefix)
+        elif isinstance(target, ast.Starred):
+            assign(target.value, None, scope, prefix)
+        elif isinstance(target, ast.Name):
+            if value is None or not (isinstance(value, ast.Constant) and value.value is None):
+                bind(f"{path.name}: {prefix}{target.id}", target.id,
+                     read(value, scope) if value is not None else (None, frozenset()), scope)
+        elif isinstance(target, ast.Attribute):
+            bind(f"{path.name}: {prefix}{ast.unparse(target)}", target.attr,
+                 read(value, scope) if value is not None else (None, frozenset()), scope, named=False)
+
+    def walk(body, scope, prefix):
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if isinstance(node, ast.ClassDef):
+                walk(node.body, dict(scope), f"{prefix}{node.name}.")
+                continue
+            if isinstance(node, ast.ImportFrom):
+                module = _module_file(path, node)
+                theirs = _census_module(module, cache=cache)[0] if module is not None else {}
+                for alias in node.names:
+                    if alias.name in theirs or _STORE_BINDING.match(alias.name) or _WALK_BINDING.match(alias.name):
+                        bind(f"{path.name}: {prefix}{alias.asname or alias.name}", alias.asname or alias.name,
+                             theirs.get(alias.name, (None, frozenset())), scope)
+                continue
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and getattr(node, "value", None) is not None:
+                for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+                    assign(target, node.value, scope, prefix)
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                value = ast.BinOp(left=ast.Name(id=node.target.id, ctx=ast.Load()), op=node.op, right=node.value)
+                assign(node.target, value, scope, prefix)
+            elif isinstance(node, ast.AugAssign):
+                assign(node.target, None, scope, prefix)
+            for field in ("body", "orelse", "finalbody", "handlers", "cases"):
+                inner = getattr(node, field, None)
+                if isinstance(inner, list):
+                    walk(inner, scope, prefix)
+
+    walk(ast.parse(path.read_text(encoding="utf-8")).body, names, "")
+    return names, bindings
+
+
+def _census(paths, places, folders, followed):
+    """Each directory the modules at ``paths`` bind, sorted: (found {directory: [label]}, outside, unread,
+    unfollowed). A store directory must be a place or a store folder of one, and no environment variable may move
+    it -- the command takes stores only in its places; another data directory must lie at or below a place, and one
+    an environment variable moves counts only when the command follows that variable. Each directory is compared
+    as the module spells it, made absolute: the census looks at no directory on disk."""
+    stores = {Path(os.path.abspath(place)) for place in places}
+    stores |= {place / folder for place in stores for folder in folders}
+    roots = {Path(os.path.abspath(place)) for place in places}
+    cache, found, outside, unread, unfollowed = {}, {}, [], [], []
+    for path in paths:
+        for label, name, value, needs in _census_module(path, cache=cache)[1]:
+            kind = "store" if _STORE_BINDING.match(name) else "walk" if _WALK_BINDING.match(name) else None
+            if kind is None:
+                continue
+            if value is None:
+                unread.append(label)
+                continue
+            unfollowed += [f"{label} ({need})" for need in sorted(needs) if need not in followed or kind == "store"]
+            if not Path(value).is_absolute():
+                outside.append(f"{label} = {value} (below whatever directory the platform starts in)")
+                continue
+            named = Path(os.path.abspath(value))
+            found.setdefault(named, []).append(label)
+            if (named not in stores) if kind == "store" else not any(named == root or root in named.parents
+                                                                      for root in roots):
+                outside.append(f"{label} = {named}")
+    return found, outside, unread, unfollowed
+
+
+def _joined(paths, folder):
+    """The modules that join a data directory with ``folder`` anywhere -- ``DATA_DIR / folder`` or
+    ``Path(DATA_DIR) / folder``, in a function too."""
+    joins = []
+    for path in paths:
+        for node in ast.walk(ast.parse(Path(path).read_text(encoding="utf-8"))):
+            if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div) and isinstance(node.right, ast.Constant)
+                    and node.right.value == folder and _STORE_BINDING.match(
+                        re.sub(r"^Path\((.*)\)$", r"\1", ast.unparse(node.left)))):
+                joins.append(Path(path).name)
+    return joins
+
+
+def test_se10_every_data_directory_the_package_binds_is_a_place_of_the_command(tmp_path, monkeypatch):
+    world = _window(tmp_path, monkeypatch)
+    try:
+        dbe = world.dbe
+        dbe._STORE_PLACES = None
+        places = [Path(os.path.abspath(place)) for place in dbe._places()]
+        package = source()
+        # Walked without entering a data directory: what lies there is the maintainer's, never a module.
+        modules = sorted(path for path in package_modules().values()
+                         if path.relative_to(package).parts[0] not in _NOT_THE_PLATFORMS)
+        found, outside, unread, unfollowed = _census(modules, places, dbe._STORE_FOLDERS, dbe._FOLLOWED)
+        assert not unread, ("bindings of a data directory the census cannot read: bind it in a form it reads, or teach "
+                            "it the form", unread)
+        assert not outside, ("data directories the command does not take: their stores would stay in plaintext",
+                             outside)
+        assert not unfollowed, ("data directories an environment variable moves, which the command does not follow",
+                                unfollowed)
+        assert all(place in found for place in places), ("a place no module binds", places, sorted(found))
+        assert all(_joined(modules, folder) for folder in dbe._STORE_FOLDERS), (
+            "a store folder no module joins to a data directory", dbe._STORE_FOLDERS)
+        assert len(found[places[1]]) >= 10 and "config.py: DATA_DIR" in found[places[1]], (
+            "control: the census reads the package's bindings", found[places[1]][:12])
+        assert any("RAG_HOME" in label for labels in found.values() for label in labels), (
+            "control: the knowledge base's home is read, the variable that moves it followed")
+        # Control: every form the census reads, sorted -- a place, outside, unread, an unfollowed variable.
+        sample = tmp_path / "sample" / "opti_oignon_sample.py"
+        sample.parent.mkdir()
+        sample.write_text(
+            "import os\nfrom pathlib import Path\nfrom elsewhere import DB_DIR\n"
+            f"DATA_DIR = Path({str(places[0])!r})\n"
+            "try:\n    _DB_DIR = Path.home() / 'oo'\nexcept ImportError:\n    _DB_DIR = DATA_DIR\n"
+            "_STORE_DIR = locate()\n"
+            "RAG_HOME = Path(os.environ.get('OO_SAMPLE_HOME', DATA_DIR))\n"
+            "_DEFAULT_DB_DIR = Path(os.environ.get('RAG_HOME', DATA_DIR))\n"
+            "DATA_DIR /= 'v2'\n"
+            "class Settings:\n    _BASE = Path('/srv')\n    CHROMA_DIR = _BASE / 'chroma'\n"
+            "settings = Settings()\nsettings.DATA_DIR = Path('/srv/data')\nsettings.DATA_DIR /= 'x'\n"
+            "STORE_DIR, other = Path('/srv/db'), 1\nDB_DIR, rest = locate()\nCHROMA_BASE, *more = (DATA_DIR, 1)\n"
+            "match os.name:\n    case 'posix':\n        _DATA_DIR = Path('/srv/posix')\n"
+            "settings.DB_DIR, x = locate()\n(a, (_DB_DIR, b)) = (1, (Path('/srv/nested'), 2))\n", encoding="utf-8")
+        found, outside, unread, unfollowed = _census([sample], places, dbe._STORE_FOLDERS, dbe._FOLLOWED)
+        assert sorted(unread) == sorted(f"opti_oignon_sample.py: {name}" for name in (
+            "DB_DIR", "_STORE_DIR", "settings.DATA_DIR", "DB_DIR", "CHROMA_BASE", "settings.DB_DIR")), unread
+        assert unfollowed == ["opti_oignon_sample.py: RAG_HOME (OO_SAMPLE_HOME)",
+                              "opti_oignon_sample.py: _DEFAULT_DB_DIR (RAG_HOME)"], unfollowed
+        assert sorted(item.split(" = ")[0] for item in outside) == sorted(
+            f"opti_oignon_sample.py: {name}" for name in ("_DB_DIR", "DATA_DIR", "Settings.CHROMA_DIR",
+                                                           "settings.DATA_DIR", "STORE_DIR", "_DATA_DIR",
+                                                           "_DB_DIR")), outside
+        assert sorted(found[places[0]]) == sorted(f"opti_oignon_sample.py: {name}" for name in (
+            "DATA_DIR", "_DB_DIR", "RAG_HOME", "_DEFAULT_DB_DIR")), found
+    finally:
+        world.restore()
+
+
+# ---------------------------------------------------------------------------
+# SE11 -- what stays in plaintext is said, and what was not checked
+# ---------------------------------------------------------------------------
+def test_se11_every_sqlite_file_left_in_plaintext_below_the_places_is_said(tmp_path, monkeypatch, capsys):
+    world = _window(tmp_path, monkeypatch)
+    locked = []
+    try:
+        data, package = world.places
+        _store(data / "auth.db", 2)
+        _store(package / "notes.db", 2)
+        for folder in ("rag/chroma_db", "rag/chroma_v2", "projects/p1", "projects/plaintext-notes",
+                       "plaintext-20990101T000000Z", "closed"):
+            (package / folder).mkdir(parents=True)
+        chroma = package / "rag" / "chroma_db" / "chroma.sqlite3"
+        _store(chroma, 3)
+        other = package / "projects" / "p1" / "tables.sqlite"
+        _store(other, 1)
+        named_plaintext = package / "projects" / "plaintext-notes" / "chroma.sqlite3"
+        _store(named_plaintext, 1)
+        _store(package / "projects" / "p1" / "user.db", 1)
+        _store(package / "plaintext-20990101T000000Z" / "kept.sqlite", 1)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        _store(outside / "far.sqlite", 1)
+        os.symlink(outside / "far.sqlite", package / "projects" / "p1" / "linked.sqlite")
+        os.symlink(outside, package / "projects" / "elsewhere")
+        os.mkfifo(package / "projects" / "p1" / "pipe.sqlite")
+        (package / "projects" / "p1" / "readme.txt").write_text("SQLite format 3, said in words\n", encoding="utf-8")
+        shut = package / "projects" / "p1" / "shut.sqlite"
+        _store(shut, 1)
+        _store(package / "closed" / "inside.sqlite", 1)
+        for path in (shut, package / "closed"):
+            os.chmod(path, 0)
+            locked.append(path)
+        odd = os.path.join(os.fsencode(package / "projects" / "p1"), b"caf\xe9.sqlite")
+        with open(odd, "wb") as handle:
+            handle.write(other.read_bytes())
+        odd = Path(os.fsdecode(odd))
+        shutil.copyfile(package / "notes.db", package / "notes.db.restoring")
+        sealed = package / "rag" / "chroma_v2" / "chroma.sqlite3"
+        conn = world.dbe._keyed(str(sealed), os.urandom(32))
+        try:
+            conn.execute("CREATE TABLE t (x)")
+            conn.commit()
+        finally:
+            conn.close()
+        assert sealed.read_bytes()[:16] != _PLAIN, "control: a database no plaintext reader opens"
+        home = tmp_path / "knowledge"
+        (home / "chroma_db").mkdir(parents=True)
+        moved = home / "chroma_db" / "chroma.sqlite3"
+        _store(moved, 1)
+        (home / "cache").mkdir()
+        jobs = home / "cache" / "jobs.db"
+        _store(jobs, 1)
+        monkeypatch.setenv("RAG_HOME", str(home))
+        others = world.dbe.plaintext_others()
+        assert others == [odd, other, named_plaintext, chroma, jobs, moved] and world.dbe.plaintext_others() == others, (
+            "every plaintext database below the places, and where RAG_HOME moves the knowledge base -- a *.db there "
+            "no store --, in one order", others)
+        unchecked = world.dbe.unchecked_entries()
+        assert sorted(unchecked) == sorted([
+            (package / "closed", "could not be read"), (package / "projects" / "elsewhere",
+                                                        "a symbolic link, never followed"),
+            (package / "projects" / "p1" / "linked.sqlite", "a symbolic link, never followed"),
+            (shut, "could not be read")]), unchecked
+        said_of = {path: (f"{path}: a ChromaDB vector store, its texts and vectors in plaintext: ChromaDB has no "
+                          "encryption at rest, and this command does not encrypt it") if path.name == "chroma.sqlite3"
+                   else f"{path}: a database in plaintext that is no store of the platform: this command does not "
+                   "encrypt it" for path in others}
+        assert world.dbe.main(["check"]) == 0
+        said = capsys.readouterr().out
+        assert all(line.replace(str(odd), "") in said.replace("caf\\udce9.sqlite", "") for line in said_of.values()), said
+        assert "caf\\udce9.sqlite: a database in plaintext" in said, ("a name the locale cannot write, said escaped", said)
+        assert said.count("this command does not encrypt it") == 6, said
+        assert all(f"{path}: not checked, {why}" in said for path, why in unchecked), said
+        assert f"left by an interrupted run: {package / 'notes.db.restoring'}" in said, (
+            "what a killed run left said as such, not as a database of another kind", said)
+        (package / "notes.db.restoring").unlink()
+        before = {path: path.read_bytes() for path in (chroma, other, named_plaintext, jobs, moved)}
+        assert world.dbe.main(["encrypt"]) == 0
+        said = capsys.readouterr().out
+        assert "2 store(s) encrypted" in said and said.count("this command does not encrypt it") == 6, said
+        assert all(f"{path}: not checked, {why}" in said for path, why in unchecked), said
+        assert all(path.read_bytes() == kept for path, kept in before.items()), "never encrypted, never moved"
+        again = world.dbe.encrypt_all_stores()
+        assert again["plaintext_others"] == [str(path) for path in others] and again["unchecked"] == [
+            [str(path), why] for path, why in unchecked], "said by each run"
+        # RAG_HOME relative to wherever the platform starts: said, never walked from here.
+        monkeypatch.chdir(tmp_path)  # where "knowledge" lies: a walk of it would be seen
+        monkeypatch.setenv("RAG_HOME", "knowledge")
+        assert world.dbe.plaintext_others() == others[:4], world.dbe.plaintext_others()
+        assert world.dbe.main(["check"]) == 0
+        assert ("RAG_HOME is knowledge, below whatever directory the platform starts in: not checked"
+                in capsys.readouterr().out)
+        # RAG_HOME above a place: the place walked once, as a place -- no file said twice, no store said as another.
+        monkeypatch.setenv("RAG_HOME", str(package.parent))
+        assert world.dbe.plaintext_others() == others[:4], world.dbe.plaintext_others()
+        # RAG_HOME that cannot be looked at: said, never passed over.
+        shut_home = tmp_path / "shut-home"
+        (shut_home / "kb").mkdir(parents=True)
+        os.chmod(shut_home, 0)
+        locked.append(shut_home)
+        monkeypatch.setenv("RAG_HOME", str(shut_home / "kb"))
+        assert (shut_home / "kb", "could not be read") in world.dbe.unchecked_entries(), world.dbe.unchecked_entries()
+        os.chmod(shut_home, 0o700)
+        # RAG_HOME through a link inside a place: its target walked, the link never said unchecked.
+        os.symlink(home, package / "kb")
+        monkeypatch.setenv("RAG_HOME", str(package / "kb"))
+        assert jobs.name in [path.name for path in world.dbe.plaintext_others()], world.dbe.plaintext_others()
+        assert not [path for path, _why in world.dbe.unchecked_entries() if path == package / "kb"], (
+            world.dbe.unchecked_entries())
+    finally:
+        for path in locked:
+            os.chmod(path, 0o700)
+        world.restore()
+
+
+# ---------------------------------------------------------------------------
+# SE12 -- git never takes what a run left
+# ---------------------------------------------------------------------------
+def test_se12_git_ignores_what_a_run_killed_outright_leaves_where_the_platform_keeps_it(tmp_path, monkeypatch):
+    world = _window(tmp_path, monkeypatch)
+    try:
+        dbe, (data, package) = world.dbe, world.places
+        (package / "rag").mkdir()
+        _store(data / "auth.db", 2)
+        _store(package / "rag" / "rag_documents.db", 2)
+        kept = data / "plaintext-20990101T000000Z"
+        kept.mkdir()
+        os.link(data / "auth.db", kept / "auth.db")
+        os.link(data / "auth.db", data / "auth.db.restoring")
+        _store(package / "notes.db.encrypting", 1)
+        _store(package / "rag" / "rag_documents.db.restoring", 1)
+        (world.keydir / "..keyfile.tmp-0a1b2c3d").write_bytes(b"half a key file")
+        named = [Path(item.split(" (", 1)[0]) for item in dbe._leftovers(dbe.store_files(), world.places)]
+        left = [data / "auth.db.restoring", package / "rag" / "rag_documents.db.restoring",
+                package / "notes.db.encrypting", world.keydir / "..keyfile.tmp-0a1b2c3d"]
+        assert sorted(named) == sorted(left), ("control: the command names each", named)
+        # Where the platform keeps them: the places as the command reads them, the key file as encryption.py binds it.
+        dbe._STORE_PLACES = None
+        real = [Path(place).relative_to(_REPO) for place in dbe._places()]
+        keyfile = Path(_census_module(source("encryption.py"))[0]["_DEFAULT_KEYFILE"][0]).relative_to(_REPO)
+        rooms = {data: real[0], package: real[1], world.keydir: keyfile.parent}
+        paths = [str(rooms[path.parent] if path.parent in rooms else rooms[path.parent.parent] / path.parent.name)
+                 + "/" + path.name for path in left]
+        for room in (real[0], real[1], real[1] / "rag"):
+            paths += [f"{room}/plaintext-20990101T000000Z/conversations.db{side}" for side in ("", *_SIDES)]
+        paths.append(str(keyfile))
+        probe = "opti_oignon/db_encryption.py"
+        answer = subprocess.run(["git", "-C", str(_REPO), "check-ignore", "--no-index", "-v", "-n", *paths, probe],
+                                capture_output=True, text=True, timeout=60)
+        rules = dict(reversed(line.split("\t", 1)) for line in answer.stdout.splitlines())
+
+        def ignored(path):
+            """Whether git ignores ``path``: a rule matched it, and not a negated one (``!``)."""
+            source_, _, rest = rules.get(path, "::").partition(":")
+            return bool(source_) and not rest.partition(":")[2].startswith("!")
+
+        assert not ignored(probe) and probe in rules, ("control: a source file is not ignored", answer.stdout,
+                                                       answer.stderr)
+        taken = [path for path in paths if not ignored(path)]
+        assert not taken, ("git would take these", taken, answer.stderr)
+    finally:
+        world.restore()
+
+
+# ---------------------------------------------------------------------------
+# SE13 -- no key from the shell
+# ---------------------------------------------------------------------------
+_KEYS = ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME")
+
+
+def test_se13_the_suites_drop_the_key_the_passphrase_and_the_data_directory_a_shell_carries():
+    conftest = Path(__file__).resolve().parent / "conftest.py"
+    env = dict(os.environ, OPTI_ENCRYPTION_KEY="a key from the shell", OPTI_KEYFILE_PASSPHRASE="a phrase from the shell",
+               RAG_HOME="/a/knowledge/base/of/the/shell")
+    tell = "import os, sys; print(sorted(name for name in sys.argv[2:] if name in os.environ))"
+    plain = subprocess.run([sys.executable, "-c", tell, "-", *_KEYS], env=env, capture_output=True, text=True,
+                           timeout=60)
+    assert plain.stdout.strip() == str(sorted(_KEYS)), ("control: the child is given both", plain.stdout, plain.stderr)
+    loaded = subprocess.run([sys.executable, "-c", "import runpy, sys; runpy.run_path(sys.argv[1]); " + tell,
+                             str(conftest), *_KEYS], env=env, capture_output=True, text=True, timeout=60)
+    assert loaded.returncode == 0 and loaded.stdout.strip().splitlines()[-1] == "[]", (
+        "the suites' configuration drops each when it is imported", loaded.stdout, loaded.stderr)
+    assert not [name for name in _KEYS if name in os.environ], "and this session carries none of them"
+    followed = next(ast.literal_eval(node.value) for node in ast.parse(source("db_encryption.py").read_text(
+        encoding="utf-8")).body if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == "_FOLLOWED")
+    assert followed and set(followed) <= set(_KEYS), (
+        "every variable the command follows to a directory is dropped too: the suites never walk a real one",
+        followed)
+
+
+# ---------------------------------------------------------------------------
+# SE14 -- the server says which key, what stays in plaintext, whether the key file is wrapped
+# ---------------------------------------------------------------------------
+def _setup(root, monkeypatch, request, *, env=(), stores=(), encrypt=False):
+    """Setup's answer in a world of its own under ``root``: ``env`` set, ``stores`` made in plaintext, encrypted
+    first when asked; (the answer, whether a key was made, the key file's bytes before and after)."""
+    root.mkdir()
+    world = _window(root, monkeypatch, routes=True)
+    try:
+        for name, value in env:
+            monkeypatch.setenv(name, value)
+        for name in stores:
+            _store(world.places[0] / name, 2)
+        if encrypt:
+            world.dbe.encrypt_all_stores()
+        made = []
+        generate = world.enc.generate_key
+        world.enc.generate_key = lambda *args, **kwargs: made.append(1) or generate(*args, **kwargs)
+        before = world.keyfile.read_bytes() if world.keyfile.exists() else None
+        answer = world.routes.setup_encryption(world.routes.EncryptionSetupRequest(**request))
+        return answer, bool(made), before, world.keyfile.read_bytes() if world.keyfile.exists() else None
+    finally:
+        for name, _value in env:
+            monkeypatch.delenv(name, raising=False)
+        world.restore()
+
+
+def test_se14_setup_says_whether_it_enabled_the_key_in_place_or_made_one(tmp_path, monkeypatch):
+    phrase = {"mode": "passphrase", "passphrase": "a passphrase never used"}
+    answer, made, before, after = _setup(tmp_path / "encrypted", monkeypatch, phrase, stores=["auth.db"], encrypt=True)
+    assert (answer["setup"], answer["key"], answer["detail"], answer["plaintext_stores"], answer["wrapped"]) == (
+        True, "existing", "Encryption enabled with the existing key", 0, None), answer
+    assert not made and before is not None and after == before, "no key made, the key file as it was"
+    environment = [("OPTI_ENCRYPTION_KEY", base64.urlsafe_b64encode(os.urandom(32)).decode("ascii"))]
+    answer, made, _, after = _setup(tmp_path / "environment", monkeypatch, {"mode": "random"}, env=environment,
+                                    stores=["auth.db"])
+    assert (answer["key"], answer["plaintext_stores"], made, after) == ("existing", 1, False, None), (
+        "the environment's key taken, the store it leaves unopenable counted", answer)
+    answer, made, _, after = _setup(tmp_path / "fresh", monkeypatch, {"mode": "random"})
+    assert (answer["key"], answer["wrapped"], answer["plaintext_stores"], made) == ("made", False, 0, True), answer
+    answer, *_ = _setup(tmp_path / "phrased", monkeypatch, {"mode": "random"},
+                        env=[("OPTI_KEYFILE_PASSPHRASE", "the server's own passphrase")])
+    assert (answer["key"], answer["wrapped"]) == ("made", True), ("wrapped under the server's passphrase", answer)
+    answer, *_ = _setup(tmp_path / "typed", monkeypatch, {"mode": "passphrase", "passphrase": "a typed passphrase"})
+    assert (answer["key"], answer["wrapped"]) == ("made", True), ("wrapped under the typed passphrase", answer)
+
+
+# ---------------------------------------------------------------------------
+# SE15 -- a folder of stores that cannot be read refuses the run; a linked one is followed
+# ---------------------------------------------------------------------------
+def test_se15_a_folder_of_stores_that_cannot_be_read_refuses_and_a_linked_one_is_followed(tmp_path, monkeypatch,
+                                                                                            capsys):
+    world = _window(tmp_path, monkeypatch)
+    locked = []
+
+    def lock(path, mode):
+        os.chmod(path, mode)
+        locked.append(path)
+
+    try:
+        dbe, (data, package) = world.dbe, world.places
+        _store(data / "auth.db", 2)
+        rag = package / "rag"
+        rag.mkdir()
+        _store(rag / "rag_documents.db", 2)
+        snapshot = _tree(data, world.keydir)
+        # Neither readable nor searchable; readable, not searchable: its stores out of sight either way.
+        for mode in (0, 0o600):
+            lock(rag, mode)
+            assert dbe.main(["check"]) == 0
+            assert f"{rag}: cannot be read: its stores are not checked, and encrypt refuses until it can" in (
+                capsys.readouterr().out), mode
+            assert dbe.main(["encrypt"]) == 1
+            refused = capsys.readouterr().err
+            assert f"{rag} cannot be read: the stores in it cannot be taken: nothing was changed" in refused, (
+                mode, refused)
+            assert _tree(data, world.keydir) == snapshot, ("nothing changed", mode)
+        os.chmod(rag, 0o700)
+        # A place that cannot be read: said, never a trace.
+        lock(package, 0)
+        assert dbe.main(["check"]) == 0
+        assert f"{package}: cannot be read: its stores are not checked" in capsys.readouterr().out
+        assert dbe.main(["encrypt"]) == 1 and f"{package} cannot be read" in capsys.readouterr().err
+        os.chmod(package, 0o700)
+        # The sandbox's folder, read from its configuration, the same.
+        dbe._LONE_STORES, dbe._SANDBOX_DEFAULT = None, str(tmp_path / "default-base")
+        config = tmp_path / "sandbox.yaml"
+        config.write_text(f"workspace_base: {tmp_path / 'sandbox'}\n", encoding="utf-8")
+        dbe._SANDBOX_CONFIG = config
+        (tmp_path / "sandbox").mkdir()
+        _store(tmp_path / "sandbox" / "sandbox_audit.db", 1)
+        lock(tmp_path / "sandbox", 0)
+        assert dbe.main(["encrypt"]) == 1
+        assert f"{tmp_path / 'sandbox'} cannot be read" in capsys.readouterr().err
+        assert _tree(data, world.keydir) == snapshot, "nothing changed"
+        os.chmod(tmp_path / "sandbox", 0o700)
+        dbe._LONE_STORES = []
+        # A store folder that is a symbolic link -- a knowledge base on another disk -- is followed, as its stores are.
+        elsewhere = tmp_path / "other-disk" / "rag"
+        elsewhere.mkdir(parents=True)
+        shutil.move(str(rag / "rag_documents.db"), str(elsewhere / "rag_documents.db"))
+        rag.rmdir()
+        os.symlink(elsewhere, rag)
+        (elsewhere / "chroma_db").mkdir()
+        _store(elsewhere / "chroma_db" / "chroma.sqlite3", 1)
+        (elsewhere / "archive").mkdir()
+        _store(elsewhere / "archive" / "old.db", 1)
+        chroma = rag / "chroma_db" / "chroma.sqlite3"
+        assert dbe.plaintext_others() == [chroma], dbe.plaintext_others()
+        assert dbe.unchecked_entries() == [], ("the store folder is no link left unchecked", dbe.unchecked_entries())
+        assert dbe.other_databases() == [rag / "archive" / "old.db"], ("a *.db below it named", dbe.other_databases())
+        # RAG_HOME at the link's real target: the same folder, walked once, its stores never said as others.
+        monkeypatch.setenv("RAG_HOME", str(elsewhere))
+        assert dbe.plaintext_others() == [chroma], dbe.plaintext_others()
+        assert dbe.main(["encrypt"]) == 0
+        said = capsys.readouterr().out
+        assert "2 store(s) encrypted" in said and f"{rag}: not checked" not in said, said
+        assert said.count(": a ChromaDB vector store") == 1 and "rag_documents.db: a database in plaintext" not in said, (
+            said)
+        assert (elsewhere / "rag_documents.db").read_bytes()[:16] != _PLAIN, "encrypted through the link"
+        assert f"{chroma}: a ChromaDB vector store" in said, said
+        assert dbe.main(["check"]) == 0
+        said = capsys.readouterr().out
+        assert "a database in plaintext that is no store" not in said, ("the plaintext copy never said as another", said)
+    finally:
+        for path in locked:
+            if os.path.lexists(path):
+                os.chmod(path, 0o700)
+        world.restore()
+    # A store folder linked to another folder of its own place: one store, never said as another database.
+    sibling = tmp_path / "sibling"
+    sibling.mkdir()
+    world = _window(sibling, monkeypatch)
+    try:
+        package = world.places[1]
+        (package / "rag-2026" / "sub").mkdir(parents=True)
+        _store(package / "rag-2026" / "rag_documents.db", 2)
+        _store(package / "rag-2026" / "sub" / "old.db", 1)
+        os.symlink(package / "rag-2026", package / "rag")
+        assert world.dbe.other_databases() == [package / "rag-2026" / "sub" / "old.db"], world.dbe.other_databases()
+        world.dbe.encrypt_all_stores()
+        assert world.dbe.other_databases() == [package / "rag-2026" / "sub" / "old.db"], (
+            "the plaintext copy, kept under the folder's other name, never said as another database",
+            world.dbe.other_databases())
+    finally:
+        world.restore()
+
+
+# ---------------------------------------------------------------------------
+# SE16 -- a key variable that is no key refuses, in the command and in the server
+# ---------------------------------------------------------------------------
+def test_se16_an_environment_key_that_is_no_key_is_refused_never_passed_over(tmp_path, monkeypatch, capsys):
+    hexadecimal = "ab" * 32  # what `openssl rand -hex 32` prints: 48 bytes once decoded, no key
+    world = _window(tmp_path, monkeypatch)
+    try:
+        data = world.places[0]
+        _store(data / "auth.db", 2)
+        monkeypatch.setenv("OPTI_ENCRYPTION_KEY", hexadecimal)
+        snapshot = _tree(data, world.keydir)
+        assert world.dbe.main(["encrypt"]) == 1
+        refused = capsys.readouterr().err
+        assert ("OPTI_ENCRYPTION_KEY is set and is no key the platform reads (32 bytes, base64-encoded with its "
+                "padding: 44 characters ending in a single '=')") in refused, refused
+        assert _tree(data, world.keydir) == snapshot and not world.keyfile.exists(), "no key file made, nothing moved"
+        assert world.dbe.main(["check"]) == 0
+        assert "key: OPTI_ENCRYPTION_KEY is set and is no key" in capsys.readouterr().out
+        # Even with a key file that loads, the variable is never passed over in silence.
+        monkeypatch.delenv("OPTI_ENCRYPTION_KEY")
+        world.dbe.encrypt_all_stores()
+        monkeypatch.setenv("OPTI_ENCRYPTION_KEY", hexadecimal)
+        assert world.dbe.main(["encrypt"]) == 1 and "is no key" in capsys.readouterr().err
+        # check reads the stores as the platform does, under the key file it passes over to.
+        assert world.dbe.main(["check"]) == 0
+        said = capsys.readouterr().out
+        assert "meanwhile the platform passes over it to the key file, which loads" in said and (
+            f"{data / 'auth.db'}: encrypted" in said) and "a key loads" in said, said
+    finally:
+        world.restore()
+    # Behind the variable, a key file wrapped under a passphrase this shell does not carry: both are said.
+    wrapped = tmp_path / "wrapped"
+    wrapped.mkdir()
+    world = _window(wrapped, monkeypatch)
+    try:
+        _store(world.places[0] / "auth.db", 2)
+        monkeypatch.setenv("OPTI_KEYFILE_PASSPHRASE", "a passphrase of this contract")
+        world.dbe.encrypt_all_stores()
+        monkeypatch.delenv("OPTI_KEYFILE_PASSPHRASE")
+        monkeypatch.setenv("OPTI_ENCRYPTION_KEY", hexadecimal)
+        assert world.dbe.main(["check"]) == 0
+        said = capsys.readouterr().out
+        assert ("the key file it passes over to does not load here either (if it is wrapped under a passphrase, set "
+                "OPTI_KEYFILE_PASSPHRASE)") in said, said
+    finally:
+        world.restore()
+    server = tmp_path / "server"
+    server.mkdir()
+    world = _window(server, monkeypatch, routes=True)
+    try:
+        monkeypatch.setenv("OPTI_ENCRYPTION_KEY", hexadecimal)
+        config = world.config.read_bytes()
+        with pytest.raises(world.routes.HTTPException) as refused:
+            world.routes.setup_encryption(world.routes.EncryptionSetupRequest(mode="random"))
+        assert refused.value.status_code == 409 and "OPTI_ENCRYPTION_KEY is set" in refused.value.detail, (
+            refused.value.detail)
+        assert not world.keyfile.exists() and world.config.read_bytes() == config, "no key made, nothing saved"
     finally:
         world.restore()

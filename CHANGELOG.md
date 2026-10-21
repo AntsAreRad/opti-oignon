@@ -39,6 +39,41 @@ package costs.
   them and every folder of plaintext copies; `encrypt` names those an
   earlier run left too; the status route counts the databases of both
   directories.
+- [SECURITY] `check` and `encrypt` name every file below the data
+  directories that begins as a plaintext SQLite database and that they do
+  not encrypt -- ChromaDB's vector stores among them --, and every such
+  file below `RAG_HOME`, so neither lets the platform's data pass for
+  encrypted while part of it is not; they name what they could not check,
+  a symbolic link never followed or an entry they could not read, and
+  `check` names what an interrupted run left. `encrypt` refuses, changing
+  nothing, when a directory of databases cannot be read, and when the
+  sandbox's audit log is configured relative to wherever the platform
+  starts or lies at the manager's default path while its configuration
+  names another; it takes the log where the manager opens it, and follows
+  a knowledge-base folder that is a symbolic link. A contract holds every
+  binding of a directory of databases made in a module or a class to be a
+  place of the command that no environment variable moves.
+- [SECURITY] An `OPTI_ENCRYPTION_KEY` that is set and is no key is refused
+  by the offline command and by setup (409). The command used to write a
+  new key file under it and say the key was the variable's, so the copy a
+  user kept was not the key the databases were encrypted with.
+- [SECURITY] The key setup of the security settings says what the server
+  did. With a key here -- a key file, or `OPTI_ENCRYPTION_KEY` -- it
+  offers only to enable it, asking for no passphrase, the server saying
+  why when it cannot open it; a success says whether the key was the one
+  already here or made, where, whether its key file is wrapped and under
+  which passphrase, and how many databases are still kept in plaintext,
+  with the command that encrypts them; a refusal shows the server's
+  reason, not "API error 409"; it no longer claims that a passphrase
+  recovers the data without the key file, which holds the passphrase's
+  salt, and its success message shows at last -- it sat in a block hidden
+  once encryption is active. The setup route's answer names the key
+  (`key`: `existing` or `made`), whether the key file it made is wrapped
+  (`wrapped`), and the databases still kept in plaintext
+  (`plaintext_stores`).
+- What a run of the database encryption killed outright leaves -- an
+  encrypted copy, a second name for a database's plaintext, a key file's
+  temp -- is ignored by git.
 - The machine names where its onion is kept. `local.yaml` beside
   `onion.yaml` takes `onion: {persistence: {path: "onion.db"}}`, a file
   under the data directory, so turning persistence on changes no tracked

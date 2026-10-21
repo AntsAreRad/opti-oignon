@@ -585,6 +585,14 @@ _KEYFILE_REFUSAL = (
     "under a passphrase, set OPTI_KEYFILE_PASSPHRASE in the server's "
     "environment and restart the server). Setup never replaces a key file."
 )
+_ENVIRONMENT_KEY_REFUSAL = (
+    "OPTI_ENCRYPTION_KEY is set in the server's environment and is no key the "
+    "platform reads (32 bytes, base64-encoded with its padding: 44 characters "
+    "ending in a single '='): the platform passes over it to the key file. "
+    "Unset it, or set it to "
+    "the key the databases are encrypted with, and restart the server. Setup "
+    "makes no key while it is set."
+)
 _PLAINTEXT_REFUSAL = (
     "{count} database(s) of the platform are kept in plaintext, and a key made "
     "now would leave each of them unreadable. Stop the platform and run: "
@@ -600,6 +608,16 @@ def _plaintext_stores() -> list:
     return plaintext_stores()
 
 
+def _environment_key_loads() -> bool:
+    """Whether OPTI_ENCRYPTION_KEY decodes to a key: base64url, 32 bytes."""
+    import base64
+
+    try:
+        return len(base64.urlsafe_b64decode(os.environ.get("OPTI_ENCRYPTION_KEY", ""))) == 32
+    except (ValueError, TypeError):
+        return False
+
+
 @router.post("/encryption/setup")
 def setup_encryption(req: EncryptionSetupRequest) -> dict:
     """Initialize data-at-rest encryption, never replacing a key file.
@@ -607,11 +625,16 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
     A key that already loads (OPTI_ENCRYPTION_KEY, or the keyfile) is
     enabled as it is and no keyfile is written. Anything at the keyfile's
     path that does not open in this server, a symbolic link included, is
-    refused with 409, and so is making a key while a store of the platform
-    is kept in plaintext: that store would no longer open. Otherwise a key
-    is made and saved to a new keyfile:
-    use mode='random' for an auto-generated key, or mode='passphrase' with
-    a user-provided passphrase for a derived key.
+    refused with 409; so is an OPTI_ENCRYPTION_KEY that is set and is no
+    key, and so is making a key while a store of the platform is kept in
+    plaintext: that store would no longer open. Otherwise a key is made and
+    saved to a new keyfile: use mode='random' for an auto-generated key, or
+    mode='passphrase' with a user-provided passphrase for a derived key.
+
+    The answer's ``key`` says which: "existing" (the passphrase of a request
+    is then not used) or "made"; ``wrapped``, whether the key file it made
+    is wrapped under a passphrase (None when it made none);
+    ``plaintext_stores``, how many stores are still kept in plaintext.
     """
     try:
         from opti_oignon.encryption import (
@@ -649,8 +672,12 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
     # A key that loads here is the one the databases are keyed by, and a key
     # file that does not open here may be: a new key would leave them
     # unreadable.
+    wrapped = None
+    if os.environ.get("OPTI_ENCRYPTION_KEY") and not _environment_key_loads():
+        raise HTTPException(status_code=409, detail=_ENVIRONMENT_KEY_REFUSAL)
     if mgr.enable_with_existing_key():
         detail = "Encryption enabled with the existing key"
+        key = "existing"
     elif keyfile_present():
         raise HTTPException(status_code=409, detail=_KEYFILE_REFUSAL)
     else:
@@ -671,7 +698,12 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
                 detail="Encryption setup failed. Check server logs.",
             )
         detail = "Encryption configured successfully"
+        key = "made"
+        # Setup wraps the key file it makes under the passphrase given, or under OPTI_KEYFILE_PASSPHRASE.
+        wrapped = req.mode == "passphrase" or bool(os.environ.get("OPTI_KEYFILE_PASSPHRASE"))
 
+    # Counted before security.yaml is saved, so a count that fails leaves the configuration as it was.
+    still_plain = len(_plaintext_stores())
     # Enable in config
     current = _load_security_yaml()
     current.setdefault("encryption", {})["enabled"] = True
@@ -687,6 +719,10 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
     return {
         "setup": True,
         "detail": detail,
+        "key": key,
+        # Under a key that loads, a store kept in plaintext does not open: the offline command encrypts it.
+        "plaintext_stores": still_plain,
+        "wrapped": wrapped,
         "status": mgr.get_status(),
     }
 

@@ -93,7 +93,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 			{ id: 'recovery-codes', title: 'Recovery codes', description: 'One-time backup codes for account recovery.', synonyms: ['backup codes', 'lockout'], panel: 'RecoveryCodesPanel', space: 'use', section: 'account' },
 			{ id: 'app-passwords', title: 'App passwords', description: 'Scoped credentials for programmatic access.', synonyms: ['api', 'token', 'cli'], panel: 'AppPasswordsPanel', space: 'use', section: 'account' },
 			{ id: 'hardening', title: 'Hardening', description: 'Security headers and runtime hardening switches.', synonyms: ['csp', 'headers', 'samesite'], panel: 'HardeningPanel', space: 'workshop', section: 'security' },
-			{ id: 'key-ceremony', title: 'Key ceremony', description: 'Encryption key generation and rotation ceremony.', synonyms: ['encryption', 'rotation', 'sqlcipher'], panel: 'KeyCeremonyPanel', space: 'workshop', section: 'security' },
+			{ id: 'key-ceremony', title: 'Key ceremony', description: 'Encryption key setup: enable the key in place, or make one.', synonyms: ['encryption', 'key file', 'sqlcipher'], panel: 'KeyCeremonyPanel', space: 'workshop', section: 'security' },
 			{ id: 'audit-chain', title: 'Audit chain', description: 'Tamper-evident hash-chained audit log viewer.', synonyms: ['audit', 'log', 'events', 'tamper'], panel: 'AuditChainPanel', space: 'workshop', section: 'security' }
 		]
 	},

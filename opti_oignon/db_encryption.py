@@ -34,6 +34,7 @@ SQLCipher.  An attacker with the key can always read the data
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import logging
 import os
@@ -422,6 +423,15 @@ _STORE_FOLDERS = ("rag",)
 _SIDECARS = ("-wal", "-shm", "-journal")
 # How every SQLite file no cipher wrote begins.
 _PLAIN_HEADER = b"SQLite format 3\x00"
+# The database ChromaDB keeps in each of its folders, beside its index: in plaintext, as all it keeps.
+_CHROMA_FILE = "chroma.sqlite3"
+# The environment variables the platform reads a data directory from. When one is set, the command looks below
+# it too for what stays in plaintext there: RAG_HOME moves the knowledge base's ChromaDB.
+_FOLLOWED = ("RAG_HOME",)
+# What an interrupted run leaves beside a store, named by ``_leftovers``: never said as anything else.
+_LEFT_BESIDE = (".db.restoring", ".db.encrypting")
+# How many entries the command names in a list before it counts the rest.
+_SAID_AT_MOST = 10
 # The command that encrypts every store, the platform stopped.
 ENCRYPT_COMMAND = "python3 -m opti_oignon.db_encryption encrypt"
 # Where the system shows each process's command line and open files.
@@ -431,6 +441,7 @@ _ENDING = ("SIGTERM", "SIGHUP", "SIGINT")
 # Where the sandbox keeps its audit log when its configuration names no place.
 _SANDBOX_CONFIG = Path(__file__).resolve().parent / "config" / "sandbox.yaml"
 _SANDBOX_DEFAULT = "/tmp/opti-oignon-sandboxes"
+_SANDBOX_LOG = "sandbox_audit.db"
 
 
 class EncryptionRefused(RuntimeError):
@@ -452,26 +463,100 @@ def _places() -> tuple:
     return (_DATA_DIR, package / "data") if _STORE_PLACES is None else tuple(Path(p) for p in _STORE_PLACES)
 
 
-def _lone_stores() -> list:
-    """The stores outside the places that hold something: the sandbox's audit log, where ``config/sandbox.yaml``
-    puts it; or the ones a contract set."""
+def _lone_store_paths() -> list:
+    """Where the stores outside the places are, whether they hold anything or not: the sandbox's audit log, where its
+    manager opens it -- ``audit_db_path`` joined to ``workspace_base``, each read from ``config/sandbox.yaml`` or
+    the manager's default --, when that path is absolute; or the ones a contract set. Nothing of the sandbox is
+    read. The manager is never imported here: its import builds the manager, which makes the sandbox's folders."""
     if _LONE_STORES is not None:
-        paths = [Path(p) for p in _LONE_STORES]
-    else:
-        try:
-            import yaml
+        return [Path(p) for p in _LONE_STORES]
+    configured = _sandbox_logs()[0]
+    return [Path(configured)] if os.path.isabs(configured) else []
 
-            raw = yaml.safe_load(_SANDBOX_CONFIG.read_text(encoding="utf-8")) or {}
-        except Exception:  # noqa: BLE001 - a configuration that does not read leaves the sandbox's own defaults
-            raw = {}
-        raw = raw if isinstance(raw, dict) else {}
-        name = Path(str(raw.get("audit_db_path") or "sandbox_audit.db"))
-        paths = [name if name.is_absolute() else Path(str(raw.get("workspace_base") or _SANDBOX_DEFAULT)) / name]
-    return [path for path in paths if path.is_symlink() or (path.is_file() and path.stat().st_size > 0)]
+
+def _sandbox_logs() -> tuple:
+    """(configured, default): where the sandbox's manager opens its audit log -- ``audit_db_path`` joined to
+    ``workspace_base`` as ``config/sandbox.yaml`` gives them --, and where it opens it when a value of its
+    configuration does not build: its defaults. A path that is not absolute lies below whatever directory the
+    platform starts in."""
+    try:
+        import yaml
+
+        raw = yaml.safe_load(_SANDBOX_CONFIG.read_text(encoding="utf-8")) or {}
+    except Exception:  # noqa: BLE001 - a configuration that does not read leaves the sandbox's own defaults
+        raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    configured = os.path.join(str(raw.get("workspace_base") or _SANDBOX_DEFAULT),
+                              str(raw.get("audit_db_path") or _SANDBOX_LOG))
+    return configured, os.path.join(_SANDBOX_DEFAULT, _SANDBOX_LOG)
+
+
+def _sandbox_problems() -> list:
+    """What keeps the command from taking the sandbox's audit log, each with what to do: a log configured below
+    whatever directory the platform starts in, which the command cannot find; a log at the manager's default
+    path while the configuration names another, which the manager opens only when its configuration does not
+    build -- taken by neither, as anyone may make that path under /tmp. None when a contract set the stores."""
+    if _LONE_STORES is not None:
+        return []
+    configured, default = _sandbox_logs()
+    problems = []
+    if not os.path.isabs(configured):
+        problems.append(f"the sandbox's audit log is configured below whatever directory the platform starts in "
+                        f"({configured}): set an absolute workspace_base in config/sandbox.yaml")
+    # A relative log lies below wherever the platform starts, which is not known here: never resolved from here.
+    elsewhere = not os.path.isabs(configured) or os.path.realpath(default) != os.path.realpath(configured)
+    if elsewhere and _holds_something(Path(default)):
+        problems.append(f"{default} holds a sandbox audit log at the manager's default path while its configuration "
+                        f"names {configured}: the manager opens it only when its configuration does not build; "
+                        + _sandbox_advice(configured))
+    return problems
+
+
+def _sandbox_advice(configured: str) -> str:
+    """What to do with a log at the manager's default path, by what the command can see of the configured one:
+    there, so this one is stale; not there, so it may move; or not to be looked at -- relative, or its folder not
+    searchable --, so nothing is said of it and nothing is moved before looking."""
+    folder = os.path.dirname(configured)
+    if not os.path.isabs(configured) or (os.path.lexists(folder) and not os.access(folder, os.X_OK)):
+        return "where the configured log lies cannot be looked at from here: look at both before moving anything"
+    if _holds_something(Path(configured)):
+        return "the configured log is there too, so this one is stale: keep what you need of it, then delete it"
+    return "move it there, as no log is there yet"
+
+
+def _unreadable_dirs(places: Any) -> list:
+    """The directories the stores are taken from that are there and cannot be read or searched: a place, a store
+    folder, the folder of a store outside the places. Their stores could not be taken, so no run is done."""
+    dirs = [Path(folder) for folder in _store_dirs(places)]
+    if places is None:
+        dirs += [path.parent for path in _lone_store_paths() if path.parent not in dirs]
+    unreadable = []
+    for folder in dirs:
+        try:
+            if not os.path.lexists(folder):
+                continue
+            # Its names read, and its files looked at: both, or its stores stay out of sight.
+            if not os.access(folder, os.R_OK | os.X_OK):
+                unreadable.append(folder)
+                continue
+            os.listdir(folder)
+        except OSError:
+            unreadable.append(folder)
+    return unreadable
+
+
+def _lone_stores() -> list:
+    """The stores outside the places that hold something (``_lone_store_paths``)."""
+    return [path for path in _lone_store_paths() if _holds_something(path)]
 
 
 def _holds_something(path: Path) -> bool:
-    return path.is_symlink() or (path.is_file() and path.stat().st_size > 0)
+    """Whether ``path`` is a symbolic link, or a file that holds something; False when it cannot be looked at
+    (``_unreadable_dirs`` says the folder)."""
+    try:
+        return path.is_symlink() or (path.is_file() and path.stat().st_size > 0)
+    except OSError:
+        return False
 
 
 def store_files(places: Any = None) -> list[Path]:
@@ -493,14 +578,161 @@ def other_databases(places: Any = None) -> list[Path]:
     """The ``*.db`` files below the places that hold something and are no store this command takes -- a plugin's
     own, read in plaintext by its plugin; a file a user added to a project --, the folders of plaintext copies
     aside: said, and left as they are."""
-    taken = set(store_files(places))
+    taken = {os.path.realpath(path) for path in store_files(places)}
+    beside = {os.path.realpath(folder) for folder in _store_dirs(places)}
     others: list[Path] = []
-    for place in _places() if places is None else places:
-        place = Path(place)
-        if place.is_dir():
-            others += [path for path in sorted(place.rglob("*.db")) if path not in taken and _holds_something(path)
-                       and not any(part.startswith("plaintext-") for part in path.relative_to(place).parts[:-1])]
+    seen: set = set()
+    for root in _walk_roots(places):
+        if os.path.isdir(root):
+            for path in sorted(root.rglob("*.db")):
+                real = os.path.realpath(path)
+                if real not in taken and real not in seen and _holds_something(path) and not _in_kept_folder(
+                        Path(real), beside):
+                    seen.add(real)
+                    others.append(path)
     return others
+
+
+def _walk_roots(places: Any) -> list:
+    """The places, then each store folder that is a symbolic link to a directory: walked from its own top, as
+    its stores are taken through it and a walk of the place never follows a link."""
+    places = [Path(place) for place in (_places() if places is None else places)]
+    return places + [place / folder for place in places for folder in _STORE_FOLDERS
+                     if os.path.islink(place / folder) and os.path.isdir(place / folder)]
+
+
+def _in_kept_folder(path: Path, beside: set) -> bool:
+    """Whether ``path``, a real path, lies in a folder of plaintext copies a run kept beside the stores, whose
+    real paths are ``beside``."""
+    return any(folder.name.startswith("plaintext-") and str(folder.parent) in beside for folder in path.parents)
+
+
+def plaintext_others(places: Any = None) -> list[Path]:
+    """The files below the places that begin as a SQLite file no cipher wrote and are neither a ``*.db`` nor what an
+    interrupted run left (``other_databases`` and ``_leftovers`` say those): a vector store's -- ChromaDB keeps its
+    texts and vectors in plaintext --, a database under another name. Said, never encrypted here (``_scan``)."""
+    return _scan(places)[0]
+
+
+def unchecked_entries(places: Any = None) -> list:
+    """What ``_scan`` could not check below the places, each with why: a symbolic link, never followed, or an entry
+    that could not be read."""
+    return _scan(places)[1]
+
+
+def _scan(places: Any) -> tuple:
+    """(``plaintext_others``, ``unchecked_entries``), in one walk of the places -- each store folder followed even
+    when it is a symbolic link, as the stores are taken through it -- and, when the places are the platform's own,
+    of each directory an absolute ``_FOLLOWED`` variable names, where a ``*.db`` is no store and is named too. A
+    followed directory that is, by its real path, a place, a store folder or below one is no new root, and a walk
+    from one above a place never enters it again. The folders of plaintext copies beside the stores are passed over;
+    a folder of that name anywhere else is walked. Only regular files are read; each file is said once; what cannot
+    be looked at is said, never raised (``_unreadable_dirs`` says a folder of stores)."""
+    own = places is None
+    beside = set(_store_dirs(places))
+    places = [Path(place) for place in (_places() if own else places)]
+    walked = [os.path.realpath(root) for root in _walk_roots(places)]
+
+    def taken(path: Path) -> bool:
+        real = os.path.realpath(path)
+        return any(real == root or real.startswith(root.rstrip(os.sep) + os.sep) for root in walked)
+
+    roots = [(root, False) for root in _walk_roots(places)]
+    roots += [(path, True) for path in (_followed_dirs() if own else []) if not taken(path)]
+    reached = {os.path.realpath(root) for root, followed in roots if followed}
+    found: list = []
+    unchecked: list = []
+    for root, followed in roots:
+        try:
+            os.stat(root)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            # A followed directory that cannot be looked at is said; a place, ``_unreadable_dirs`` says.
+            unchecked += [(root, "could not be read")] if followed else []
+            continue
+        if not os.path.isdir(root) or not (followed or os.access(root, os.R_OK | os.X_OK)):
+            continue
+        for top, dirs, files in os.walk(root, onerror=lambda error: unchecked.append(
+                (Path(error.filename), "could not be read"))):
+            here = Path(top)
+            links = [name for name in sorted(dirs) if os.path.islink(here / name)]
+            # A link is said unless what it leads to is walked anyway: a store folder, a place, a followed directory.
+            unchecked += [(here / name, "a symbolic link, never followed") for name in links
+                          if not (here in places and name in _STORE_FOLDERS) and not taken(here / name)
+                          and os.path.realpath(here / name) not in reached]
+            # A folder of stores that cannot be read is said by ``_unreadable_dirs``, never twice.
+            dirs[:] = sorted(name for name in dirs if name not in links and not (followed and taken(here / name))
+                             and not (here in beside and name.startswith("plaintext-"))
+                             and not (here / name in beside and not os.access(here / name, os.R_OK | os.X_OK)))
+            for name in sorted(files):
+                if name.endswith(_LEFT_BESIDE) or (name.endswith(".db") and not followed):
+                    continue
+                state = _plain_regular(here / name)
+                if state is None:
+                    unchecked.append((here / name, "a symbolic link, never followed"
+                                      if os.path.islink(here / name) else "could not be read"))
+                elif state:
+                    found.append(here / name)
+    return list(dict.fromkeys(found)), list(dict.fromkeys(unchecked))
+
+
+def _followed_dirs() -> list:
+    """The absolute directories a ``_FOLLOWED`` variable moves the platform's data to; a relative one is said by
+    ``check``, never walked."""
+    return [Path(os.environ[name]) for name in _FOLLOWED
+            if os.environ.get(name) and Path(os.environ[name]).is_absolute()]
+
+
+def _relative_followed() -> list:
+    """The ``_FOLLOWED`` variables set to a relative path, each with its value: below whatever directory the
+    platform starts in, never walked here."""
+    return [(name, os.environ[name]) for name in _FOLLOWED
+            if os.environ.get(name) and not Path(os.environ[name]).is_absolute()]
+
+
+def _plain_regular(path: Path) -> Any:
+    """Whether ``path`` begins as a SQLite file no cipher wrote: True or False for a regular file read, False for
+    what is no regular file nor a link (a pipe is never opened) or is gone, None for a symbolic link -- never
+    followed -- or a file that could not be read."""
+    try:
+        mode = os.lstat(path).st_mode
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None
+    if stat.S_ISLNK(mode):
+        return None
+    if not stat.S_ISREG(mode):
+        return False
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return None
+    try:
+        return os.read(fd, len(_PLAIN_HEADER)) == _PLAIN_HEADER
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+
+
+def _say_unchecked(unchecked: list) -> None:
+    """Say what could not be checked below the places, the first ``_SAID_AT_MOST`` by name."""
+    for path, why in unchecked[:_SAID_AT_MOST]:
+        print(f"{path}: not checked, {why}")
+    if len(unchecked) > _SAID_AT_MOST:
+        print(f"{len(unchecked) - _SAID_AT_MOST} more entries below the places not checked")
+
+
+def _plaintext_said(path: Path) -> str:
+    """The line that says a file of ``plaintext_others``."""
+    if path.name == _CHROMA_FILE:
+        return (f"{path}: a ChromaDB vector store, its texts and vectors in plaintext: ChromaDB has no encryption at "
+                "rest, and this command does not encrypt it")
+    return f"{path}: a database in plaintext that is no store of the platform: this command does not encrypt it"
 
 
 def _store_dirs(places: Any) -> list:
@@ -716,6 +948,9 @@ def _loaded_key() -> Any:
     none does. A key file that does not load here is refused by name: it is never replaced."""
     from opti_oignon import encryption
 
+    refused = _environment_key_refused()
+    if refused is not None:
+        raise refused
     if encryption.get_encryption_key() is None:
         if encryption.keyfile_present():
             raise EncryptionRefused("a key file exists and does not load here (if it is wrapped under a passphrase, "
@@ -725,6 +960,38 @@ def _loaded_key() -> Any:
     if key is None:
         raise EncryptionRefused("the master key that loads gives no database key: nothing was changed")
     return key
+
+
+def _environment_key_refused() -> Any:
+    """The refusal of an OPTI_ENCRYPTION_KEY that is set and is no key -- a base64url-encoded 32-byte key --, or
+    None. The platform passes over such a variable to the key file, so the stores would be keyed by another key
+    than the one the variable seems to set, and the command would say the key is the variable's."""
+    from opti_oignon import encryption
+
+    value = os.environ.get(encryption._ENV_KEY_NAME)
+    if not value:
+        return None
+    try:
+        if len(base64.urlsafe_b64decode(value)) == encryption._KEY_SIZE:
+            return None
+    except (ValueError, TypeError):
+        pass
+    return EncryptionRefused("OPTI_ENCRYPTION_KEY is set and is no key the platform reads (32 bytes, base64-encoded "
+                             "with its padding: 44 characters ending in a single '='): unset it, or set it to the "
+                             "key the stores are encrypted with: nothing was changed")
+
+
+def _key_file_key() -> Any:
+    """The databases' key from the key file alone, or None: what the platform opens the stores with when it passes
+    over an OPTI_ENCRYPTION_KEY that is no key."""
+    from opti_oignon import encryption
+
+    try:
+        master, _salt, _kdf = encryption.load_keyfile()
+    except Exception:  # noqa: BLE001 - a key file that does not load gives no key
+        return None
+    raw = master.as_bytes() if hasattr(master, "as_bytes") else master
+    return _db_key(raw) if raw and len(raw) == encryption._KEY_SIZE else None
 
 
 def _write_master(master: bytes, key: bytes) -> None:
@@ -1022,8 +1289,16 @@ def _encrypt(places: Any, proc: Any, noted: list) -> dict[str, Any]:
     if left:
         raise EncryptionRefused("an interrupted run left " + "; ".join(left) + "; then run the command again: "
                                 "nothing was changed")
+    unreadable = _unreadable_dirs(places)
+    if unreadable:
+        raise EncryptionRefused(", ".join(str(folder) for folder in unreadable) + " cannot be read: the stores in "
+                                "it cannot be taken: nothing was changed")
+    problems = _sandbox_problems() if places is None else []
+    if problems:
+        raise EncryptionRefused("; ".join(problems) + "; then run the command again: nothing was changed")
     earlier = plaintext_folders(places)
     alone = [str(path) for path in other_databases(places)]
+    others, unchecked = _scan(places)
     held = store_holders(stores, proc=proc)
     if held:
         raise EncryptionRefused("stop every process of the platform first: " + "; ".join(
@@ -1131,6 +1406,8 @@ def _encrypt(places: Any, proc: Any, noted: list) -> dict[str, Any]:
         "key_path": "" if os.environ.get("OPTI_ENCRYPTION_KEY") else str(_key_file()),
         "places": [str(place) for place in (_places() if places is None else places)],
         "left": alone,
+        "plaintext_others": [str(path) for path in others],
+        "unchecked": [[str(path), why] for path, why in unchecked],
         "unsynced": unsynced,
         "signal": noted[0] if noted else None,
     }
@@ -1158,14 +1435,25 @@ def main(argv: Any = None) -> int:
                                                  "stopped.")
     parser.add_argument("action", choices=("check", "encrypt"))
     action = parser.parse_args(argv).action
+    for stream in (sys.stdout, sys.stderr):
+        # A file name the locale cannot write is said escaped, never a crash after the work is done.
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     if action == "check":
         print("places: " + ", ".join(str(place) for place in _places()))
         stores = store_files()
         try:
             key = _loaded_key() if SQLCIPHER_AVAILABLE else None
         except EncryptionRefused as exc:
-            key = None
-            print(f"key: {exc}")
+            # The platform passes over a key variable that is no key: the states are read as it reads them.
+            key = _key_file_key() if SQLCIPHER_AVAILABLE and _environment_key_refused() is not None else None
+            from opti_oignon import encryption
+
+            passed = ("; meanwhile the platform passes over it to the key file, which loads" if key else
+                      "; the key file it passes over to does not load here either (if it is wrapped under a "
+                      "passphrase, set OPTI_KEYFILE_PASSPHRASE)" if _environment_key_refused() is not None
+                      and encryption.keyfile_present() else "")
+            print(f"key: {exc}{passed}")
         for path in stores:
             state = ("a symbolic link" if path.is_symlink() else "plaintext" if _plain(path) else
                      "encrypted" if key is not None and _opens_under(path, key) else "unreadable here")
@@ -1177,8 +1465,20 @@ def main(argv: Any = None) -> int:
         else:
             for pid, why in sorted(held.items()):
                 print(f"process {pid} {why}")
+        for folder in _unreadable_dirs(None):
+            print(f"{folder}: cannot be read: its stores are not checked, and encrypt refuses until it can")
         for path in other_databases():
             print(f"{path}: no store of the platform, left as it is")
+        others, unchecked = _scan(None)
+        for path in others:
+            print(_plaintext_said(path))
+        _say_unchecked(unchecked)
+        for problem in _sandbox_problems():
+            print(f"sandbox: {problem}; encrypt refuses until then")
+        for name, value in _relative_followed():
+            print(f"{name} is {value}, below whatever directory the platform starts in: not checked")
+        for item in _leftovers(stores, None):
+            print(f"left by an interrupted run: {item}")
         for folder in plaintext_folders():
             print(f"plaintext copies kept in {folder}: delete it once the platform reads its stores again and the key "
                   "is kept safe elsewhere")
@@ -1212,6 +1512,11 @@ def main(argv: Any = None) -> int:
               "and the key is kept safe elsewhere")
     for path in done["left"]:
         print(f"{path}: no store of the platform, left as it is")
+    for path in done["plaintext_others"]:
+        print(_plaintext_said(Path(path)))
+    _say_unchecked([(Path(path), why) for path, why in done["unchecked"]])
+    for name, value in _relative_followed():
+        print(f"{name} is {value}, below whatever directory the platform starts in: not checked")
     for place in done["unsynced"]:
         print(f"{place} could not be synced to the disk: the switch stands; run sync before the next power cut")
     if done["signal"]:

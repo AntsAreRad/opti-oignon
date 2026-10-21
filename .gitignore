@@ -40,6 +40,10 @@ opti_oignon/data/*.db
 opti_oignon/data/*.db-wal
 opti_oignon/data/*.db-shm
 opti_oignon/data/*.db-journal
+# Left beside a store by a run of the store encryption killed outright: an encrypted copy, or a
+# second name for the store's plaintext. The next run names each.
+*.db.encrypting
+*.db.restoring
 # Plugins' private data folders: whatever a plugin keeps is the user's.
 opti_oignon/data/plugin_data/
 
@@ -63,6 +67,8 @@ data/redteam_results/
 
 # --- Master key material (keyfile mode, K-01): never commit or back up ---
 data/.keyfile
+# A temp of the key file, left only by a write killed outright: it may hold the key.
+data/..keyfile.tmp-*
 
 # --- ChromaDB vector persistence (may hold ingested personal documents) ---
 opti_oignon/data/project_chroma/

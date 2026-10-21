@@ -47,10 +47,19 @@ The heap the collection built is frozen before any contract runs, so a
 collector pass does not rescan it inside a contract and charge that
 contract a pause it did not cause (PH3 holds it).
 
+When it is imported, before any suite is collected or any child process
+started, it drops ``OPTI_ENCRYPTION_KEY`` and ``OPTI_KEYFILE_PASSPHRASE``
+from the environment, and ``RAG_HOME``, which moves the knowledge base to a
+directory the database encryption then reads: a key, a passphrase or a
+data directory the maintainer's shell carries to start the platform never
+reaches a contract, and a contract that wants one sets its own (SE13 holds
+it).
+
 Local-only (the public distribution ships no tests).
 """
 
 import gc
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -60,6 +69,10 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _data_firewall import REFUSED, DataFirewall  # noqa: E402
+
+# The key, the passphrase and the data directory a shell may carry to start the platform: never a contract's.
+for _name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME"):
+    os.environ.pop(_name, None)
 
 _PACKAGE = "opti_oignon"
 _FOUND = pytest.StashKey()
