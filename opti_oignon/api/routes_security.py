@@ -585,6 +585,19 @@ _KEYFILE_REFUSAL = (
     "under a passphrase, set OPTI_KEYFILE_PASSPHRASE in the server's "
     "environment and restart the server). Setup never replaces a key file."
 )
+_PLAINTEXT_REFUSAL = (
+    "{count} database(s) of the platform are kept in plaintext, and a key made "
+    "now would leave each of them unreadable. Stop the platform and run: "
+    "python3 -m opti_oignon.db_encryption encrypt -- it makes the key and "
+    "encrypts every database together."
+)
+
+
+def _plaintext_stores() -> list:
+    """The platform's stores kept in plaintext; none known when the database encryption layer is not here."""
+    if not DB_ENCRYPTION_AVAILABLE:
+        return []
+    return plaintext_stores()
 
 
 @router.post("/encryption/setup")
@@ -594,7 +607,9 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
     A key that already loads (OPTI_ENCRYPTION_KEY, or the keyfile) is
     enabled as it is and no keyfile is written. Anything at the keyfile's
     path that does not open in this server, a symbolic link included, is
-    refused with 409. Otherwise a key is made and saved to a new keyfile:
+    refused with 409, and so is making a key while a store of the platform
+    is kept in plaintext: that store would no longer open. Otherwise a key
+    is made and saved to a new keyfile:
     use mode='random' for an auto-generated key, or mode='passphrase' with
     a user-provided passphrase for a derived key.
     """
@@ -639,6 +654,10 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
     elif keyfile_present():
         raise HTTPException(status_code=409, detail=_KEYFILE_REFUSAL)
     else:
+        # A key made while a store stays in plaintext would leave that store unreadable.
+        plain = _plaintext_stores()
+        if plain:
+            raise HTTPException(status_code=409, detail=_PLAINTEXT_REFUSAL.format(count=len(plain)))
         try:
             if req.mode == "passphrase":
                 ok = mgr.setup_from_passphrase(req.passphrase)
@@ -1229,18 +1248,14 @@ async def verify_plugin_allowlist(plugin_id: str) -> dict[str, Any]:
 
 try:
     from opti_oignon.db_encryption import (
-        SQLCIPHER_AVAILABLE as _SQLCIPHER_OK,
-    )
-    from opti_oignon.db_encryption import (
+        ENCRYPT_COMMAND,
         encryption_status_summary,
         get_db_status,  # noqa: F401
-        migrate_all_databases,
-        migrate_db_to_encrypted,
+        plaintext_stores,
     )
     DB_ENCRYPTION_AVAILABLE = True
 except ImportError:
     DB_ENCRYPTION_AVAILABLE = False
-    _SQLCIPHER_OK = False
 
 
 class MigrateDBRequest(BaseModel):
@@ -1265,24 +1280,17 @@ async def get_db_encryption_status() -> dict[str, Any]:
 
 @router.post("/db-encryption/migrate")
 async def migrate_databases(body: MigrateDBRequest) -> dict[str, Any]:
-    """Migrate unencrypted databases to SQLCipher format."""
+    """Refused by name: the server holds its databases open, and a database moved under an open connection loses
+    what that connection writes next. They are encrypted together, the platform stopped, by the offline command."""
     if not DB_ENCRYPTION_AVAILABLE:
         raise HTTPException(
             status_code=503, detail="DB encryption module not available"
         )
-    if not _SQLCIPHER_OK:
-        raise HTTPException(
-            status_code=503,
-            detail="SQLCipher not installed. Install pysqlcipher3.",
-        )
-
-    if body.db_name:
-        from pathlib import Path
-        db_path = Path(__file__).resolve().parent.parent.parent / "data" / body.db_name
-        result = migrate_db_to_encrypted(db_path, backup=body.backup)
-        return result
-    else:
-        return migrate_all_databases(backup=body.backup)
+    raise HTTPException(
+        status_code=409,
+        detail=("The server holds its databases open and never moves one under its own connections. Stop the "
+                f"platform and run: {ENCRYPT_COMMAND}"),
+    )
 
 
 # =========================================================================

@@ -18,8 +18,14 @@ SQLCipher 4.x PRAGMAs applied:
   - ``PRAGMA cipher_hmac_algorithm = HMAC_SHA512``
   - ``PRAGMA kdf_iter = 256000``
 
-Migration: existing unencrypted DBs can be migrated in-place using
-``sqlcipher_export`` (ATTACH plain DB, export to encrypted, swap files).
+Migration: the stores kept in plaintext -- every ``*.db`` of the
+repository's data directory and of the package's -- are encrypted together,
+with the platform stopped, by ``python3 -m opti_oignon.db_encryption
+encrypt`` (``encrypt_all_stores``): all of them, or none, each encrypted
+copy proved before anything moves. ``check`` says the state of each store.
+A key made while a store stays in plaintext would leave that store
+unreadable, so the server makes none then, and moves no store under its
+own open connections.
 
 Security derives from the encryption key, not from the presence of
 SQLCipher.  An attacker with the key can always read the data
@@ -31,9 +37,10 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
-import shutil
 import sqlite3
-import tempfile
+import stat
+import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -178,17 +185,17 @@ def _get_db_encryption_key() -> bytes | None:
         if master_key:
             # Extract raw bytes if SecureBytes
             raw_key = master_key.as_bytes() if hasattr(master_key, "as_bytes") else master_key
-            # Derive DB subkey: HMAC-SHA256(master_key, "opti-oignon-sqlcipher-v1")
-            import hmac
-            subkey = hmac.new(
-                raw_key,
-                b"opti-oignon-sqlcipher-v1",
-                hashlib.sha256,
-            ).digest()
-            return subkey
+            return _db_key(raw_key)
     except Exception as exc:
         logger.debug("Failed to derive DB encryption key: %s", exc)
     return None
+
+
+def _db_key(master: bytes) -> bytes:
+    """The databases' key: HMAC-SHA256(master key, "opti-oignon-sqlcipher-v1"), apart from every other key."""
+    import hmac
+
+    return hmac.new(master, b"opti-oignon-sqlcipher-v1", hashlib.sha256).digest()
 
 
 def _key_to_hex_pragma(key: bytes) -> str:
@@ -326,100 +333,6 @@ def get_encrypted_connection(
 # Migration: unencrypted -> encrypted
 # ---------------------------------------------------------------------------
 
-def migrate_db_to_encrypted(
-    db_path: str | Path,
-    *,
-    backup: bool = True,
-) -> dict[str, Any]:
-    """Migrate an existing unencrypted DB to SQLCipher encryption.
-
-    Uses the sqlcipher_export extension: attaches the plain DB,
-    exports to a new encrypted DB, then swaps files.
-
-    Parameters
-    ----------
-    db_path : str or Path
-        Path to the unencrypted database.
-    backup : bool
-        If True, keep a .bak copy of the original.
-
-    Returns
-    -------
-    dict with keys: success, message, backup_path (if applicable)
-    """
-    db_path = Path(db_path).resolve()
-
-    if not db_path.exists():
-        return {"success": False, "message": f"Database not found: {db_path}"}
-
-    if not SQLCIPHER_AVAILABLE:
-        return {
-            "success": False,
-            "message": "SQLCipher not available. Install pysqlcipher3.",
-        }
-
-    key = _get_db_encryption_key()
-    if not key:
-        return {
-            "success": False,
-            "message": "No encryption key available. Run encryption setup first.",
-        }
-
-    # Check if already encrypted
-    if is_db_encrypted(db_path):
-        return {"success": True, "message": "Database is already encrypted"}
-
-    # Create encrypted copy
-    tmp_fd, tmp_path = tempfile.mkstemp(
-        suffix=".db", dir=str(db_path.parent)
-    )
-    os.close(tmp_fd)
-
-    try:
-        # Open the new encrypted DB
-        hex_key = _key_to_hex_pragma(key)
-        enc_conn = _sqlcipher_module.connect(tmp_path)
-        enc_conn.execute(f"PRAGMA key = {hex_key}")
-        enc_conn.execute(f"PRAGMA cipher_page_size = {_CIPHER_PAGE_SIZE}")
-        enc_conn.execute(f"PRAGMA cipher_hmac_algorithm = {_CIPHER_HMAC_ALGORITHM}")
-        enc_conn.execute(f"PRAGMA kdf_iter = {_KDF_ITER}")
-
-        # Attach the plain DB and export
-        enc_conn.execute(
-            f"ATTACH DATABASE '{db_path}' AS plaintext KEY ''"
-        )
-        enc_conn.execute("SELECT sqlcipher_export('main', 'plaintext')")
-        enc_conn.execute("DETACH DATABASE plaintext")
-        enc_conn.close()
-
-        # Backup original
-        backup_path = None
-        if backup:
-            backup_path = str(db_path) + ".bak"
-            shutil.copy2(str(db_path), backup_path)
-
-        # Swap files
-        shutil.move(tmp_path, str(db_path))
-
-        logger.info("Migrated %s to encrypted format", db_path)
-        result: dict[str, Any] = {
-            "success": True,
-            "message": f"Migrated {db_path.name} to encrypted format",
-        }
-        if backup_path:
-            result["backup_path"] = backup_path
-        return result
-
-    except Exception as exc:
-        # Cleanup temp file on failure
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        logger.error("Migration failed for %s: %s", db_path, exc)
-        return {"success": False, "message": f"Migration failed: {exc}"}
-
-
 def is_db_encrypted(db_path: str | Path) -> bool:
     """Check if a database file is SQLCipher encrypted.
 
@@ -467,39 +380,8 @@ def get_db_status(db_path: str | Path) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def get_all_db_status() -> list[dict[str, Any]]:
-    """Return encryption status for all known databases."""
-    db_files = list(_DATA_DIR.glob("*.db"))
-    return [get_db_status(p) for p in sorted(db_files)]
-
-
-def migrate_all_databases(*, backup: bool = True) -> dict[str, Any]:
-    """Migrate all unencrypted databases to SQLCipher format.
-
-    Returns a summary with per-DB results.
-    """
-    if not SQLCIPHER_AVAILABLE:
-        return {
-            "success": False,
-            "message": "SQLCipher not available",
-            "results": [],
-        }
-
-    db_files = list(_DATA_DIR.glob("*.db"))
-    results = []
-    all_ok = True
-
-    for db_path in sorted(db_files):
-        result = migrate_db_to_encrypted(db_path, backup=backup)
-        result["db"] = db_path.name
-        results.append(result)
-        if not result["success"] and "already encrypted" not in result.get("message", ""):
-            all_ok = False
-
-    return {
-        "success": all_ok,
-        "message": f"Processed {len(results)} databases",
-        "results": results,
-    }
+    """Return encryption status for every store of both data places (``store_files``)."""
+    return [get_db_status(p) for p in store_files()]
 
 
 # ---------------------------------------------------------------------------
@@ -519,3 +401,823 @@ def encryption_status_summary() -> dict[str, Any]:
         "fully_encrypted": total > 0 and encrypted == total,
         "databases": dbs,
     }
+
+
+# ---------------------------------------------------------------------------
+# Every store, encrypted offline: all of them, or none
+# ---------------------------------------------------------------------------
+# The places the platform keeps its SQLite stores: the repository's data
+# directory (authentication, the audit chain) and the package's
+# (conversations, branches, notes, projects, caches, the governor, the rest).
+# None reads them where the package lies (``_places``); a contract sets its own.
+_STORE_PLACES: Any = None
+# The stores the platform keeps outside the places, one by one. None reads
+# them from their configuration (``_lone_stores``): the sandbox's audit log.
+_LONE_STORES: Any = None
+# Below a place, the folder the platform keeps stores in too: the knowledge
+# base's. A plugin's own folder is none: its plugin opens its stores without
+# the platform's key, in plaintext, and they are left so.
+_STORE_FOLDERS = ("rag",)
+# The files SQLite keeps beside a database while it is open or recovering.
+_SIDECARS = ("-wal", "-shm", "-journal")
+# How every SQLite file no cipher wrote begins.
+_PLAIN_HEADER = b"SQLite format 3\x00"
+# The command that encrypts every store, the platform stopped.
+ENCRYPT_COMMAND = "python3 -m opti_oignon.db_encryption encrypt"
+# Where the system shows each process's command line and open files.
+_PROC = Path("/proc")
+# The signals that ask the process to end: a run notes them, and stops at its next safe point, everything put back.
+_ENDING = ("SIGTERM", "SIGHUP", "SIGINT")
+# Where the sandbox keeps its audit log when its configuration names no place.
+_SANDBOX_CONFIG = Path(__file__).resolve().parent / "config" / "sandbox.yaml"
+_SANDBOX_DEFAULT = "/tmp/opti-oignon-sandboxes"
+
+
+class EncryptionRefused(RuntimeError):
+    """The offline encryption of the stores refused, by name, and changed nothing."""
+
+
+class EncryptionStuck(RuntimeError):
+    """A run that could not put every store back: where each of their files is, said; the key file and the folders
+    of plaintext copies kept."""
+
+
+class _Ended(BaseException):
+    """A signal that asked the process to end, raised at a safe point of the run so it puts everything back."""
+
+
+def _places() -> tuple:
+    """The two places of the stores, or the ones a contract set."""
+    package = Path(__file__).resolve().parent
+    return (_DATA_DIR, package / "data") if _STORE_PLACES is None else tuple(Path(p) for p in _STORE_PLACES)
+
+
+def _lone_stores() -> list:
+    """The stores outside the places that hold something: the sandbox's audit log, where ``config/sandbox.yaml``
+    puts it; or the ones a contract set."""
+    if _LONE_STORES is not None:
+        paths = [Path(p) for p in _LONE_STORES]
+    else:
+        try:
+            import yaml
+
+            raw = yaml.safe_load(_SANDBOX_CONFIG.read_text(encoding="utf-8")) or {}
+        except Exception:  # noqa: BLE001 - a configuration that does not read leaves the sandbox's own defaults
+            raw = {}
+        raw = raw if isinstance(raw, dict) else {}
+        name = Path(str(raw.get("audit_db_path") or "sandbox_audit.db"))
+        paths = [name if name.is_absolute() else Path(str(raw.get("workspace_base") or _SANDBOX_DEFAULT)) / name]
+    return [path for path in paths if path.is_symlink() or (path.is_file() and path.stat().st_size > 0)]
+
+
+def _holds_something(path: Path) -> bool:
+    return path.is_symlink() or (path.is_file() and path.stat().st_size > 0)
+
+
+def store_files(places: Any = None) -> list[Path]:
+    """Every store of the platform: the ``*.db`` entries that hold something, a symbolic link included, of each
+    place and of its store folder (``_STORE_FOLDERS``), place by place, sorted; then the stores outside the places
+    (``_lone_stores``) when the places are the platform's own."""
+    found: list[Path] = []
+    for place in _places() if places is None else places:
+        place = Path(place)
+        if place.is_dir():
+            for pattern in ("*.db", *(f"{folder}/*.db" for folder in _STORE_FOLDERS)):
+                found += [path for path in sorted(place.glob(pattern)) if _holds_something(path)]
+    if places is None:
+        found += [path for path in _lone_stores() if path not in found]
+    return found
+
+
+def other_databases(places: Any = None) -> list[Path]:
+    """The ``*.db`` files below the places that hold something and are no store this command takes -- a plugin's
+    own, read in plaintext by its plugin; a file a user added to a project --, the folders of plaintext copies
+    aside: said, and left as they are."""
+    taken = set(store_files(places))
+    others: list[Path] = []
+    for place in _places() if places is None else places:
+        place = Path(place)
+        if place.is_dir():
+            others += [path for path in sorted(place.rglob("*.db")) if path not in taken and _holds_something(path)
+                       and not any(part.startswith("plaintext-") for part in path.relative_to(place).parts[:-1])]
+    return others
+
+
+def _store_dirs(places: Any) -> list:
+    """The directories that hold stores: each place and its store folders, and, when the places are the platform's
+    own, the directories of the stores outside them."""
+    dirs = []
+    for place in _places() if places is None else places:
+        place = Path(place)
+        dirs += [place, *(place / folder for folder in _STORE_FOLDERS)]
+    if places is None:
+        dirs += [path.parent for path in _lone_stores()]
+    return list(dict.fromkeys(dirs))
+
+
+def plaintext_folders(places: Any = None) -> list[Path]:
+    """The folders of plaintext copies runs kept beside the stores, each holding stores as they were before they
+    were encrypted: to delete once the platform reads its stores again and the key is kept safe elsewhere."""
+    return [path for folder in _store_dirs(places) for path in sorted(folder.glob("plaintext-*")) if path.is_dir()]
+
+
+def _same(one: Path, other: Path) -> bool:
+    """Whether ``one`` and ``other`` are two names of one regular file -- never through a symbolic link."""
+    try:
+        first, second = os.lstat(one), os.lstat(other)
+    except OSError:
+        return False
+    return (stat.S_ISREG(first.st_mode) and stat.S_ISREG(second.st_mode)
+            and (first.st_dev, first.st_ino) == (second.st_dev, second.st_ino))
+
+
+def _plain(path: Path) -> bool:
+    """Whether ``path`` begins as a SQLite file no cipher wrote."""
+    try:
+        with open(path, "rb") as handle:
+            return handle.read(len(_PLAIN_HEADER)) == _PLAIN_HEADER
+    except OSError:
+        return False
+
+
+def plaintext_stores(places: Any = None) -> list[Path]:
+    """The stores kept in plaintext: a key made now would leave each of them unreadable."""
+    return [path for path in store_files(places) if not path.is_symlink() and _plain(path)]
+
+
+def _ancestors(proc: Path) -> set:
+    """This process's ancestors: its parent, and each one's parent while ``proc`` shows it."""
+    found: set = set()
+    pid = os.getppid()
+    while pid > 1 and pid not in found:
+        found.add(pid)
+        try:
+            status = (proc / str(pid) / "status").read_text(encoding="utf-8", errors="replace")
+            pid = int(next(line for line in status.splitlines() if line.startswith("PPid:")).split()[1])
+        except (OSError, StopIteration, IndexError, ValueError):
+            break
+    return found
+
+
+def store_holders(paths: Any, *, proc: Any = None) -> dict[int, str]:
+    """The processes other than this one that run the platform, or hold one of ``paths`` -- or a file SQLite keeps
+    beside it -- open: ``{pid: why}``.
+
+    Read from ``proc`` (``/proc``); refused by name (``EncryptionRefused``)
+    on a system that shows no open files per process. A process of another
+    user cannot be read, and is not counted: the platform runs as its user.
+    An ancestor of this process whose command line holds this command --
+    the shell or the tool that started it -- is counted only for what it
+    holds open.
+    """
+    proc = Path(_PROC if proc is None else proc)
+    if not proc.is_dir():
+        raise EncryptionRefused(f"this system shows no open files per process ({proc}): nothing was changed")
+    watched = set()
+    for path in paths:
+        resolved = os.path.realpath(path)
+        watched.update({resolved, *(resolved + side for side in _SIDECARS)})
+    elders = _ancestors(proc)
+    found: dict[int, str] = {}
+    for entry in proc.iterdir():
+        if not entry.name.isdigit() or int(entry.name) == os.getpid():
+            continue
+        why = "" if int(entry.name) in elders and _runs_this_command(entry) else _runs_the_platform(entry)
+        try:
+            for fd in (entry / "fd").iterdir():
+                try:
+                    target = os.readlink(fd)
+                except OSError:
+                    continue
+                if target.removesuffix(" (deleted)") in watched:
+                    why = f"holds {Path(target).name} open"
+                    break
+        except OSError:
+            pass
+        if why:
+            found[int(entry.name)] = why
+    return found
+
+
+def _runs_this_command(entry: Path) -> bool:
+    """Whether the process at ``entry`` was started with this command in its command line."""
+    try:
+        return b"db_encryption" in (entry / "cmdline").read_bytes()
+    except OSError:
+        return False
+
+
+def _runs_the_platform(entry: Path) -> str:
+    """Why the process at ``entry`` runs the platform, read from its command line; "" when it does not."""
+    try:
+        argv = [part.decode("utf-8", "replace") for part in (entry / "cmdline").read_bytes().split(b"\0") if part]
+    except OSError:
+        return ""
+    for part in argv:
+        if "opti_oignon" in part or Path(part).name == "oo":
+            return f"runs the platform ({Path(part).name})"
+    return ""
+
+
+def _keyed(path: Any, key: bytes) -> Any:
+    """A SQLCipher connection to ``path`` under ``key``, with the PRAGMAs every store is opened with."""
+    conn = _sqlcipher_module.connect(str(path))
+    conn.execute(f"PRAGMA key = {_key_to_hex_pragma(key)}")
+    conn.execute(f"PRAGMA cipher_page_size = {_CIPHER_PAGE_SIZE}")
+    conn.execute(f"PRAGMA cipher_hmac_algorithm = {_CIPHER_HMAC_ALGORITHM}")
+    conn.execute(f"PRAGMA kdf_iter = {_KDF_ITER}")
+    return conn
+
+
+def _opens_under(path: Path, key: Any) -> bool:
+    """Whether the store at ``path`` opens under ``key`` and reads whole."""
+    conn = None
+    try:
+        conn = _keyed(path, key)
+        return conn.execute("PRAGMA quick_check").fetchall() == [("ok",)]
+    except Exception:  # noqa: BLE001 - a store that does not open under the key is no store of this key
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _shape(conn: Any) -> tuple:
+    """What a database holds, as digests: its objects (kind, name, table, SQL); each table that is not virtual by
+    its rows' count and the SHA-256 of its rows in order; its user_version, application_id and auto_vacuum."""
+    objects = conn.execute("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name").fetchall()
+    tables = []
+    for kind, name, _table, sql in objects:
+        text = str(sql or "").upper()
+        if kind != "table" or text.startswith("CREATE VIRTUAL TABLE"):
+            continue
+        order = "" if "WITHOUT ROWID" in text else " ORDER BY rowid"
+        digest, count = hashlib.sha256(), 0
+        for row in conn.execute('SELECT * FROM "' + name.replace('"', '""') + '"' + order):
+            digest.update(repr(tuple(row)).encode("utf-8", "surrogatepass"))
+            count += 1
+        tables.append((name, count, digest.hexdigest()))
+    return (tuple(tuple(row) for row in objects), tuple(tables),
+            *(conn.execute(f"PRAGMA {name}").fetchone()[0] for name in ("user_version", "application_id",
+                                                                         "auto_vacuum")))
+
+
+def _encrypted_copy(store: Path, copy: Path, key: bytes) -> None:
+    """Write ``copy``: ``store`` encrypted under ``key``, proved to hold what the store holds, with its mode,
+    synced to the disk.
+
+    The store's write-ahead log is folded into it first. Raises
+    ``EncryptionRefused`` naming the store and what differs; never a word
+    of what it holds.
+    """
+    plain = sqlite3.connect(str(store))
+    try:
+        plain.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        held = _shape(plain) if plain.execute("PRAGMA integrity_check").fetchall() == [("ok",)] else None
+    except sqlite3.DatabaseError:
+        held = None
+    finally:
+        plain.close()
+    if held is None:
+        raise EncryptionRefused(f"{store.name} does not pass its own integrity check: nothing was changed")
+    conn = _keyed(copy, key)
+    try:
+        conn.execute(f"PRAGMA auto_vacuum = {int(held[-1])}")
+        conn.execute("ATTACH DATABASE ? AS plaintext KEY ''", (str(store),))
+        conn.execute("SELECT sqlcipher_export('main', 'plaintext')")
+        version = conn.execute("PRAGMA plaintext.user_version").fetchone()[0]
+        application = conn.execute("PRAGMA plaintext.application_id").fetchone()[0]
+        conn.execute("DETACH DATABASE plaintext")
+        conn.execute(f"PRAGMA user_version = {int(version)}")
+        conn.execute(f"PRAGMA application_id = {int(application)}")
+        conn.commit()
+    finally:
+        conn.close()
+    conn = _keyed(copy, key)
+    try:
+        whole = conn.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+        whole = whole and not conn.execute("PRAGMA cipher_integrity_check").fetchall()
+        same = whole and _shape(conn) == held
+    finally:
+        conn.close()
+    if not same:
+        raise EncryptionRefused(f"the encrypted copy of {store.name} does not hold what the store holds: nothing was "
+                                "changed")
+    os.chmod(copy, os.stat(store).st_mode & 0o7777)
+    fd = os.open(copy, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _loaded_key() -> Any:
+    """The databases' key from the master key that loads -- OPTI_ENCRYPTION_KEY, or the key file --, or None when
+    none does. A key file that does not load here is refused by name: it is never replaced."""
+    from opti_oignon import encryption
+
+    if encryption.get_encryption_key() is None:
+        if encryption.keyfile_present():
+            raise EncryptionRefused("a key file exists and does not load here (if it is wrapped under a passphrase, "
+                                    "set OPTI_KEYFILE_PASSPHRASE); it is never replaced: nothing was changed")
+        return None
+    key = _get_db_encryption_key()
+    if key is None:
+        raise EncryptionRefused("the master key that loads gives no database key: nothing was changed")
+    return key
+
+
+def _write_master(master: bytes, key: bytes) -> None:
+    """Write ``master`` to a new key file -- wrapped under OPTI_KEYFILE_PASSPHRASE when it is set, as setup writes
+    one -- and prove it loads to ``key``; refused by name, the file removed, when it does not."""
+    from opti_oignon import encryption
+
+    passphrase = os.environ.get("OPTI_KEYFILE_PASSPHRASE")
+    try:
+        encryption.save_keyfile(master, kdf_name="random", passphrase=passphrase, allow_unprotected=passphrase is None)
+    except encryption.KeyfileExists:
+        raise EncryptionRefused("a key file appeared while this one was made; it is never replaced: nothing was "
+                                "changed") from None
+    if _get_db_encryption_key() != key:
+        _unmake_key()
+        raise EncryptionRefused("the key does not load once written: nothing was changed")
+
+
+def _unmake_key() -> None:
+    """Remove the key file this run made: no store is encrypted under it."""
+    from opti_oignon import encryption
+
+    os.unlink(encryption._DEFAULT_KEYFILE)
+
+
+def _key_file() -> Path:
+    from opti_oignon import encryption
+
+    return Path(encryption._DEFAULT_KEYFILE)
+
+
+def _fresh_folder(place: Path, name: str) -> Path:
+    """A new folder, 0700, in ``place``: ``name``, or ``name`` with the first number that is free."""
+    for n in range(1, 1000):
+        folder = place / (name if n == 1 else f"{name}-{n}")
+        try:
+            folder.mkdir(mode=0o700)
+        except FileExistsError:
+            continue
+        return folder
+    raise EncryptionRefused(f"no free folder named {name} in {place}: nothing was changed")
+
+
+def _fsync_dir(path: Path) -> None:
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def encrypt_all_stores(*, places: Any = None, proc: Any = None) -> dict[str, Any]:
+    """Encrypt every store kept in plaintext, the platform stopped: all of them, or none, even when the run dies.
+
+    Refused by name, nothing changed (``EncryptionRefused``) -- but each
+    plaintext store's write-ahead log folded into it: SQLCipher missing;
+    another run under way; a process that runs the platform or holds a
+    store, or a file SQLite keeps beside one (``store_holders``); a store
+    that is a symbolic link; what an interrupted run left that is not
+    plainly a copy to make again (``_leftovers``); a key file that does not
+    load here; a store that no cipher left in plaintext and the key does
+    not open.
+
+    The key is the one that loads, or a new master key held in memory:
+    each plaintext store is copied, encrypted under it, beside itself, and
+    every copy is proved before anything moves -- its integrity checked,
+    its objects, each table's rows in order and their digest, its
+    user_version, application_id and auto_vacuum those of the store, its
+    mode the store's. Then the holders are read again, a new key is
+    written to its key file and proved to load, and each store is switched
+    (``_switch``): its plaintext linked into a folder of plaintext copies
+    beside it, its encrypted copy taking its name in one rename, so a
+    store's name is never missing even when the process is killed.
+
+    SIGTERM, SIGHUP and SIGINT are noted -- and said at once on standard
+    error --, never raised where they land: the run stops at its next safe
+    point -- before a copy, before the processes are read again, before
+    the key is written, before a store is switched -- and puts back every
+    store it switched, removing the copies, the folders and the key file
+    it wrote; one that lands once the last store's switch has begun lets
+    the run finish. A failed step is put back the same way. A store is put
+    back before its plaintext link goes, and a store that cannot be put
+    back keeps its plaintext, its folder and the key file: the run raises
+    ``EncryptionStuck`` naming where each of its files is. A run killed outright leaves every
+    store whole, plaintext or encrypted under the key file: the next run
+    finishes it, or first names what the killed one left and what to do
+    with it (``_leftovers``).
+
+    Returns what was done: the stores encrypted, those already encrypted,
+    the folders of plaintext copies this run kept and those earlier runs
+    kept (each to delete once the platform reads its stores again, and the
+    key kept safe elsewhere), whether the key was made, where it is kept
+    and how, the places, the other databases below them, left as they
+    are, the directories that could not be synced, and the signal that
+    came after the last safe point, if one did.
+    """
+    import signal
+
+    if not SQLCIPHER_AVAILABLE:
+        raise EncryptionRefused("SQLCipher is not installed (pip install sqlcipher3): nothing was changed")
+    first = (_places() if places is None else tuple(Path(p) for p in places))[0]
+    lock = _alone(first)
+    noted: list = []
+    previous = {}
+
+    notice = _notice_fd()
+
+    def note(signum, _frame):
+        first = not noted
+        noted.append(signum)
+        if first and notice is not None:
+            try:
+                os.write(notice, f"signal {signum} noted: the run stops at its next safe point and puts everything "
+                                 "back, or finishes if none is left\n".encode())
+            except OSError:
+                pass
+
+    try:
+        for name in _ENDING:
+            signum = getattr(signal, name, None)
+            if signum is None:
+                continue
+            try:
+                if signal.getsignal(signum) is signal.SIG_IGN:
+                    continue
+                previous[signum] = signal.signal(signum, note)
+            except ValueError:
+                pass
+        return _encrypt(places, proc, noted)
+    finally:
+        try:
+            for signum, handler in previous.items():
+                signal.signal(signum, signal.SIG_DFL if handler is None else handler)
+        finally:
+            try:
+                if notice is not None:
+                    os.close(notice)
+            finally:
+                lock.close()
+
+
+def _notice_fd() -> Any:
+    """A descriptor of its own on standard error, for the one notice a signal handler writes; None when the process
+    has no standard error -- the number 2 may then be any file it opened."""
+    try:
+        return os.dup(sys.stderr.fileno()) if sys.stderr is not None else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+class _Held:
+    """A lock held on a directory, released when closed."""
+
+    def __init__(self, fd: int) -> None:
+        self.fd = fd
+
+    def close(self) -> None:
+        os.close(self.fd)
+
+
+def _alone(place: Path) -> Any:
+    """Hold the run's lock on ``place`` itself -- no file is made for it --; refused by name when another run
+    holds it, or when no lock can be held there."""
+    import fcntl
+
+    try:
+        fd = os.open(place, os.O_RDONLY)
+    except OSError as exc:
+        raise EncryptionRefused(f"the run's lock cannot be held on {place} ({type(exc).__name__}): nothing was "
+                                "changed") from None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        raise EncryptionRefused("another encryption of the stores is under way: nothing was changed") from None
+    except OSError as exc:
+        os.close(fd)
+        raise EncryptionRefused(f"the run's lock cannot be held on {place} ({type(exc).__name__}): nothing was "
+                                "changed") from None
+    return _Held(fd)
+
+
+def _stop_if_asked(noted: list) -> None:
+    """A safe point: when a signal asked the process to end, stop here."""
+    if noted:
+        raise _Ended(noted[0])
+
+
+def _switch(store: Path, copy: Path, folder: Path, records: list) -> None:
+    """Put ``copy`` in ``store``'s place, ``store`` kept in ``folder``: the store's name is never missing on the
+    way -- the plaintext is linked into the folder first, the copy takes the name in one rename. What was done is
+    on its record, in ``records``, before and after each step."""
+    record = {"store": store, "kept": folder / store.name, "linked": False, "sides": [], "switched": False}
+    records.append(record)
+    os.link(store, record["kept"])
+    record["linked"] = True
+    for side in _SIDECARS:
+        beside = Path(str(store) + side)
+        if os.path.lexists(beside):
+            spare = folder / beside.name
+            os.link(beside, spare)
+            record["sides"].append([beside, spare, False])
+            os.unlink(beside)
+            record["sides"][-1][2] = True
+    os.replace(copy, store)
+    record["switched"] = True
+
+
+def _roll_back(records: list) -> list:
+    """Put every store of ``records`` back, the last switched first; where each file is that could not be.
+
+    A switched store is put back by linking its plaintext to a name of its
+    own and renaming that over it. Only once the store is that plaintext
+    again do the links in its folder go; a store that cannot be put back
+    keeps them.
+    """
+    stuck = []
+    for record in reversed(records):
+        store, kept = record["store"], record["kept"]
+        if record["switched"]:
+            try:
+                restoring = store.with_name(store.name + ".restoring")
+                if os.path.lexists(restoring):
+                    os.unlink(restoring)
+                os.link(kept, restoring)
+                os.replace(restoring, store)
+            except OSError as exc:
+                stuck.append(f"{store} is encrypted, its plaintext is {kept} ({type(exc).__name__})")
+                continue
+        if record["linked"]:
+            try:
+                plain_again = os.path.samefile(store, kept)
+            except OSError:
+                plain_again = False
+            if not plain_again:
+                stuck.append(f"{store}: its plaintext is {kept}")
+                continue
+        for beside, spare, moved in record["sides"]:
+            try:
+                if moved and not os.path.lexists(beside):
+                    os.link(spare, beside)
+                if os.path.samefile(beside, spare):
+                    os.unlink(spare)
+            except OSError as exc:
+                stuck.append(f"{beside} is {spare} ({type(exc).__name__})")
+        if record["linked"]:
+            try:
+                os.unlink(kept)
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                stuck.append(f"{kept} stays ({type(exc).__name__})")
+    return stuck
+
+
+def _leftovers(stores: list, places: Any) -> list:
+    """What an interrupted run left that the next one must not pass over, each named with what to do about it: a
+    plaintext store half put back, a copy whose store is missing, a key file's temp. Every writer of the key file
+    (``encryption._write_keyfile``) puts it in place before the key is used and never replaces it, so a temp that is
+    not the key file holds no key in use -- unless the key file is a symbolic link to it; a rotation that renamed a
+    temp into place would end this."""
+    found = []
+    for folder in _store_dirs(places):
+        for path in sorted(folder.glob("*.db.restoring")):
+            name = path.name[:-len(".restoring")]
+            twin = next((sub / name for sub in sorted(folder.glob("plaintext-*")) if _same(sub / name, path)), None)
+            found.append(f"{path} (a second name for {twin}, left by a run killed while putting {name} back: delete "
+                         "it)" if twin is not None else
+                         f"{path} ({name}'s plaintext, left by a run killed while putting {name} back, and in no "
+                         f"plaintext-* folder beside it: move it into a new one, as {name})")
+        for path in sorted(folder.glob("*.db.encrypting")):
+            store = path.with_name(path.name[:-len(".encrypting")])
+            if store not in stores:
+                found.append(f"{path} (an encrypted copy of {store.name}, which is missing: put {store.name} back, or "
+                             "delete the copy if it was removed on purpose)")
+    key = _key_file()
+    for path in sorted(key.parent.glob("." + key.name + ".tmp-*")):
+        if key.is_symlink():
+            found.append(f"{path} (a key file's temp, and the key file is a symbolic link: if it leads here, this "
+                         "holds the key in use; keep it)")
+        else:
+            found.append(f"{path} (a second name for the key file, left by a write killed once it was in place: "
+                         "delete it)" if _same(path, key) else
+                         f"{path} (left by a write of the key file killed before it was in place: nothing was "
+                         "encrypted under it; delete it)")
+    return found
+
+
+def _encrypt(places: Any, proc: Any, noted: list) -> dict[str, Any]:
+    stores = store_files(places)
+    linked = [path.name for path in stores if path.is_symlink()]
+    if linked:
+        raise EncryptionRefused(f"store(s) {', '.join(linked)} are symbolic links: nothing was changed")
+    left = _leftovers(stores, places)
+    if left:
+        raise EncryptionRefused("an interrupted run left " + "; ".join(left) + "; then run the command again: "
+                                "nothing was changed")
+    earlier = plaintext_folders(places)
+    alone = [str(path) for path in other_databases(places)]
+    held = store_holders(stores, proc=proc)
+    if held:
+        raise EncryptionRefused("stop every process of the platform first: " + "; ".join(
+            f"process {pid} {why}" for pid, why in sorted(held.items())) + ": nothing was changed")
+    plain = [path for path in stores if _plain(path)]
+    key = _loaded_key()
+    if key is None and len(plain) < len(stores):
+        raise EncryptionRefused("store(s) " + ", ".join(path.name for path in stores if path not in plain)
+                                + " are encrypted under a key that does not load here: nothing was changed")
+    unread = [path.name for path in stores if path not in plain and not _opens_under(path, key)]
+    if unread:
+        raise EncryptionRefused(f"store(s) {', '.join(unread)} do not open under the key that loads here: nothing "
+                                "was changed")
+    master = None
+    if key is None and plain:
+        from opti_oignon import encryption
+
+        master = encryption.generate_key()
+        key = _db_key(master)
+    copies: list = []
+    current = None
+    try:
+        for store in plain:
+            _stop_if_asked(noted)
+            current = store
+            copy = store.with_name(store.name + ".encrypting")
+            if os.path.lexists(copy):
+                os.unlink(copy)
+            copies.append((store, copy))
+            _encrypted_copy(store, copy, key)
+        current = None
+        _stop_if_asked(noted)
+        held = store_holders(stores, proc=proc)
+        if held:
+            raise EncryptionRefused("a process of the platform started meanwhile: " + "; ".join(
+                f"process {pid} {why}" for pid, why in sorted(held.items())) + ": nothing was changed")
+    except BaseException as exc:
+        _drop(copies)  # copies that took no store's place: what it could not remove is harmless
+        if isinstance(exc, _Ended):
+            raise EncryptionRefused(f"stopped by signal {exc.args[0]} before any store was switched: nothing was "
+                                    "changed") from exc
+        if isinstance(exc, Exception) and not isinstance(exc, EncryptionRefused):
+            named = (f"{current.name} could not be copied encrypted" if current is not None else
+                     "the processes could not be read again")
+            raise EncryptionRefused(f"{named} ({type(exc).__name__}): nothing was changed") from exc
+        raise
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    records: list = []
+    folders: dict[Path, Path] = {}
+    written = False
+    try:
+        if master is not None:
+            _stop_if_asked(noted)
+            _write_master(master, key)
+            written = True
+        for store, copy in copies:
+            _stop_if_asked(noted)
+            if store.parent not in folders:
+                folders[store.parent] = _fresh_folder(store.parent, f"plaintext-{stamp}")
+            _switch(store, copy, folders[store.parent], records)
+    except BaseException as exc:
+        stuck = _roll_back(records)
+        stays = _drop(copies)
+        if stuck:
+            encrypted = any(" is encrypted, " in item for item in stuck)
+            raise EncryptionStuck("the stores could not all be put back where they were: " + "; ".join(stuck + stays)
+                                  + "; the folders and the key file stay" + (", a store is encrypted under that key"
+                                                                            if encrypted else "")) from exc
+        for folder in folders.values():
+            try:
+                folder.rmdir()
+            except OSError:
+                pass
+        if written:
+            try:
+                _unmake_key()
+            except FileNotFoundError:
+                pass
+        note = "".join(f"; {item}: delete it" for item in stays)
+        if isinstance(exc, EncryptionRefused):
+            if not note:
+                raise
+            raise EncryptionRefused(f"{exc}{note}") from exc
+        if isinstance(exc, _Ended):
+            raise EncryptionRefused(f"stopped by signal {exc.args[0]}: every store it switched was put back: nothing "
+                                    f"was changed{note}") from exc
+        if isinstance(exc, Exception):
+            raise EncryptionRefused(f"a store could not be switched ({type(exc).__name__}): every step was put back: "
+                                    f"nothing was changed{note}") from exc
+        raise
+    unsynced = []
+    for place in {store.parent for store, _copy in copies} | set(folders.values()):
+        try:
+            _fsync_dir(place)
+        except OSError:
+            unsynced.append(str(place))
+    return {
+        "encrypted": [store.name for store, _copy in copies],
+        "already": [path.name for path in stores if path not in plain],
+        "plaintext_copies": [str(folder) for folder in folders.values()],
+        "earlier_copies": [str(folder) for folder in earlier],
+        "key": "made" if master is not None else "existing",
+        "key_file": ("environment" if os.environ.get("OPTI_ENCRYPTION_KEY") else
+                     "wrapped" if os.environ.get("OPTI_KEYFILE_PASSPHRASE") else "file"),
+        "key_path": "" if os.environ.get("OPTI_ENCRYPTION_KEY") else str(_key_file()),
+        "places": [str(place) for place in (_places() if places is None else places)],
+        "left": alone,
+        "unsynced": unsynced,
+        "signal": noted[0] if noted else None,
+    }
+
+
+def _drop(copies: list) -> list:
+    """Remove the encrypted copies a run made that took no store's place; what could not be removed."""
+    kept = []
+    for _store, copy in copies:
+        try:
+            os.unlink(copy)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            kept.append(f"{copy} stays ({type(exc).__name__})")
+    return kept
+
+
+def main(argv: Any = None) -> int:
+    """``python3 -m opti_oignon.db_encryption check|encrypt``: each store's state, or every store encrypted."""
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="python3 -m opti_oignon.db_encryption",
+                                     description="Say the state of every store, or encrypt them all, the platform "
+                                                 "stopped.")
+    parser.add_argument("action", choices=("check", "encrypt"))
+    action = parser.parse_args(argv).action
+    if action == "check":
+        print("places: " + ", ".join(str(place) for place in _places()))
+        stores = store_files()
+        try:
+            key = _loaded_key() if SQLCIPHER_AVAILABLE else None
+        except EncryptionRefused as exc:
+            key = None
+            print(f"key: {exc}")
+        for path in stores:
+            state = ("a symbolic link" if path.is_symlink() else "plaintext" if _plain(path) else
+                     "encrypted" if key is not None and _opens_under(path, key) else "unreadable here")
+            print(f"{path}: {state}")
+        try:
+            held = store_holders(stores)
+        except EncryptionRefused as exc:
+            print(f"holders: {exc}")
+        else:
+            for pid, why in sorted(held.items()):
+                print(f"process {pid} {why}")
+        for path in other_databases():
+            print(f"{path}: no store of the platform, left as it is")
+        for folder in plaintext_folders():
+            print(f"plaintext copies kept in {folder}: delete it once the platform reads its stores again and the key "
+                  "is kept safe elsewhere")
+        print(f"{len(stores)} store(s), {len(plaintext_stores())} in plaintext; SQLCipher "
+              f"{'installed' if SQLCIPHER_AVAILABLE else 'missing'}; a key {'loads' if key else 'does not load'}")
+        return 0
+    try:
+        done = encrypt_all_stores()
+    except EncryptionRefused as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    except EncryptionStuck as exc:
+        print(f"stopped part way: {exc}", file=sys.stderr)
+        return 3
+    print("places: " + ", ".join(done["places"]))
+    print(f"{len(done['encrypted'])} store(s) encrypted, {len(done['already'])} already; key {done['key']} "
+          f"({done['key_file']})")
+    if done["key_file"] == "environment":
+        print("the key is OPTI_ENCRYPTION_KEY: the platform starts with it set, and a copy of it is kept somewhere "
+              "safe, off this machine and out of any repository")
+    else:
+        print(f"key file: {done['key_path']} -- every store opens only with it: keep a copy of it somewhere safe, off "
+              "this machine and out of any repository, before deleting the plaintext copies")
+        if done["key_file"] == "wrapped":
+            print("it is wrapped under OPTI_KEYFILE_PASSPHRASE: the platform starts with it set")
+    for folder in done["plaintext_copies"]:
+        print(f"plaintext copies kept in {folder}: delete it once the platform reads its stores again and the key is "
+              "kept safe elsewhere")
+    for folder in done["earlier_copies"]:
+        print(f"plaintext copies an earlier run kept in {folder}: delete it once the platform reads its stores again "
+              "and the key is kept safe elsewhere")
+    for path in done["left"]:
+        print(f"{path}: no store of the platform, left as it is")
+    for place in done["unsynced"]:
+        print(f"{place} could not be synced to the disk: the switch stands; run sync before the next power cut")
+    if done["signal"]:
+        print(f"signal {done['signal']} came after the last safe point: the run finished", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

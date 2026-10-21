@@ -27,6 +27,80 @@ to open a database in plaintext. Daily mode opens it in plaintext and
 logs a warning once per process; the startup security checklist does
 not report it.
 
+#### Turning database encryption on
+
+Once a key loads, every connection the platform opens keys its
+database, so a database still kept in plaintext no longer opens. The
+databases are therefore encrypted together, with the platform stopped
+-- the server, and every `oo` process:
+
+```bash
+python3 -m opti_oignon.db_encryption check     # each database's state
+python3 -m opti_oignon.db_encryption encrypt   # all of them, or none
+```
+
+`encrypt` takes every `*.db` of the repository's `data/` and of
+`opti_oignon/data/`, of the knowledge base's `rag/` folder, and the
+sandbox's audit log where `config/sandbox.yaml` puts it. A plugin's own
+databases (`plugin_data/<plugin>/`) are left in plaintext: the plugin
+opens them in its own process, without the platform's key. Any other
+`*.db` below the data directories -- a file added to a project, say --
+is named and left as it is.
+
+It refuses, changing nothing -- but each plaintext database's
+write-ahead log folded into it -- while another run is under way, while
+a process holds a database or runs the platform (read from `/proc`; the
+shell that started the command, naming it, is not counted), when a key
+file exists and does not load here (set `OPTI_KEYFILE_PASSPHRASE`), when
+a database does not open under the key, or when an interrupted run left
+something to look at first. A new key is held in memory while every
+database is copied, encrypted, beside itself; each copy is proved before
+anything moves -- its integrity checked, its objects, each table's rows
+in order and a digest of them, its `user_version`, `application_id` and
+`auto_vacuum`, its file mode. (The implicit row ids of a table without
+an `INTEGER PRIMARY KEY` may be renumbered, in order; the platform never
+refers to them from another table.) Only then is the key written to its
+key file -- wrapped under `OPTI_KEYFILE_PASSPHRASE` when it is set --
+and each database switched: its plaintext linked into a
+`plaintext-<time>` folder (mode 0700) inside its directory, its
+encrypted copy taking its name in one rename.
+
+SIGTERM, SIGHUP and Ctrl-C are noted -- the command says so at once --
+and the run stops at its next safe point -- before a copy, before the
+processes are read again, before the key is written, before a database
+is switched -- putting back every database it switched and removing the
+key file it wrote; one that lands once the last database's switch has
+begun lets the run finish, and is said. A database is put back before
+its plaintext link goes: one that cannot be put back keeps its
+plaintext, its folder and the key file, and the run says where each is.
+A run killed outright (`kill -9`, `Ctrl-\`) still leaves every database
+whole under its name, plaintext or encrypted under the key file: run the
+command again before starting the platform. It finishes, or first names
+what the killed run left -- a second name for a plaintext, a key file's
+temp -- and what to do with it.
+
+The command ends with 0 once every database is encrypted, 1 when it
+refused and changed nothing, and 3 when a database could not be put
+back. A directory it could not sync to the disk once every database was
+switched is said: the switch stands; run `sync`.
+
+The command says where the key file is. Every database now opens only
+with it: keep a copy of it somewhere safe, off the machine and out of
+any repository, before deleting the `plaintext-<time>` folders -- until
+then they are the plaintext. `check` lists every such folder, and
+`encrypt` names those an earlier run left too. A key taken from
+`OPTI_ENCRYPTION_KEY`, or a key file wrapped under
+`OPTI_KEYFILE_PASSPHRASE`, needs that variable set wherever the platform
+starts. Field-level encryption and the sealing of the run journal follow
+when encryption is set up in the security settings once the command has
+run: setup then takes the existing key and makes no new one.
+
+The server never does this itself: it holds its databases open, and a
+database moved under an open connection loses what that connection
+writes next. `POST /api/security/db-encryption/migrate` answers 409,
+and `POST /api/security/encryption/setup` makes no key -- 409 -- while
+a database is kept in plaintext.
+
 The RAG vector store (ChromaDB) is not encrypted at rest: chunk text and
 embedding vectors are stored in plaintext files. Full-disk encryption is
 required for a sensitive corpus; see `SECURITY.md`.

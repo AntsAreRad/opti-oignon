@@ -11,6 +11,34 @@ package costs.
 
 ### Added
 
+- [SECURITY] Every database encrypted at rest in one offline command:
+  `python3 -m opti_oignon.db_encryption encrypt`, with the platform stopped,
+  takes every `*.db` of the repository's `data/` and of `opti_oignon/data/`,
+  of the knowledge base's `rag/` folder, and the sandbox's audit log, all of
+  them or none: it refuses, changing nothing but folding each database's
+  write-ahead log into it, while another run is under way, while a process
+  holds a database or runs the platform, when a key file does not load here,
+  when a database does not open under the key, or when an interrupted run
+  left something to look at; a new key is held in memory while every
+  encrypted copy is made and proved -- integrity, objects, rows in order and
+  their digest, `user_version`, `application_id`, `auto_vacuum`, file mode
+  -- and only then written and each database switched by a link and a
+  rename, so its name is never missing. SIGTERM, SIGHUP and Ctrl-C are
+  noted, said at once, and stop the run at its next safe point, every
+  database it switched put back and the key file it wrote removed (one that
+  lands once the last database's switch has begun lets the run finish,
+  said); a database that cannot be put back keeps its plaintext and the key,
+  said, and the command ends with 3; a run killed outright leaves every
+  database whole, finished by the next run, which first names anything the
+  killed run left and what to do with it. The plaintext databases are kept
+  in a `plaintext-<time>` folder (0700) to delete once the platform reads
+  its databases again and the key file -- whose path the command says -- is
+  kept safe elsewhere. A plugin's own databases are left in plaintext (the
+  plugin opens them without the platform's key), and any other `*.db` is
+  named and left. `check` says the places, each database's state, who holds
+  them and every folder of plaintext copies; `encrypt` names those an
+  earlier run left too; the status route counts the databases of both
+  directories.
 - The machine names where its onion is kept. `local.yaml` beside
   `onion.yaml` takes `onion: {persistence: {path: "onion.db"}}`, a file
   under the data directory, so turning persistence on changes no tracked
@@ -3270,6 +3298,14 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] Encryption setup no longer makes a key while a database is
+  kept in plaintext: once a key loads, every connection keys its
+  database, and each plaintext one stopped opening (409, naming the
+  offline command). The in-server migration is refused (409): it moved
+  databases under the server's own open connections, saw only the
+  repository's `data/` -- not `opti_oignon/data/`, where the
+  conversations live --, kept plaintext `.bak` copies beside each
+  database, and proved nothing it wrote.
 - A load of the onion's file reads its rows and their generation inside one
   read transaction: a save another process committed between two of its
   reads tore what it read, and the state was refused as moved. A window a
