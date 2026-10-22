@@ -79,6 +79,7 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import types
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -106,6 +107,8 @@ BUDGET_S = {
     "test_df16_a_covered_child_imports_the_package_of_its_tree_and_never_one_an_install_finds_elsewhere": 2.0,
     "test_df17_a_session_whose_children_cannot_be_covered_stops_and_one_whose_children_can_runs": 2.0,
     "test_df18_the_summary_counts_every_covered_process_and_every_launch_the_firewall_does_not_reach": 2.0,
+    "test_df19_a_module_of_the_package_an_install_finds_elsewhere_is_refused_whatever_the_package": 2.0,
+    "test_df20_a_lookup_that_passes_a_path_is_judged_whatever_the_parent_in_the_cache": 2.0,
 }
 
 
@@ -1048,6 +1051,95 @@ def test_df18_the_summary_counts_every_covered_process_and_every_launch_the_fire
     assert (run.returncode, once) == (0, {"-I": 1}), ("a launch that goes on through os.posix_spawn is counted once",
                                                       run.returncode, once)
 
+
+
+# ---------------------------------------------------------------------------
+# DF19 -- a module of the package an install finds elsewhere is refused
+# ---------------------------------------------------------------------------
+_MODULES_ELSEWHERE = _INSTALLED_ELSEWHERE + r"""
+import importlib
+import types
+
+root = sys.argv[2]
+
+
+def asked(name, path):
+    # opti_oignon.<name> imported under a stand-in package whose __path__ is path: None, or why it was refused.
+    stand_in = types.ModuleType("opti_oignon")
+    stand_in.__path__ = path
+    sys.modules["opti_oignon"] = stand_in
+    sys.modules.pop("opti_oignon." + name, None)
+    try:
+        importlib.import_module("opti_oignon." + name)
+    except ImportError as error:
+        return str(error)
+    return None
+
+
+said = {"installs": 1, "probe": asked("probe", []), "own": asked("own", [root + "/opti_oignon"]),
+        "probe_beside_own": asked("probe", [root + "/opti_oignon"]), "probe_no_path": asked("probe", None),
+        "nsdir": asked("nsdir", []), "nsdir_beside_own": asked("nsdir", [root + "/opti_oignon"]),
+        "nsdir_mod": asked("nsdir.mod", []), "data": asked("data", [])}
+# The install pointed at the covered tree itself: a package of it, found by the install, lies in that tree.
+installs[0].MAPPING["opti_oignon"] = root + "/opti_oignon"
+said["deep_in_tree"] = asked("deep", [])
+installs[0].MAPPING["opti_oignon"] = elsewhere + "/opti_oignon"
+print(json.dumps(said))
+"""
+
+
+def test_df19_a_module_of_the_package_an_install_finds_elsewhere_is_refused_whatever_the_package(tmp_path):
+    root, mirror, elsewhere, empty = (tmp_path / name for name in ("tree", "mirror", "elsewhere", "empty"))
+    (root / "opti_oignon" / "data").mkdir(parents=True)
+    (root / "opti_oignon" / "__init__.py").write_text("", encoding="utf-8")
+    (root / "opti_oignon" / "own.py").write_text("", encoding="utf-8")
+    (root / "opti_oignon" / "deep").mkdir()
+    (root / "opti_oignon" / "deep" / "__init__.py").write_text("", encoding="utf-8")
+    ran = elsewhere / "ran.txt"
+    (elsewhere / "opti_oignon").mkdir(parents=True)
+    (elsewhere / "opti_oignon" / "__init__.py").write_text("", encoding="utf-8")
+    (elsewhere / "opti_oignon" / "probe.py").write_text(f"open({str(ran)!r}, 'w').write('ran')\n", encoding="utf-8")
+    # Two namespace packages of the other checkout, folders without __init__: one with a module, and its data place.
+    (elsewhere / "opti_oignon" / "nsdir").mkdir()
+    (elsewhere / "opti_oignon" / "nsdir" / "mod.py").write_text(f"open({str(ran)!r}, 'w').write('ran')\n",
+                                                               encoding="utf-8")
+    (elsewhere / "opti_oignon" / "data").mkdir()
+    (elsewhere / "opti_oignon" / "data" / "secret.txt").write_text("the other checkout's data\n", encoding="utf-8")
+    empty.mkdir()
+    with _covering(root, mirror):
+        sites = os.pathsep.join(entry for entry in os.environ["PYTHONPATH"].split(os.pathsep)
+                                if os.path.basename(entry) == "_firewall_site")
+        child = subprocess.run([sys.executable, "-c", _MODULES_ELSEWHERE, str(elsewhere), str(root)], cwd=empty,
+                               env=dict(os.environ, PYTHONPATH=sites), capture_output=True, text=True, timeout=60)
+    assert child.returncode == 0, child.stderr[-2000:]
+    said = json.loads(child.stdout)
+    assert said["installs"] == 1, "control: this interpreter has one editable install of the package to point"
+    for case in ("probe", "probe_beside_own", "probe_no_path", "nsdir", "nsdir_beside_own", "nsdir_mod", "data"):
+        assert said[case] and "data firewall: opti_oignon." in said[case] and str(elsewhere) in said[case], (
+            "under a stand-in package -- its path empty or None -- or missing from the tree, the module or the "
+            "namespace package the install finds elsewhere is refused", case, said)
+    assert said["own"] is None, ("a module found along the path is left alone", said)
+    assert said["deep_in_tree"] is None, ("a package the install finds in the covered tree is its own", said)
+    assert not ran.exists(), "the module the install found elsewhere never ran"
+
+
+# ---------------------------------------------------------------------------
+# DF20 -- a lookup that passes a path is judged, whatever the parent in the cache
+# ---------------------------------------------------------------------------
+def test_df20_a_lookup_that_passes_a_path_is_judged_whatever_the_parent_in_the_cache(monkeypatch):
+    asked = _module()._asked_by_an_import
+    parent = types.ModuleType("opti_oignon.zz_df20")
+    parent.__path__ = ["/nowhere/a/stand/in"]
+    monkeypatch.setitem(sys.modules, "opti_oignon.zz_df20", parent)
+    name = "opti_oignon.zz_df20.probe"
+    assert asked(name, []) is True, "a path that is not the parent's own -- the parent swapped meanwhile -- is judged"
+    assert asked(name, parent.__path__) is True
+    assert asked(name, None) is False, "no path, beside a parent with one: a probe asking every finder, left alone"
+    parent.__path__ = None
+    assert asked(name, None) is True, "no path, from a parent whose path is None: an import's, judged"
+    monkeypatch.delitem(sys.modules, "opti_oignon.zz_df20")
+    assert asked(name, None) is False, "no parent in the cache: no import asked for it"
+    assert asked("elsewhere_package.probe", []) is False, "another package's lookup is not the firewall's"
 
 if __name__ == "__main__":
     import pytest

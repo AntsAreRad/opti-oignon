@@ -37,7 +37,8 @@ export interface SecurityModeStatus {
   timestamp?: number;
   lockfile_exists?: boolean;
   sources_agree?: boolean;
-  hmac_valid?: boolean;
+  /** null when no key loads: the lockfile is not verified. */
+  hmac_valid?: boolean | null;
   policy?: ModePolicy;
   pending_downgrade?: PendingDowngrade | null;
 }

@@ -1076,6 +1076,15 @@ fail_under = 0
 # memory through _HAS_VECTOR_STORE, names the knowledge base's store and
 # keeps their other assertions. They stay in the tree word for word.
 #
+# I4 of tests/test_isolation_window_contracts.py held that the window refuses
+# a project name its caller never declared, with a name-answering finder
+# serving a file outside the tree. The data firewall now judges every module
+# of the package an import asks for and refuses that file on its own, so I4
+# passes with the window's guard gone. It gives way to I4b of the same file,
+# which asks the same with the firewall's rule and the install's finders set
+# aside, so the refusal is the window's alone. I4 stays in the tree word for
+# word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1463,4 +1472,5 @@ addopts = """
     --deselect=tests/test_vector_store_health.py::test_construct_without_chromadb_does_not_raise
     --deselect=tests/test_vector_store_health.py::test_crud_are_safe_noops_without_collection
     --deselect=tests/test_vector_store_health.py::test_find_similar_empty_without_collection
+    --deselect=tests/test_isolation_window_contracts.py::test_i4_a_name_the_caller_never_declared_is_refused_too
 """

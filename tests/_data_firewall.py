@@ -50,8 +50,12 @@ reason when it is not, so a session can refuse to run uncovered.
 In a covered process the project's package is refused (``ImportError``)
 when a finder other than the path's -- an editable install -- would load it
 from outside every covered tree: that checkout's data places are covered by
-no firewall here. A package found along the path, a scratch copy a contract
-runs on purpose, is left alone.
+no firewall here. So is each module of it an import asks for, a namespace
+package judged by its folders: one asked under a stand-in package -- an
+empty ``__path__``, or None, as a suite's own window makes it -- or missing
+from the tree is found by the install alone, in that checkout. A package or
+a module found along the path, a scratch copy a contract runs on purpose, is
+left alone.
 
 Each covered child leaves, in ``CHILDREN_REPORT`` in the mirror, a marker
 when its firewall is installed and each path it keeps off, the first time,
@@ -79,6 +83,7 @@ interpreter has loaded before its site hooks run, so that a child pays
 nothing for it.
 """
 
+import _thread
 import builtins
 import io
 import os
@@ -246,23 +251,35 @@ class _PackageHome:
     working directory, ``PYTHONPATH``, the interpreter's directories) is
     left alone: a contract that runs a copy of the package does it on
     purpose. One found by any other finder, whose file lies outside every
-    covered tree, is refused before any of its code runs. One entry serves a
+    covered tree, is refused before any of its code runs. A module of the
+    package is judged the same way when an import asks for it -- with its
+    parent's own path, whatever that path is: under a stand-in package, or
+    missing from the tree, the install alone finds it, in its checkout; a
+    namespace package, which has no file, is judged by its folders. Every
+    lookup that passes a path is judged, and one with no path when the
+    parent's path is None; any other lookup with no path -- a probe asking
+    every finder -- imports nothing, and is left alone. One entry serves a
     process: a firewall of another copy of this module adds its trees to the
-    same list, which it finds by its attribute.
+    same list, which it finds by its attribute. A lookup made while this
+    entry judges another, on the same thread, is left to the finders it asks.
     """
 
     def __init__(self):
         self.data_firewall_homes = []
-        self._finding = False
+        # The threads judging a lookup now: each asks the finders behind this
+        # one, and a lookup they make in turn is theirs to answer.
+        self._finding = set()
 
     def find_spec(self, name, path=None, target=None):
-        if name != PACKAGE or not self.data_firewall_homes or self._finding:
+        thread = _thread.get_ident()
+        if (name != PACKAGE and not _asked_by_an_import(name, path)) or not self.data_firewall_homes \
+                or thread in self._finding:
             return None
-        self._finding = True
+        self._finding.add(thread)
         try:
             return self._judged(name, path, target)
         finally:
-            self._finding = False
+            self._finding.discard(thread)
 
     def _judged(self, name, path, target):
         """Ask the finders behind this one, as the import would; refuse what an install finds outside every tree."""
@@ -274,19 +291,53 @@ class _PackageHome:
             spec = find(name, path, target)
             if spec is None:
                 continue
-            origin = spec.origin
-            if finder is along_the_path or not isinstance(origin, str) or not os.path.isabs(origin):
+            if finder is along_the_path:
                 return spec
-            home = os.path.realpath(os.path.dirname(os.path.dirname(origin)))
-            if home in {os.path.realpath(tree) for tree in self.data_firewall_homes}:
+            # A module's file, or a namespace package's folders -- where its modules would be found: the checkout
+            # it would come from, whichever kind it is.
+            origin = spec.origin
+            places = ([origin] if isinstance(origin, str) and os.path.isabs(origin) else
+                      list(spec.submodule_search_locations or ()))
+            homes = {os.path.realpath(tree) for tree in self.data_firewall_homes}
+            if places and all(_checkout(name, place) in homes for place in places):
                 return spec
             raise ImportError(
-                f"data firewall: {PACKAGE} would load from {origin}, found by an install and in no covered "
-                f"tree ({os.pathsep.join(self.data_firewall_homes)}); that checkout's data places are not "
-                "covered here, so the import is refused",
+                f"data firewall: {name} would load from {', '.join(places) or 'nowhere it names'}, found by an "
+                f"install and in no covered tree ({os.pathsep.join(self.data_firewall_homes)}); that checkout's "
+                "data places are not covered here, so the import is refused",
                 name=name,
             )
         return None
+
+
+# What a module that is no package has for a path: nothing an import passes.
+_NO_PATH = object()
+
+
+def _asked_by_an_import(name, path):
+    """Whether a lookup of a module of the package is an import's.
+
+    The import machinery passes the parent package's own ``__path__``: a
+    lookup that passes a path is judged, whatever the parent in the cache
+    is by the time it is judged; one with no path is judged when the
+    parent's path is None, as a stand-in's can be. Any other lookup with
+    no path -- a probe asking every finder -- imports nothing.
+    """
+    if not name.startswith(PACKAGE + "."):
+        return False
+    if path is not None:
+        return True
+    parent = sys.modules.get(name.rpartition(".")[0])
+    return parent is not None and getattr(parent, "__path__", _NO_PATH) is None
+
+
+def _checkout(name, origin):
+    """The checkout a module of the package lies in: its file -- or a namespace package's folder -- climbed once
+    per part of its name, and once more for a package's ``__init__``."""
+    home = origin
+    for _ in range(name.count(".") + 1 + (os.path.basename(origin) == "__init__.py")):
+        home = os.path.dirname(home)
+    return os.path.realpath(home)
 
 
 def _package_home():

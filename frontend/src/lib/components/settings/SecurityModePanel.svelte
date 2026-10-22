@@ -266,8 +266,8 @@
 				</span>
 				<span>
 					HMAC:
-					<span style="color: {status.hmac_valid ? 'var(--oo-success)' : 'var(--oo-fg-error)'};">
-						{status.hmac_valid ? 'valid' : 'INVALID'}
+					<span style="color: {status.hmac_valid === true ? 'var(--oo-success)' : status.hmac_valid === false ? 'var(--oo-fg-error)' : 'var(--oo-fg-muted)'};">
+						{status.hmac_valid === true ? 'valid' : status.hmac_valid === false ? 'INVALID' : 'not verified: no key loads'}
 					</span>
 				</span>
 			</div>

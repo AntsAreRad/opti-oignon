@@ -127,6 +127,16 @@ def _compute_entry_hash(
     return hashlib.sha512(payload.encode("utf-8")).hexdigest()
 
 
+def _said_not_written(entry: tuple, why: Any) -> None:
+    """An entry asked for by the thread writing another, and not written: said as ``chain_log`` says any append
+    that fails -- never a debug line."""
+    logger.error(
+        "AUDIT CHAIN APPEND FAILED -- this event is NOT in the tamper-"
+        "evidence chain: %s (event_type=%s, action=%s)",
+        why, entry[1], entry[3],
+    )
+
+
 # ---------------------------------------------------------------------------
 # SignedAuditLog
 # ---------------------------------------------------------------------------
@@ -142,6 +152,10 @@ class SignedAuditLog:
     def __init__(self, db_path: str | Path | None = None) -> None:
         self._db_path = str(db_path or (_DATA_DIR / _DB_NAME))
         self._lock = threading.Lock()
+        # The thread writing an entry, while it holds the lock, and the
+        # entries that thread asked for meanwhile (``append_event``).
+        self._holder: int | None = None
+        self._queued: list[tuple] = []
         # Both the schema and the integrity check move to the first
         # connection. This log is constructed at module scope, so the check
         # ran in every process that imported the package, including tooling
@@ -153,52 +167,60 @@ class SignedAuditLog:
     # -- DB helpers ----------------------------------------------------------
 
     def _get_conn(self) -> sqlite3.Connection:
-        """Open a connection, preferring encrypted if available."""
+        """Open a connection, preferring encrypted if available.
+
+        The first connection makes the schema on itself before it is handed
+        out, and only then is the log ready: opening the store asks the
+        security mode, and a mode that fails secure records why through
+        ``append_event`` -- an entry that must find the table made, whichever
+        call opened the store first. A schema that could not be made is made
+        at the next call.
+        """
         if not self._ready:
-            # Set before the two calls below, because both reach this helper
-            # again -- the schema build directly, the integrity check through
-            # verify_chain().
-            self._ready = True
             directory = os.path.dirname(self._db_path)
             if directory:
                 os.makedirs(directory, exist_ok=True)
-            self._init_db()
+        conn = safe_connect(self._db_path, check_same_thread=False)
+        if not self._ready:
+            try:
+                self._init_db(conn)
+            except BaseException:
+                conn.close()
+                raise
+            # Set before the integrity check, which reaches this helper again
+            # through verify_chain().
+            self._ready = True
             self._check_integrity_on_init()
-        return safe_connect(self._db_path, check_same_thread=False)
+        return conn
 
-    def _init_db(self) -> None:
-        """Create the audit_chain table if it does not exist."""
-        os.makedirs(os.path.dirname(self._db_path), exist_ok=True)
-        conn = self._get_conn()
-        try:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS audit_chain (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    timestamp    REAL    NOT NULL,
-                    event_type   TEXT    NOT NULL,
-                    source       TEXT    NOT NULL DEFAULT '',
-                    action       TEXT    NOT NULL DEFAULT '',
-                    severity     TEXT    NOT NULL DEFAULT 'INFO',
-                    details_json TEXT    NOT NULL DEFAULT '{}',
-                    prev_hash    TEXT    NOT NULL,
-                    entry_hash   TEXT    NOT NULL
-                )
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_audit_event_type
-                ON audit_chain(event_type)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_audit_severity
-                ON audit_chain(severity)
-            """)
-            conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_audit_timestamp
-                ON audit_chain(timestamp)
-            """)
-            conn.commit()
-        finally:
-            conn.close()
+    def _init_db(self, conn: sqlite3.Connection) -> None:
+        """Create the audit_chain table on ``conn`` if it does not exist."""
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS audit_chain (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp    REAL    NOT NULL,
+                event_type   TEXT    NOT NULL,
+                source       TEXT    NOT NULL DEFAULT '',
+                action       TEXT    NOT NULL DEFAULT '',
+                severity     TEXT    NOT NULL DEFAULT 'INFO',
+                details_json TEXT    NOT NULL DEFAULT '{}',
+                prev_hash    TEXT    NOT NULL,
+                entry_hash   TEXT    NOT NULL
+            )
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_event_type
+            ON audit_chain(event_type)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_severity
+            ON audit_chain(severity)
+        """)
+        conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_audit_timestamp
+            ON audit_chain(timestamp)
+        """)
+        conn.commit()
 
     def _check_integrity_on_init(self) -> None:
         """Run a quick chain check on startup and warn if broken.
@@ -398,59 +420,88 @@ class SignedAuditLog:
         action: str = "",
         severity: str = "INFO",
         details: dict[str, Any] | None = None,
-    ) -> int:
+    ) -> int | None:
         """Append a new event to the chain.
 
-        Returns the new entry id.
+        Returns the new entry id. The thread already writing an entry is
+        never made to wait on itself: opening the store asks the security
+        mode, and a mode that fails secure records why -- through here, on
+        the same thread. Such an entry is chained right after the one being
+        written, in the order asked, and None is returned; if the entry it
+        follows is not written, it is said as not written, by name. Another
+        thread waits its turn as before.
         """
         details_json = json.dumps(details or {}, separators=(",", ":"), default=str)
-        ts = time.time()
+        entry = (time.time(), event_type, source, action, severity, details_json)
 
+        if self._holder == threading.get_ident():
+            self._queued.append(entry)
+            return None
         with self._lock:
-            conn = self._get_conn()
+            self._holder = threading.get_ident()
             try:
-                # Fetch last entry hash
-                row = conn.execute(
-                    "SELECT entry_hash FROM audit_chain ORDER BY id DESC LIMIT 1"
-                ).fetchone()
-                prev_hash = row[0] if row else _GENESIS_PREV_HASH
-
-                # We need the id BEFORE computing the hash, but AUTOINCREMENT
-                # assigns it on INSERT.  Strategy: insert a placeholder then
-                # update, or use a two-step approach.
-                # Better: fetch max(id)+1 within the lock.
-                max_row = conn.execute(
-                    "SELECT COALESCE(MAX(id), 0) FROM audit_chain"
-                ).fetchone()
-                next_id = max_row[0] + 1
-
-                entry_hash = _compute_entry_hash(
-                    next_id, ts, event_type, source, action,
-                    severity, details_json, prev_hash,
-                )
-
-                conn.execute(
-                    """INSERT INTO audit_chain
-                       (id, timestamp, event_type, source, action,
-                        severity, details_json, prev_hash, entry_hash)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (next_id, ts, event_type, source, action,
-                     severity, details_json, prev_hash, entry_hash),
-                )
-                conn.commit()
-
-                # Update anchor for truncation detection
+                conn = self._get_conn()
                 try:
-                    self._save_anchor(next_id, entry_hash)
-                except Exception:
-                    pass  # Non-critical, do not fail the append
-
-                return next_id
-            except Exception:
-                conn.rollback()
-                raise
+                    own = self._chain(conn, entry)
+                    while self._queued:
+                        queued = self._queued.pop(0)
+                        try:
+                            self._chain(conn, queued)
+                        except Exception as exc:
+                            _said_not_written(queued, exc)
+                    return own
+                finally:
+                    conn.close()
             finally:
-                conn.close()
+                self._holder = None
+                left, self._queued = self._queued, []
+                for queued in left:
+                    _said_not_written(queued, "the entry it was to follow was not written")
+
+    def _chain(self, conn: sqlite3.Connection, entry: tuple) -> int:
+        """Write ``entry`` after the chain's last one, committed, and move the anchor; its id."""
+        ts, event_type, source, action, severity, details_json = entry
+        try:
+            # Fetch last entry hash
+            row = conn.execute(
+                "SELECT entry_hash FROM audit_chain ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            prev_hash = row[0] if row else _GENESIS_PREV_HASH
+
+            # We need the id BEFORE computing the hash, but AUTOINCREMENT
+            # assigns it on INSERT.  Strategy: insert a placeholder then
+            # update, or use a two-step approach.
+            # Better: fetch max(id)+1 within the lock.
+            max_row = conn.execute(
+                "SELECT COALESCE(MAX(id), 0) FROM audit_chain"
+            ).fetchone()
+            next_id = max_row[0] + 1
+
+            entry_hash = _compute_entry_hash(
+                next_id, ts, event_type, source, action,
+                severity, details_json, prev_hash,
+            )
+
+            conn.execute(
+                """INSERT INTO audit_chain
+                   (id, timestamp, event_type, source, action,
+                    severity, details_json, prev_hash, entry_hash)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (next_id, ts, event_type, source, action,
+                 severity, details_json, prev_hash, entry_hash),
+            )
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+        # Update anchor for truncation detection
+        try:
+            self._save_anchor(next_id, entry_hash)
+        except Exception:
+            pass  # Non-critical, do not fail the append
+
+        return next_id
 
     def verify_chain(self) -> tuple[bool, int | None, int]:
         """Verify the entire chain from genesis to tip.
@@ -636,7 +687,9 @@ def chain_log(
 ) -> int | None:
     """Convenience wrapper: log to the chain if available.
 
-    Returns the entry id or None if the chain is unavailable.
+    Returns the entry id or None if the chain is unavailable, or if this
+    thread is writing an entry already: chained right after it
+    (``SignedAuditLog.append_event``).
     """
     if signed_audit_log is None:
         return None

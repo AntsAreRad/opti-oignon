@@ -173,6 +173,38 @@ the application's environment still carries the requests to Ollama and to
 a llama-server.
 
 
+## The mode's two sources
+
+The mode is read from `security.yaml` and from a lockfile beside the
+databases (`data/.security_mode_lock`), signed with an HMAC under the
+master key of the key file. The platform reads Bulbe, failing secure,
+when the two disagree, when the lockfile does not verify under the key
+that loads, or when the key file is there and does not load; it records
+why in the audit chain each time it reads the files anew -- at a start,
+and when either changes --, never waiting on the record it is writing.
+A platform started without the passphrase of its wrapped key file opens
+no encrypted database, and reads Bulbe as soon as a lockfile is there:
+set `OPTI_KEYFILE_PASSPHRASE` wherever it starts. Without a key file the
+lockfile is not verified, and a lockfile that cannot be read counts as
+none. `python3 -m opti_oignon.db_encryption check` says the mode the
+platform reads and why -- with, for a lockfile that does not verify,
+when it says it was signed and when the key file changed.
+
+Making the key file -- at setup, or by `encrypt` -- first signs a
+lockfile that agrees with `security.yaml` under the new key, so the mode
+read is the same before and after: the agreed state is taken as it is,
+since without a key file nothing verified it. One that disagrees is left
+as it is; a lockfile that cannot be written refuses the key, by its
+name. The emergency stop escalates even when no key loads: it writes
+`security.yaml`, and, with no key file at all, a lockfile that says Bulbe
+unsigned, so the two agree and a key file made later signs it; a key file
+that does not load keeps the lockfile it has, and a lockfile the stop
+cannot write is left where it is and said -- one that says Daily keeps
+the two disagreeing, which reads Bulbe. The lockfile is written whole
+where its folder takes a new file, and in place where it does not, never
+through a symbolic link at its place.
+
+
 ## Enabling Bulbe mode
 
 ### From the UI

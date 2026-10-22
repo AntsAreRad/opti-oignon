@@ -23,6 +23,11 @@ module resolve behind a test's back:
   * I4 -- a project name the caller NEVER NAMED and never seeded is refused
     too, even when a name-answering finder would have resolved it. The window
     is closed by construction, not by an enumeration a human has to get right;
+  * I4b -- the same, with the WINDOW ALONE answering: the data firewall now
+    judges a module of the package an install finds outside the tree too, and
+    would refuse I4's probe on its own, so I4 held with the window's guard
+    gone. The firewall's rule and the install's finders are set aside for the
+    clause (nothing can reach another checkout meanwhile), and put back;
   * I5 -- the window PROVES ITSELF: a name declared absent that nonetheless
     resolves raises rather than yielding a window that blocks nothing;
   * I6 -- a seeded name resolves to the caller's stand-in, never to the real
@@ -223,6 +228,45 @@ def test_i4_a_name_the_caller_never_declared_is_refused_too(tmp_path):
             restore()
     finally:
         _drop_finder(finder)
+    assert _UNNAMED not in sys.modules
+
+
+# I4b -- the window alone refuses a name the caller never declared
+
+
+def _the_window_alone():
+    """Take off the meta path every finder besides the window's that would refuse or serve the package -- the data
+    firewall's package rule and an editable install's finders -- and return the meta path as it was, to put back.
+
+    A refusal is then the window's own, and nothing can reach another checkout while the rule is off.
+    """
+    before = list(sys.meta_path)
+    sys.meta_path[:] = [finder for finder in before
+                        if not isinstance(getattr(finder, "data_firewall_homes", None), list)
+                        and "editable" not in repr(finder).lower()]
+    return before
+
+
+def test_i4b_the_window_alone_refuses_a_name_the_caller_never_declared(tmp_path):
+    _forget(_UNNAMED)
+    leaf = _UNNAMED.rpartition(".")[2]
+    before = _the_window_alone()
+    assert len(sys.meta_path) < len(before), "control: the firewall's package rule was on the meta path"
+    try:
+        finder = _with_finder({_UNNAMED: _live_source(tmp_path, leaf)})
+        try:
+            loaded, restore = isolate(targets={_REAL: _REAL_PATH})
+            try:
+                assert _unreachable(_UNNAMED), (
+                    "with no other guard on the meta path, the window itself refuses a project name that is "
+                    "neither seeded nor a target, whatever a finder answers"
+                )
+            finally:
+                restore()
+        finally:
+            _drop_finder(finder)
+    finally:
+        sys.meta_path[:] = before
     assert _UNNAMED not in sys.modules
 
 

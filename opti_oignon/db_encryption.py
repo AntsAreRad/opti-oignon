@@ -999,9 +999,10 @@ def _key_file_key() -> Any:
     return _db_key(raw) if raw and len(raw) == encryption._KEY_SIZE else None
 
 
-def _write_master(master: bytes, key: bytes) -> None:
+def _write_master(master: bytes, key: bytes, lock_before: Any = None) -> None:
     """Write ``master`` to a new key file -- wrapped under OPTI_KEYFILE_PASSPHRASE when it is set, as setup writes
-    one -- and prove it loads to ``key``; refused by name, the file removed, when it does not."""
+    one -- and prove it loads to ``key``; refused by name, the file removed and the mode's lockfile put back to
+    ``lock_before``, when it does not. A key file or a lockfile that cannot be written refuses, by name."""
     from opti_oignon import encryption
 
     passphrase = os.environ.get("OPTI_KEYFILE_PASSPHRASE")
@@ -1010,16 +1011,91 @@ def _write_master(master: bytes, key: bytes) -> None:
     except encryption.KeyfileExists:
         raise EncryptionRefused("a key file appeared while this one was made; it is never replaced: nothing was "
                                 "changed") from None
+    except OSError as exc:
+        raise EncryptionRefused(f"{exc}: nothing was changed") from None
     if _get_db_encryption_key() != key:
-        _unmake_key()
+        try:
+            _unmake_key(lock_before, master)
+        except OSError as exc:
+            raise EncryptionRefused(f"the key does not load once written, and its key file {_key_file()} could not "
+                                    f"be removed ({type(exc).__name__}): no store is encrypted under it: delete it"
+                                    ) from None
         raise EncryptionRefused("the key does not load once written: nothing was changed")
 
 
-def _unmake_key() -> None:
-    """Remove the key file this run made: no store is encrypted under it."""
+def _unmake_key(lock_before: Any = None, master: Any = None) -> None:
+    """Remove the key file this run made: no store is encrypted under it. Once it is gone, the security mode's
+    lockfile, signed under ``master`` as the key file was made (``encryption.save_keyfile``), is put back to
+    ``lock_before`` (``_lock_snapshot``) -- unless another maker signed it since; a key file that cannot be removed
+    keeps the lockfile signed under it, and raises."""
     from opti_oignon import encryption
 
-    os.unlink(encryption._DEFAULT_KEYFILE)
+    try:
+        os.unlink(encryption._DEFAULT_KEYFILE)
+    except FileNotFoundError:
+        pass
+    if lock_before is not None:
+        from opti_oignon import security_mode
+
+        try:
+            security_mode.put_lock_back(lock_before, master)
+        except OSError as exc:
+            # Said, never raised over the refusal that undid the key: with no key file, a lockfile signed
+            # under the key is verified by nothing.
+            logger.error("the security mode's lockfile could not be put back as it was: %s", exc)
+
+
+def _lock_snapshot() -> Any:
+    """The security mode's lockfile as it is now (``security_mode.lock_snapshot``); None where the mode module does
+    not import, or keeps no lockfile (a stand-in): no mode to keep."""
+    try:
+        from opti_oignon import security_mode
+    except ImportError:
+        return None
+    snapshot = getattr(security_mode, "lock_snapshot", None)
+    return None if snapshot is None else snapshot()
+
+
+def _mode_line() -> str:
+    """The security mode the platform reads from these files, and why, as ``check`` says it
+    (``security_mode.mode_report``)."""
+    try:
+        from opti_oignon import security_mode
+
+        report = security_mode.mode_report()
+    except Exception as exc:  # noqa: BLE001 - a mode that does not read is said, never a crash of check
+        return f"security mode: not read here ({type(exc).__name__}: {exc})"
+    lock, failure, said = report["lock"], report["failure"], report["yaml_said"]
+    # security.yaml holding no plain mode is said wherever the line would not say it.
+    held = "" if said in ("daily", "bulbe") else f"; security.yaml says {said}"
+    if lock is None:
+        source = "security.yaml" if said in ("daily", "bulbe") else f"security.yaml, which says {said}"
+        if report["lock_unread"]:
+            return f"security mode: {report['mode']}, from {source}: its lock file {report['lock_unread']}, read as none"
+        return f"security mode: {report['mode']}, from {source}: no lock file"
+    if failure == "lockfile_hmac_failure":
+        changed = report["key_changed"]
+        return (f"security mode: bulbe, failing secure: its lock file ({lock['MODE'] or 'no mode'}, signed "
+                f"{_when(lock['TIMESTAMP'])} by its own account) does not verify under the key that loads (key file "
+                f"changed {_when(changed) if changed is not None else 'at a time not read here'}): it was signed under "
+                "another key, or written without one; the platform records lockfile_hmac_failure at each start until "
+                f"it is signed again under this key, which leaving Bulbe through the downgrade ceremony does{held}")
+    if failure == "lockfile_unverifiable":
+        return f"security mode: bulbe, failing secure: {report['key']}: its lock file cannot be verified{held}"
+    if failure == "security_mode_mismatch":
+        return (f"security mode: bulbe, failing secure: security.yaml says {said}, its lock file "
+                f"{lock['MODE'] or 'no mode'}")
+    if report["verified"]:
+        return f"security mode: {report['mode']}; its lock file verifies under the key that loads{held}"
+    return f"security mode: {report['mode']}; its lock file is not verified: no key file{held}"
+
+
+def _when(stamp: Any) -> str:
+    """A time in seconds since the epoch, as ``check`` says it (UTC, to the minute); one that is no time, said so."""
+    try:
+        return time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(float(stamp)))
+    except (TypeError, ValueError, OverflowError, OSError):
+        return f"at a time it does not give ({stamp!r})"
 
 
 def _key_file() -> Path:
@@ -1354,10 +1430,12 @@ def _encrypt(places: Any, proc: Any, noted: list) -> dict[str, Any]:
     records: list = []
     folders: dict[Path, Path] = {}
     written = False
+    lock_before = None
     try:
         if master is not None:
             _stop_if_asked(noted)
-            _write_master(master, key)
+            lock_before = _lock_snapshot()
+            _write_master(master, key, lock_before)
             written = True
         for store, copy in copies:
             _stop_if_asked(noted)
@@ -1377,22 +1455,25 @@ def _encrypt(places: Any, proc: Any, noted: list) -> dict[str, Any]:
                 folder.rmdir()
             except OSError:
                 pass
+        changed = "nothing was changed"
         if written:
             try:
-                _unmake_key()
-            except FileNotFoundError:
-                pass
+                _unmake_key(lock_before, master)
+            except OSError as removal:
+                changed = "nothing was changed but the key file"
+                stays.append(f"the key file {_key_file()} ({type(removal).__name__}), under which no store is "
+                             "encrypted")
         note = "".join(f"; {item}: delete it" for item in stays)
         if isinstance(exc, EncryptionRefused):
             if not note:
                 raise
             raise EncryptionRefused(f"{exc}{note}") from exc
         if isinstance(exc, _Ended):
-            raise EncryptionRefused(f"stopped by signal {exc.args[0]}: every store it switched was put back: nothing "
-                                    f"was changed{note}") from exc
+            raise EncryptionRefused(f"stopped by signal {exc.args[0]}: every store it switched was put back: "
+                                    f"{changed}{note}") from exc
         if isinstance(exc, Exception):
             raise EncryptionRefused(f"a store could not be switched ({type(exc).__name__}): every step was put back: "
-                                    f"nothing was changed{note}") from exc
+                                    f"{changed}{note}") from exc
         raise
     unsynced = []
     for place in {store.parent for store, _copy in copies} | set(folders.values()):
@@ -1608,6 +1689,7 @@ def main(argv: Any = None) -> int:
         for folder in plaintext_folders():
             print(f"plaintext copies kept in {folder}: delete it once the platform reads its stores again and the key "
                   "is kept safe elsewhere")
+        print(_mode_line())
         print(f"{len(stores)} store(s), {len(plaintext_stores())} in plaintext; SQLCipher "
               f"{'installed' if SQLCIPHER_AVAILABLE else 'missing'}; a key {'loads' if key else 'does not load'}")
         return 0
@@ -1632,6 +1714,9 @@ def main(argv: Any = None) -> int:
               "this machine and out of any repository, before deleting the plaintext copies")
         if done["key_file"] == "wrapped":
             print("it is wrapped under OPTI_KEYFILE_PASSPHRASE: the platform starts with it set")
+    if done["key"] == "made":
+        # The key file is new: the mode the platform reads, said as it reads it now (encryption.save_keyfile).
+        print(_mode_line())
     for folder in done["plaintext_copies"]:
         print(f"plaintext copies kept in {folder}: delete it once the platform reads its stores again and the key is "
               "kept safe elsewhere")

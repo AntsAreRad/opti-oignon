@@ -91,7 +91,12 @@ refers to them from another table.) Only then is the key written to its
 key file -- wrapped under `OPTI_KEYFILE_PASSPHRASE` when it is set --
 and each database switched: its plaintext linked into a
 `plaintext-<time>` folder (mode 0700) inside its directory, its
-encrypted copy taking its name in one rename.
+encrypted copy taking its name in one rename. Just before the key file
+is written, the security mode's lockfile, when it agrees with
+`security.yaml`, is signed under the new key (no key file, no lockfile
+verified until then), so the platform reads the same mode after the run,
+which the command says; a run that undoes its key file puts the
+lockfile back as it was.
 
 SIGTERM, SIGHUP and Ctrl-C are noted -- the command says so at once --
 and the run stops at its next safe point -- before a copy, before the

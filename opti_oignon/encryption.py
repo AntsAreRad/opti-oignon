@@ -541,6 +541,26 @@ def _write_keyfile(fpath: Path, data: bytes) -> None:
         )
 
 
+@contextlib.contextmanager
+def _mode_kept(key: bytes, fpath: Path):
+    """The security mode's lockfile signed under ``key`` before the key file
+    ``fpath`` is written, and put back as it was when it is not
+    (``security_mode.signed_for_a_new_key``): making the key file never
+    changes the mode the platform reads. A mode module that does not import,
+    or keeps no lockfile (a stand-in), has no mode to keep.
+    """
+    try:
+        from opti_oignon import security_mode
+    except ImportError:
+        security_mode = None
+    keep = getattr(security_mode, "signed_for_a_new_key", None)
+    if keep is None:
+        yield
+        return
+    with keep(key, fpath):
+        yield
+
+
 def save_keyfile(
     key: bytes,
     salt: bytes | None = None,
@@ -571,7 +591,8 @@ def save_keyfile(
 
     The file is created with mode 0600 (owner read/write only) and written
     whole, and an existing key file is never replaced: ``KeyfileExists``
-    (see ``_write_keyfile``).
+    (see ``_write_keyfile``). The security mode reads the same mode before
+    and after: its lockfile is signed under the key first (``_mode_kept``).
     """
     if len(key) != _KEY_SIZE:
         raise ValueError(f"Key must be {_KEY_SIZE} bytes, got {len(key)}")
@@ -592,7 +613,8 @@ def save_keyfile(
             "kek_salt": base64.urlsafe_b64encode(kek_salt).decode("ascii"),
             "blob": base64.urlsafe_b64encode(blob).decode("ascii"),
         }
-        _write_keyfile(fpath, (json.dumps(payload) + "\n").encode("ascii"))
+        with _mode_kept(key, fpath):
+            _write_keyfile(fpath, (json.dumps(payload) + "\n").encode("ascii"))
         logger.info(
             "Encryption keyfile saved (enveloped, kdf=%s): %s", kek_kdf, fpath,
         )
@@ -617,7 +639,8 @@ def save_keyfile(
     else:
         lines.append("")
     lines.append(kdf_name or "")
-    _write_keyfile(fpath, ("\n".join(lines) + "\n").encode("ascii"))
+    with _mode_kept(key, fpath):
+        _write_keyfile(fpath, ("\n".join(lines) + "\n").encode("ascii"))
     logger.info(
         "Encryption keyfile saved (unprotected, kdf=%s): %s",
         kdf_name or "random", fpath,
