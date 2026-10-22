@@ -123,6 +123,10 @@ REASON_FILE_UNREADABLE = "file_unreadable"
 
 _CHUNK = 1024 * 1024
 
+# The master key's size, an AES-256 key's (encryption._KEY_SIZE): a key file
+# that loads any other size of key is damaged, and seals nothing.
+_MASTER_KEY_BYTES = 32
+
 
 class ProvenanceError(Exception):
     """Base class for provenance failures."""
@@ -253,23 +257,38 @@ def _pqc_enabled() -> bool:
 
 
 def _hmac_key() -> Any:
-    """The local HMAC secret, mirroring the plugin allowlist idiom."""
+    """The local HMAC secret: the key file's key when it loads, else None.
+
+    None makes and checks no HMAC seal. Never the key file's bytes: the first
+    32 bytes of every wrapped key file are the same text, and a seal made with
+    them is made with a key anyone holds. No key file -- nothing at its path,
+    or a link there that leads nowhere -- is no key, said by nothing; one
+    that is there and does not load -- wrapped under a passphrase this
+    process lacks, damaged, unreadable, or holding no 32-byte key, as an
+    empty or cut one loads -- is said.
+    """
     try:
         from opti_oignon.encryption import load_keyfile
 
         key, _salt, _kdf = load_keyfile()
-        return key
-    except Exception:
-        pass
-    try:
-        keyfile = _DATA_DIR / ".keyfile"
-        if keyfile.is_file():
-            raw = keyfile.read_bytes()
-            if len(raw) >= 32:
-                return raw[:32]
-    except Exception:
-        pass
-    return None
+    except FileNotFoundError:
+        return None
+    except Exception as exc:  # noqa: BLE001 - whatever stops the load, no key loads
+        logger.error(
+            "the key file does not load here (%s): no model seal is made or "
+            "checked under it; if it is wrapped under a passphrase, set "
+            "OPTI_KEYFILE_PASSPHRASE",
+            type(exc).__name__,
+        )
+        return None
+    if len(key) != _MASTER_KEY_BYTES:
+        logger.error(
+            "the key file does not load here as a key: it holds %d bytes, not "
+            "%d; no model seal is made or checked under it",
+            len(key), _MASTER_KEY_BYTES,
+        )
+        return None
+    return key
 
 
 def _extract_key_bytes(key: Any) -> bytes | None:

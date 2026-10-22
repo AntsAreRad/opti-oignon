@@ -53,6 +53,9 @@ _DATA_DIR = _PROJECT_ROOT / "data"
 _LOCKFILE_PATH = _DATA_DIR / ".security_mode_lock"
 _SECURITY_YAML = Path(__file__).resolve().parent / "config" / "security.yaml"
 _DEFAULT_KEYFILE = _DATA_DIR / ".keyfile"
+# The master key's size, an AES-256 key's (encryption._KEY_SIZE): a key file
+# that loads any other size of key is damaged, and signs nothing.
+_MASTER_KEY_BYTES = 32
 
 # Downgrade ceremony
 DOWNGRADE_COOLDOWN_SECONDS = 300  # 5 minutes
@@ -193,11 +196,11 @@ def _load_signing_key():
     """The key file's key when it loads (SecureBytes); None when there is no key file.
 
     A key file that is there and does not load -- wrapped under a passphrase
-    this process lacks, damaged, unreadable -- raises
-    ``SigningKeyUnavailable``: the mode then fails secure and signs nothing.
-    Its bytes are never a key: the first 32 bytes of every wrapped key file
-    are the same text, and a lockfile signed with them is signed with a key
-    anyone holds.
+    this process lacks, damaged, unreadable, or holding no 32-byte key, as an
+    empty or cut one loads -- raises ``SigningKeyUnavailable``: the mode then
+    fails secure and signs nothing. Its bytes are never a key: the first 32
+    bytes of every wrapped key file are the same text, and a lockfile signed
+    with them is signed with a key anyone holds.
     """
     if not os.path.lexists(_DEFAULT_KEYFILE):
         return None
@@ -209,6 +212,11 @@ def _load_signing_key():
             f"the key file {_DEFAULT_KEYFILE} does not load here ({type(exc).__name__}); if it is wrapped under a "
             "passphrase, set OPTI_KEYFILE_PASSPHRASE"
         ) from None
+    if len(key) != _MASTER_KEY_BYTES:
+        raise SigningKeyUnavailable(
+            f"the key file {_DEFAULT_KEYFILE} does not load here as a key: it holds {len(key)} bytes, not "
+            f"{_MASTER_KEY_BYTES}"
+        )
     return key
 
 

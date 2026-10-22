@@ -244,9 +244,13 @@ Veilid record signing refuses. Where a post-quantum signature is
 required (the operator asked for one, or the mode demands it), a backup
 export and a provenance seal are refused. Elsewhere a backup is
 exported unsigned, still encrypted and authenticated with AES-256-GCM,
-and the provenance seal is an HMAC-SHA512 MAC, which anyone holding the
-key can forge and nobody else can verify. The startup security
-checklist reports a missing primitive.
+and the provenance seal is an HMAC-SHA512 MAC under the key file's key,
+which anyone holding the key can forge and nobody else can verify. A key
+file that does not load here (a wrapped one without
+`OPTI_KEYFILE_PASSPHRASE`, or one holding no 32-byte key) makes and
+checks no MAC -- its bytes are never a key --, and where provenance is
+enforced the model is refused.
+The startup security checklist reports a missing primitive.
 
 ### What is not signed
 

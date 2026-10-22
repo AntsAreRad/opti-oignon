@@ -25,11 +25,13 @@ Environment variables (set by the host):
 
 import hashlib
 import hmac as _hmac
+import importlib.machinery
 import importlib.util
 import json
 import logging
 import os
 import resource
+import secrets
 import signal
 import socket
 import struct
@@ -215,7 +217,9 @@ def load_plugin_module(
     install_host_package_guard()
 
     module_name = f"_oo_worker_plugin_{plugin_name}"
-    spec = importlib.util.spec_from_file_location(module_name, str(entry_path))
+    spec = importlib.util.spec_from_file_location(
+        module_name, str(entry_path), loader=_SourceOnlyLoader(module_name, str(entry_path))
+    )
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot create module spec for {entry_path}")
 
@@ -225,6 +229,34 @@ def load_plugin_module(
     sys.modules[module_name] = module
     spec.loader.exec_module(module)
     return module
+
+
+class _SourceOnlyLoader(importlib.machinery.SourceFileLoader):
+    """Loads a plugin's entry point from its source, the bytes the allowlist hashed.
+
+    The default loader runs the bytecode cached beside a source in
+    ``__pycache__`` when its time and size match the source's: one planted
+    there would run in the source's place, its hash unchanged. This one
+    compiles the source each time, and reads and writes no bytecode.
+    """
+
+    def get_code(self, fullname):
+        path = self.get_filename(fullname)
+        return self.source_to_code(self.get_data(path), path)
+
+
+def _no_cached_bytecode() -> None:
+    """Every import in this worker compiles from its source.
+
+    No bytecode is read from a ``__pycache__`` beside a source -- where
+    whoever can write the plugin's folder could plant one that runs in the
+    source's place, its hash unchanged -- and none is written: the cache
+    moves to a path that does not exist, at the root, under a name nobody
+    can guess, which only root could make. No temporary folder is asked
+    for: a sandbox may have none that takes a file.
+    """
+    sys.dont_write_bytecode = True
+    sys.pycache_prefix = os.path.join(os.sep, f"oo-plugin-no-bytecode-{secrets.token_hex(16)}")
 
 
 # ---------------------------------------------------------------------------
@@ -514,6 +546,7 @@ class PluginWorkerServer:
 
 def main() -> None:
     """Main entry point for the plugin worker subprocess."""
+    _no_cached_bytecode()
     # Read configuration from environment
     plugin_name = os.environ.get("OO_PLUGIN_NAME", "")
     plugin_dir = os.environ.get("OO_PLUGIN_DIR", "")

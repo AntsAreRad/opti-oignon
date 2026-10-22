@@ -1085,6 +1085,19 @@ fail_under = 0
 # aside, so the refusal is the window's alone. I4 stays in the tree word for
 # word.
 #
+# C2 and C3 of tests/test_plugin_allowlist_contracts.py held the allowlist's
+# verifier and its batch ceremony under a key their stand-in loader never
+# gave: it refuses, and the key came from the first 32 bytes of the key
+# file, the fallback that made every wrapped key file's opening text a
+# key. The allowlist now takes the security mode's key, the key file's key
+# when it loads, or none. Both give way to KY2 and KY3 of
+# tests/test_signing_key_contracts.py, which assert all they pin under
+# the real key file, on the shared isolation window. C1 of the same file
+# held that a plugin's hash leaves out every file but four suffixes:
+# bytecode or native code beside a source ran unhashed. It gives way to
+# KY11, which asserts the rest of what it pins with every file of the
+# folder in the hash. C1, C2 and C3 stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1473,4 +1486,7 @@ addopts = """
     --deselect=tests/test_vector_store_health.py::test_crud_are_safe_noops_without_collection
     --deselect=tests/test_vector_store_health.py::test_find_similar_empty_without_collection
     --deselect=tests/test_isolation_window_contracts.py::test_i4_a_name_the_caller_never_declared_is_refused_too
+    --deselect=tests/test_plugin_allowlist_contracts.py::test_c1_hash_discipline
+    --deselect=tests/test_plugin_allowlist_contracts.py::test_c2_verifier_four_points
+    --deselect=tests/test_plugin_allowlist_contracts.py::test_c3_batch_ceremony
 """

@@ -3,7 +3,7 @@
 Plugin Allowlist for Opti-Oignon Bulbe mode.
 
 In Bulbe mode, only explicitly approved plugins may be loaded.  Each plugin
-is identified by a SHA-512 hash of its source files.  Approval uses a
+is identified by a SHA-512 hash of everything its folder holds.  Approval uses a
 batch ceremony (same security as mode degradation) and produces HMAC-SHA512
 signed allowlist entries.
 
@@ -12,11 +12,17 @@ load in Bulbe mode verifies:
 
   1. The plugin is in the allowlist
   2. Its current on-disk hash matches the approved hash
-  3. The HMAC signature on the allowlist entry is valid
+  3. The HMAC signature on the allowlist entry is valid under the
+     allowlist's own key, derived from the key that loads -- the security
+     mode's, the key file's key -- over all the entry's fields
   4. Its permissions have not escalated since approval
 
 Security derives from the signing key and the human approval ceremony,
-not from code obscurity (Kerckhoffs principle).
+not from code obscurity (Kerckhoffs principle). With no key file, or one
+that does not load here, no entry is signed and none verifies: the key
+file's bytes are never a key. The allowlist's key is its own, so an
+entry's signature is never a signature of anything else the master key
+signs -- the mode's lockfile is signed under the master key itself.
 
 In Daily mode, the allowlist is ignored and all plugins load normally.
 """
@@ -27,7 +33,9 @@ import hashlib
 import hmac as _hmac
 import json
 import logging
+import os
 import secrets
+import stat
 import time
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -42,6 +50,12 @@ logger = logging.getLogger(__name__)
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _DATA_DIR = _PROJECT_ROOT / "data"
 _ALLOWLIST_PATH = _DATA_DIR / "plugin_allowlist.json"
+
+# The signing scheme of an entry: what its signature covers and under which
+# key. An entry that carries another scheme was signed before and is refused.
+_ENTRY_SCHEME = "allowlist-v2"
+# The domain the allowlist's key is derived on from the master key.
+_ENTRY_KEY_LABEL = b"opti-oignon-plugin-allowlist-v2"
 
 
 # ---------------------------------------------------------------------------
@@ -58,6 +72,7 @@ class AllowlistEntry:
     batch_id: str
     permissions: list[str] = field(default_factory=list)
     signature: str = ""  # HMAC-SHA512
+    scheme: str = _ENTRY_SCHEME
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -72,6 +87,7 @@ class AllowlistEntry:
             batch_id=data.get("batch_id", ""),
             permissions=data.get("permissions", []),
             signature=data.get("signature", ""),
+            scheme=data.get("scheme", ""),
         )
 
 
@@ -91,31 +107,88 @@ class BatchManifest:
 # ---------------------------------------------------------------------------
 
 def compute_plugin_hash(plugin_dir: Path) -> str:
-    """Compute SHA-512 of all plugin source files.
+    """SHA-512 of everything the plugin's folder holds; "" when it cannot be hashed.
 
-    Files are sorted by relative path for deterministic ordering.
-    The hash covers the file content of every ``.py`` and ``.yaml``
-    file in the plugin directory.
+    Every file and folder under it enters the digest, sorted by relative
+    path: a file by its path and the SHA-512 of its bytes, a folder by its
+    path, all of it as one canonical record. Whatever the import system
+    could run from there -- a source, bytecode with or without one, native
+    code -- is covered with every other file: the plugin changes when
+    anything in its folder does. A folder that is missing or holds no file
+    gives "", and so does one holding a symbolic link -- hashed as one thing,
+    it could lead to another when the plugin runs --, a special file (a
+    pipe, a socket, a device), which is never read, or a folder or file it
+    cannot read, whose content the plugin might still reach. An unhashable
+    plugin is never approved and never verifies.
     """
     plugin_path = Path(plugin_dir).resolve()
     if not plugin_path.is_dir():
         return ""
+    listing, unread = [], []
+    for folder, dirs, files in os.walk(plugin_path, onerror=unread.append, followlinks=False):
+        for name in sorted(dirs) + sorted(files):
+            entry = Path(folder) / name
+            rel = entry.relative_to(plugin_path).as_posix()
+            try:
+                mode = os.lstat(entry).st_mode
+            except OSError:
+                return ""
+            if stat.S_ISDIR(mode):
+                listing.append(["folder", rel])
+                continue
+            digest = _file_digest(entry) if stat.S_ISREG(mode) else None
+            if digest is None:
+                return ""
+            listing.append(["file", rel, digest])
+    if unread or not any(kind == "file" for kind, *_rest in listing):
+        return ""
+    record = json.dumps(sorted(listing, key=lambda item: (item[1], item[0])), separators=(",", ":"),
+                        ensure_ascii=True)
+    return f"sha512:{hashlib.sha512(record.encode('ascii')).hexdigest()}"
 
+
+def _file_digest(path: Path) -> str | None:
+    """The SHA-512 of a regular file's bytes, or None: opened without following a link and without
+    waiting on a pipe, so a file swapped for either after it was listed is not read."""
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError:
+        return None
+    digest = hashlib.sha512()
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+                return None
+            for block in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(block)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _hash_before(plugin_dir: Path) -> str:
+    """A plugin's hash as the scheme before made it: the paths and bytes of its .py, .yaml, .yml and .json files,
+    one after the other. Kept only to tell an entry of that scheme whose files changed since its approval from one
+    whose files did not; never compared with an entry of today's scheme."""
+    plugin_path = Path(plugin_dir).resolve()
+    if not plugin_path.is_dir():
+        return ""
     hasher = hashlib.sha512()
-    source_files = sorted(
+    sources = sorted(
         p for p in plugin_path.rglob("*")
         if p.is_file() and p.suffix in (".py", ".yaml", ".yml", ".json")
     )
-
-    if not source_files:
+    if not sources:
         return ""
-
-    for fpath in source_files:
-        rel = fpath.relative_to(plugin_path)
-        # Include the relative path in the hash so renaming is detected
-        hasher.update(str(rel).encode("utf-8"))
-        hasher.update(fpath.read_bytes())
-
+    try:
+        for source in sources:
+            hasher.update(str(source.relative_to(plugin_path)).encode("utf-8"))
+            with open(source, "rb") as handle:
+                for block in iter(lambda: handle.read(1 << 20), b""):
+                    hasher.update(block)
+    except OSError:
+        return ""
     return f"sha512:{hasher.hexdigest()}"
 
 
@@ -134,27 +207,37 @@ def compute_batch_hash(plugin_hashes: list[str]) -> str:
 # ---------------------------------------------------------------------------
 
 def _load_signing_key():
-    """Load signing key from the keyfile.
+    """The key the allowlist signs and verifies with: the security mode's.
 
-    Returns SecureBytes when available (from load_keyfile()),
-    falls back to raw bytes from file if keyfile module is unavailable.
-    Use .as_bytes() to extract raw bytes for HMAC operations.
+    The key file's key when it loads (SecureBytes); None when there is no key
+    file. A key file that is there and does not load -- wrapped under a
+    passphrase this process lacks, damaged, unreadable, or holding no
+    32-byte key, as an empty or cut one loads -- raises the mode's
+    ``SigningKeyUnavailable``. Its bytes are never a key: the first 32 bytes
+    of every wrapped key file are the same text, and an entry signed with
+    them is signed with a key anyone holds. Entries are signed under the
+    allowlist's own key, derived from this one (``_entry_key``).
+    """
+    from opti_oignon.security_mode import _load_signing_key as mode_signing_key
+
+    return mode_signing_key()
+
+
+def _key_or_why() -> tuple[Any, str | None]:
+    """``(key, None)`` when the key loads; ``(None, why)`` when none does.
+
+    No key file, a key file that does not load here, and a security mode
+    that does not import -- it reads the key -- each say why.
     """
     try:
-        from opti_oignon.encryption import load_keyfile
-        key, _salt, _kdf = load_keyfile()
-        return key  # SecureBytes
-    except Exception:
-        pass
-    try:
-        keyfile = _DATA_DIR / ".keyfile"
-        if keyfile.exists():
-            raw = keyfile.read_bytes()
-            if len(raw) >= 32:
-                return raw[:32]
-    except Exception:
-        pass
-    return None
+        key = _load_signing_key()
+    except ImportError as exc:
+        return None, f"the security mode, which reads the key, does not import ({exc})"
+    except Exception as exc:  # noqa: BLE001 - whatever stops the load, no key loads
+        return None, str(exc) or type(exc).__name__
+    if key is None:
+        return None, "there is no key file"
+    return key, None
 
 
 def _extract_key_bytes(key) -> bytes:
@@ -167,20 +250,58 @@ def _extract_key_bytes(key) -> bytes:
     return key
 
 
-def _sign_entry(entry: AllowlistEntry, key) -> str:
-    """Compute HMAC-SHA512 signature for an allowlist entry.
+def _entry_key(key) -> bytes:
+    """The allowlist's own key: HMAC-SHA256 of its domain under the master key.
 
-    Covers plugin_id || code_hash || permissions || batch_id.
-    Security derives from the key, not from format secrecy.
-
-    Accepts SecureBytes or raw bytes via _extract_key_bytes().
+    The mode's lockfile is signed under the master key itself, over fields
+    joined by ``||``; an entry signed under it too, over fields a caller
+    chooses, could be laid out as a lockfile that verifies. Under a key of
+    its own, an entry's signature is never anything else's.
     """
-    raw_key = _extract_key_bytes(key)
-    perms_str = ",".join(sorted(entry.permissions))
-    message = (
-        f"{entry.plugin_id}||{entry.code_hash}||{perms_str}||{entry.batch_id}"
-    ).encode()
-    return _hmac.new(raw_key, message, hashlib.sha512).hexdigest()
+    return _hmac.new(_extract_key_bytes(key), _ENTRY_KEY_LABEL, hashlib.sha256).digest()
+
+
+def _entry_message(entry: AllowlistEntry) -> bytes:
+    """The bytes an entry's signature covers: every field but the signature, as one record.
+
+    Canonical JSON -- sorted keys, no whitespace, ASCII -- so two entries
+    never share it whatever their fields hold: fields joined by ``||``
+    could be cut elsewhere and read as other fields. The approver and the
+    time are covered too.
+    """
+    return json.dumps(
+        {
+            "scheme": _ENTRY_SCHEME,
+            "plugin_id": entry.plugin_id,
+            "code_hash": entry.code_hash,
+            "permissions": sorted(entry.permissions),
+            "batch_id": entry.batch_id,
+            "approved_by": entry.approved_by,
+            "approved_at": entry.approved_at,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+
+
+def _signed_before(entry: AllowlistEntry, key) -> bool:
+    """Whether the entry carries a signature of the scheme before ``allowlist-v2``: the master key itself over
+    plugin_id, code_hash, the sorted permissions and batch_id joined by ``||``. Checked, never made: a signature
+    of that scheme could stand in for the mode's lockfile's."""
+    record = "||".join((entry.plugin_id, entry.code_hash, ",".join(sorted(entry.permissions)), entry.batch_id))
+    expected = _hmac.new(_extract_key_bytes(key), record.encode(), hashlib.sha512).hexdigest()
+    return _hmac.compare_digest(expected, entry.signature)
+
+
+def _sign_entry(entry: AllowlistEntry, key) -> str:
+    """HMAC-SHA512 of the entry's record under the allowlist's own key.
+
+    ``key`` is the master key (SecureBytes or raw bytes); the allowlist's
+    key is derived from it (``_entry_key``). Security derives from the key,
+    not from format secrecy.
+    """
+    return _hmac.new(_entry_key(key), _entry_message(entry), hashlib.sha512).hexdigest()
 
 
 def _verify_entry_signature(entry: AllowlistEntry, key) -> bool:
@@ -211,6 +332,44 @@ def _save_allowlist(entries: list[AllowlistEntry]) -> None:
     _DATA_DIR.mkdir(parents=True, exist_ok=True)
     with open(_ALLOWLIST_PATH, "w", encoding="utf-8") as fh:
         json.dump([e.to_dict() for e in entries], fh, indent=2)
+
+
+def _well_formed(entry: AllowlistEntry) -> bool:
+    """Whether every field holds what the allowlist writes there: texts that encode as UTF-8, a list of them, a
+    time in seconds, and a signature of 128 lowercase hexadecimal digits -- so checking it refuses, and never
+    raises."""
+    texts = (entry.plugin_id, entry.code_hash, entry.approved_by, entry.batch_id, entry.signature, entry.scheme)
+    if not (
+        all(isinstance(value, str) for value in texts)
+        and isinstance(entry.permissions, list)
+        and all(isinstance(permission, str) for permission in entry.permissions)
+        and isinstance(entry.approved_at, (int, float))
+        and not isinstance(entry.approved_at, bool)
+    ):
+        return False
+    if len(entry.signature) != 128 or not all(digit in "0123456789abcdef" for digit in entry.signature):
+        return False
+    try:
+        for value in (*texts, *entry.permissions):
+            value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _tampered(plugin_id: str) -> dict[str, Any]:
+    return {
+        "allowed": False,
+        "reason": f"Invalid signature for '{plugin_id}': allowlist entry may be tampered",
+    }
+
+
+def _unverifiable(plugin_id: str, why: str | None) -> dict[str, Any]:
+    logger.error("Plugin '%s' allowlist signature cannot be checked: %s.", plugin_id, why)
+    return {
+        "allowed": False,
+        "reason": f"Unverifiable signature for '{plugin_id}': {why}",
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -277,8 +436,75 @@ class PluginAllowlistManager:
                 "reason": f"Plugin '{plugin_id}' is not in the allowlist",
             }
 
-        # Verify code hash
+        # An entry that does not hold what the allowlist writes -- text, a list
+        # of texts, a time -- was not written by it.
+        if not _well_formed(entry):
+            logger.critical(
+                "Plugin '%s' allowlist entry is malformed. Possible allowlist tampering.",
+                plugin_id,
+            )
+            return _tampered(plugin_id)
+
+        # An entry of another scheme is settled first, under the key: its hash
+        # is of the scheme before too, and is not compared with today's. It is
+        # outdated only when the scheme before -- the master key itself over
+        # fields joined by "||", checked, never made -- verifies it; any other
+        # is tampered.
+        if entry.scheme != _ENTRY_SCHEME:
+            key, why = _key_or_why()
+            if key is None:
+                return _unverifiable(plugin_id, why)
+            if _signed_before(entry, key):
+                # Its files changed since that approval when the hash the
+                # scheme before made of them no longer matches: say so, rather
+                # than ask for an approval again.
+                if _hash_before(plugin_dir) != entry.code_hash:
+                    logger.critical(
+                        "Plugin '%s' code hash MISMATCH under the scheme before. "
+                        "Plugin may have been modified since approval.",
+                        plugin_id,
+                    )
+                    return {
+                        "allowed": False,
+                        "reason": (
+                            f"Code hash mismatch for '{plugin_id}': "
+                            "plugin files changed since approval"
+                        ),
+                    }
+                logger.error(
+                    "Plugin '%s' allowlist entry was signed before the scheme %s.",
+                    plugin_id, _ENTRY_SCHEME,
+                )
+                return {
+                    "allowed": False,
+                    "reason": (
+                        f"Outdated signature for '{plugin_id}': signed before the "
+                        "allowlist had a key of its own; approve it again"
+                    ),
+                }
+            logger.critical(
+                "Plugin '%s' allowlist signature INVALID. "
+                "Possible allowlist tampering.",
+                plugin_id,
+            )
+            return _tampered(plugin_id)
+
+        # Verify code hash: a folder that cannot be hashed matches nothing
         current_hash = compute_plugin_hash(plugin_dir)
+        if not current_hash:
+            logger.critical(
+                "Plugin '%s' cannot be hashed: its folder is missing, holds no file, "
+                "or holds a symbolic link, a special file or something it cannot read.",
+                plugin_id,
+            )
+            return {
+                "allowed": False,
+                "reason": (
+                    f"Unhashable plugin '{plugin_id}': its folder is missing, holds no "
+                    "file, or holds a symbolic link, a special file or something "
+                    "unreadable"
+                ),
+            }
         if current_hash != entry.code_hash:
             logger.critical(
                 "Plugin '%s' code hash MISMATCH. Expected %s, got %s. "
@@ -293,22 +519,18 @@ class PluginAllowlistManager:
                 ),
             }
 
-        # Verify HMAC signature
-        key = _load_signing_key()
-        if key:
-            if not _verify_entry_signature(entry, key):
-                logger.critical(
-                    "Plugin '%s' allowlist signature INVALID. "
-                    "Possible allowlist tampering.",
-                    plugin_id,
-                )
-                return {
-                    "allowed": False,
-                    "reason": (
-                        f"Invalid signature for '{plugin_id}': "
-                        "allowlist entry may be tampered"
-                    ),
-                }
+        # Verify the HMAC signature under the key that loads, and no other:
+        # an entry that cannot be checked is not trusted.
+        key, why = _key_or_why()
+        if key is None:
+            return _unverifiable(plugin_id, why)
+        if not _verify_entry_signature(entry, key):
+            logger.critical(
+                "Plugin '%s' allowlist signature INVALID. "
+                "Possible allowlist tampering.",
+                plugin_id,
+            )
+            return _tampered(plugin_id)
 
         # Check permission escalation
         if permissions is not None:
@@ -388,18 +610,28 @@ class PluginAllowlistManager:
                 "message": "No pending batch with that ID",
             }
 
-        key = _load_signing_key()
-        if not key:
+        key, why = _key_or_why()
+        if key is None:
             return {
                 "success": False,
                 "error": "no_signing_key",
-                "message": "Cannot approve without signing key",
+                "message": f"Cannot approve without the signing key: {why}",
             }
 
         # Verify batch hash still matches (no changes since prepare)
         current_hashes = []
         for p in batch.plugins:
             current_hash = compute_plugin_hash(Path(p["plugin_dir"]))
+            if not current_hash:
+                return {
+                    "success": False,
+                    "error": "unhashable",
+                    "message": (
+                        f"Plugin '{p['plugin_id']}' cannot be hashed: its folder is "
+                        "missing, holds no file, or holds a symbolic link, a special "
+                        "file or something unreadable."
+                    ),
+                }
             if current_hash != p["code_hash"]:
                 return {
                     "success": False,

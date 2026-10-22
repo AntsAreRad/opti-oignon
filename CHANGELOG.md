@@ -3382,6 +3382,64 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] The platform signs only under the key that loads. A key
+  file that did not load -- wrapped under a passphrase the process
+  lacked, or damaged -- gave as its key its first 32 bytes, the same
+  text in every wrapped key file: the security mode's lockfile, the
+  plugin allowlist's entries and the model provenance seal were signed
+  and checked under a key anyone holds. An empty key file loaded as an
+  empty key, which the mode took for none, checking nothing. A key file
+  that holds no 32-byte key now does not load either. With a key file
+  that does not load, the mode reads Bulbe as soon as a lockfile is
+  there, its escalation and its downgrade ceremony refuse, and the
+  emergency stop still escalates; the allowlist verifies no entry and
+  approves none, saying why; and no provenance MAC is made or checked,
+  a model whose provenance is enforced being refused. Without a key
+  file the allowlist verifies no entry either, where it skipped the
+  signature: in Bulbe mode a plugin loads only under a signature that
+  verifies. Making the key file -- at setup, or by `encrypt` -- first
+  signs a lockfile that agrees with `security.yaml` under it, so the
+  mode read stays what it was, and `check` says the mode the platform
+  reads and why. A model manifest sealed by a process that lacked the
+  passphrase was sealed under that public text: it now reads as
+  invalid, and vouches for nothing. Before any model download, re-seal
+  or enrolment -- each seals every entry it finds -- move it aside, and
+  never re-seal it; enrol the models again (`scripts/enroll_models.py`)
+  once their weights are checked against where they came from. A key
+  file that is empty or cut now makes the mode read Bulbe where a
+  lockfile is there, and setup and `encrypt` refuse: put back the copy
+  of the key file kept elsewhere.
+- [SECURITY] The plugin allowlist signs under a key of its own, and a
+  plugin's hash covers everything its folder holds. Its entries and the
+  mode's lockfile were both an HMAC-SHA512 under the master key over
+  fields joined by `||`: a plugin id approved as `daily||1.0||x` gave a
+  signature that, laid out as a lockfile, read Daily -- Bulbe left
+  without its downgrade ceremony. An entry is now signed under a key
+  derived from the master key for the allowlist alone, over all its
+  fields -- the approver and the time included -- as one canonical
+  record; an entry signed before reads as outdated, saying so. A
+  plugin's hash covered only its `.py`, `.yaml`, `.yml` and `.json`
+  files: bytecode planted beside a source -- in `__pycache__`, stamped
+  with the source's time and size, or in a package folder of its own,
+  which the import system finds first -- and native code ran unhashed.
+  The hash now covers every file and folder the plugin's folder holds
+  when the load checks it, and a folder holding a symbolic link, a
+  special file or something unreadable is never approved and never
+  loads; the worker compiles the entry point from its source, and no
+  import reads bytecode cached beside a source or writes any. The
+  folder is still read by its path before and after it is hashed: a
+  process of the same user that writes it in between is not stopped.
+  Approve the plugins again, once their files are checked against where
+  they came from: their hashes changed, and while one signature could
+  stand in for another, anything on disk could have been changed.
+- [SECURITY] The security mode's fail-secure read no longer waits on
+  itself. A lockfile that did not verify, or sources that disagreed,
+  made the mode read Bulbe and record why in the audit chain, whose
+  store, as it opened, read the mode again on the same thread: that read
+  recorded the verdict anew and waited for ever on the chain the first
+  one held, which hung `migrate`. The verdict is kept before it is
+  recorded, a read on the recording thread is answered it, and an entry
+  the thread already writing one asks for is chained right after it.
 - [SECURITY] Encryption setup no longer makes a key while a database is
   kept in plaintext: once a key loads, every connection keys its
   database, and each plaintext one stopped opening (409, naming the

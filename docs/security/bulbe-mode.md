@@ -38,6 +38,34 @@ When Bulbe mode is active, the following constraints apply:
   resource limits on, and a degraded sandbox confirmed by the user. The
   mode is read at each use, so a switch to Bulbe takes effect without a
   restart; Daily mode keeps the configured values
+- **Plugin allowlist** -- a plugin loads only when its entry in
+  `data/plugin_allowlist.json` names the hash of everything its folder
+  holds as the load checks it -- every file, bytecode and native code
+  included; a folder holding a symbolic link, a special file or something
+  unreadable is never approved and never loads --, asks no permission
+  beyond those approved, and carries an HMAC-SHA512 signature over all its
+  fields under the allowlist's own key, derived from the key that loads --
+  the key file's, the one the mode's lockfile is signed under. An entry
+  signed before the allowlist had a key of its own is refused as outdated
+  -- or, when its files changed since, as changed --: approve the plugin
+  again once its files are checked against where they came from. Without a
+  key file, or with one that does not load here (a wrapped key file
+  without `OPTI_KEYFILE_PASSPHRASE`, or one holding no 32-byte key), no
+  entry verifies, no plugin loads, and the approval refuses, saying why;
+  the key file's bytes are never a key. The plugin's worker runs its entry
+  point from its source, and no import reads bytecode cached beside a
+  source or writes any. The folder is read by its path before and after it
+  is hashed -- its manifest before, its code as the plugin starts --:
+  whoever can write it in between -- a process of the same user racing the
+  start, or serving the folder through a file system of its own -- runs
+  other code than was hashed. Like the model provenance seal, the
+  allowlist does not defend against a full compromise of the account. A
+  revocation removes the entry, but an entry once signed verifies again
+  when it is written back, or an older file put back: revocation does not
+  hold against whoever can write the data folder. A plugin loader that
+  cannot import the allowlist loads without this check, and the settings'
+  check of one plugin, like the install gate, reads only that its entry is
+  there
 
 
 ## Web search
