@@ -37,11 +37,9 @@ git clone https://github.com/AntsAreRad/opti-oignon.git
 cd opti-oignon
 pip install -e ".[dev]"
 
-# Start the backend
+# Start the backend and the frontend; with a key file wrapped under a
+# passphrase, the launcher asks for it before it starts the backend
 python -m opti_oignon
-
-# In another terminal, start the frontend
-cd frontend && npm install && npm run dev
 ```
 
 See [Installation](getting-started/installation.md) for detailed instructions.

@@ -126,7 +126,37 @@ then they are the plaintext. `check` lists every such folder, and
 `encrypt` names those an earlier run left too. A key taken from
 `OPTI_ENCRYPTION_KEY`, or a key file wrapped under
 `OPTI_KEYFILE_PASSPHRASE`, needs that variable set wherever the platform
-starts. Field-level encryption and the sealing of the run journal follow
+starts. The launchers (`scripts/launch.sh`, `python -m opti_oignon`) ask
+for the passphrase on their terminal when the key file is wrapped and it
+is not set, and check it with `opti_oignon.keyfile_gate` before the
+backend starts: `launch.sh` before it starts anything, running
+`python3 -m opti_oignon.keyfile_gate` in a process of its own that reads
+the passphrase on its standard input; the Python launcher in its own
+process, once it has installed the frontend's dependencies and freed its
+ports, which stops whatever held them once you confirm -- a passphrase
+refused then leaves them stopped. A key file damaged in a way its format
+shows -- cut short, of another version or length, naming a key derivation
+unknown or that the Python at hand cannot run -- is said as such; a byte
+changed for another in its salt, or in its wrapped key past the version
+byte, fails as a wrong passphrase does, and is said as one: nothing can
+tell the two apart. Both
+launchers hand the passphrase, and `OPTI_ENCRYPTION_KEY`, to the backend
+alone: the frontend, the browser and every other command they run start
+without them, and `launch.sh`, run as it is, runs itself and the
+backend's script under `bash -p`, which reads no `BASH_ENV` and takes no
+function from the environment. What the Python launcher's own
+interpreter runs as it starts -- a `sitecustomize`, the code of a `.pth`
+file -- runs before it takes the secrets out of its environment. A
+passphrase given for a key file that is not wrapped, or not
+there yet, goes to the backend as it was given: random-key setup wraps the
+key it makes under it, while setup with a passphrase of its own wraps under
+that one, and the platform must then be started again with it. A passphrase of
+several lines is not taken. The backend keeps the passphrase in its
+environment while it runs, where a process of the same user can read it,
+and so does a launcher started with it set, in the environment it was
+started with; the commands the backend itself runs outside its sandbox
+still inherit both, and a bash among them reads the caller's `BASH_ENV`.
+Field-level encryption and the sealing of the run journal follow
 when encryption is set up in the security settings once the command has
 run: setup then takes the existing key and makes no new one. The
 settings say so: with a key here -- a key file, or

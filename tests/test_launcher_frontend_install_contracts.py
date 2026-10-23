@@ -155,8 +155,9 @@ def _launch(root, run):
 
         ui._free_port = stop
         ui.signal = types.SimpleNamespace(
-            signal=lambda *_args: None, SIGINT=signal.SIGINT, SIGTERM=signal.SIGTERM,
-            SIGKILL=signal.SIGKILL,
+            signal=lambda *_args: None, getsignal=lambda _sig: signal.SIG_DFL,
+            SIGINT=signal.SIGINT, SIGTERM=signal.SIGTERM, SIGKILL=signal.SIGKILL,
+            SIG_IGN=signal.SIG_IGN, SIG_DFL=signal.SIG_DFL,
         )
         ui.subprocess = types.SimpleNamespace(
             run=run, Popen=_refuse_popen, DEVNULL=subprocess.DEVNULL,

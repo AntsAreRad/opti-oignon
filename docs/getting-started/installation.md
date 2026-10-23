@@ -7,7 +7,8 @@ Before installing Opti-Oignon, make sure you have:
 - **Python 3.10+** (3.11 or 3.12 recommended)
 - **Node.js 18+** (for the SvelteKit frontend)
 - **Ollama** running locally (see [Ollama Setup](ollama-setup.md))
-- **Linux** (Kubuntu/Ubuntu recommended; macOS works without bwrap sandbox)
+- **Linux** (Kubuntu/Ubuntu recommended; macOS works without the bwrap sandbox
+  and without the one-click launcher, which needs Linux)
 
 Optional but recommended:
 
@@ -46,7 +47,7 @@ Start the backend and frontend in separate terminals:
 
 ```bash
 # Terminal 1: Backend
-uvicorn opti_oignon.api.app:app --port 8000 --reload
+uvicorn opti_oignon.api.app:app --port 8001 --reload
 
 # Terminal 2: Frontend
 cd frontend && npm run dev
@@ -58,11 +59,32 @@ Open [http://localhost:5173](http://localhost:5173).
 ## Option C: One-click launcher
 
 ```bash
-./launch.sh
+scripts/launch.sh
 ```
 
-The launcher starts both backend and frontend, checks for Ollama, and
-opens the browser automatically.
+The launcher needs Linux: util-linux's `setsid` and `setpriv` (2.33 or
+later), and a `/proc` of its own. Run it as it is, as above or from its
+desktop icon: its first line runs it under `bash -p`, which reads no
+`BASH_ENV` and takes no function from your environment, while
+`bash scripts/launch.sh` would read them first. It starts the backend,
+then, once it answers, the frontend, and opens the browser
+automatically. Both run in sessions of their own, which the terminal
+neither interrupts nor hangs up: Ctrl+C or closing the window tells the
+launcher, which tells each to stop, waits 15 s at most for it to end,
+and kills only what did not, saying so; and each is told to stop when
+the launcher ends, however it ends. A backend that stops is said with its
+exit status once the frontend is stopped, so its error stays in sight.
+`python -m opti_oignon` does the same, on macOS too, where a launcher
+killed outright leaves what it started running. When
+the key file is wrapped under a passphrase (see
+[Encryption](../security/encryption.md)), the launcher asks for it on its
+terminal before it starts anything, checks it, and hands it to the backend
+alone, as it does `OPTI_ENCRYPTION_KEY`: the frontend and the browser start
+without them. A desktop icon for it needs `Terminal=true`, so that the
+launcher has a terminal to ask on, and
+`Exec=bash -ic '<project>/scripts/launch.sh'`, so that your shell's conda
+and node setup load while the launcher still runs by its first line --
+`bash -i <project>/scripts/launch.sh` would skip it.
 
 
 ## Verifying the installation
@@ -87,8 +109,10 @@ curl http://localhost:8001/api/health
 accessible at `http://localhost:11434`. You can verify with
 `curl http://localhost:11434/api/tags`.
 
-**Port conflicts:** The backend defaults to port 8000 and the frontend to
+**Port conflicts:** The backend defaults to port 8001 and the frontend to
 5173. Change them with `--port` (uvicorn) or by editing `vite.config.ts`.
+`scripts/launch.sh` refuses to start when either port already answers;
+`python -m opti_oignon` offers to stop whatever holds them.
 
 **Missing bwrap:** On Ubuntu/Debian, install with `sudo apt install bubblewrap`.
 Without bwrap, the sandbox falls back to tempdir isolation (less secure but

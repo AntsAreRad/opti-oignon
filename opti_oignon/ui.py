@@ -7,14 +7,19 @@ Launches the full Opti-Oignon stack:
   1. Checks prerequisites (Python, Node, Ollama), and holds the frontend's
      installed dependencies to package-lock.json (npm ci when they differ)
   2. Frees ports if occupied (with user confirmation)
-  3. Starts FastAPI backend
-  4. Starts SvelteKit frontend (npm run dev)
-  5. Opens browser
+  3. Asks for the key file's passphrase when it is wrapped under one, and
+     checks it (``opti_oignon.keyfile_gate``) before the backend starts
+  4. Starts FastAPI backend, the platform's secrets (OPTI_KEYFILE_PASSPHRASE,
+     OPTI_ENCRYPTION_KEY) in its environment alone, and waits until it
+     answers or stops
+  5. Starts SvelteKit frontend (npm run dev), without them
+  6. Opens browser, without them
 
 Usage:
     python -m opti_oignon [ui] [--port PORT]
 """
 
+import functools
 import json
 import os
 import signal
@@ -26,6 +31,20 @@ from pathlib import Path
 # Default ports
 DEFAULT_BACKEND_PORT = 8001
 DEFAULT_FRONTEND_PORT = 5173
+
+# The platform's two secrets, the key file's passphrase and the master key itself: taken out of this process's
+# environment at once, handed to the backend alone.
+_PASSPHRASE_VAR = "OPTI_KEYFILE_PASSPHRASE"
+_KEY_VAR = "OPTI_ENCRYPTION_KEY"
+_SECRET_VARS = (_PASSPHRASE_VAR, _KEY_VAR)
+_PASSPHRASE_TRIES = 3
+# The key file gate's answers; any other status, Python's own failures included, is "cannot tell".
+_GATE_YES, _GATE_NO = 0, 3
+# How long a stopped backend or frontend may take to end before it is killed (the backend waits 10 s at most for
+# its open connections: scripts/dev_backend.sh).
+_STOP_GRACE = 15
+# prctl's option that sets the signal a child is sent when its parent ends (linux/prctl.h).
+_PR_SET_PDEATHSIG = 1
 
 # Colors for terminal output
 GREEN = "\033[92m"
@@ -263,10 +282,193 @@ def _update_vite_proxy(project_root: Path, backend_port: int) -> None:
         vite_config.write_text(new_content)
 
 
-def _wait_for_backend(port: int, timeout: int = 30) -> bool:
-    """Wait for backend to be ready."""
+def _gate(root: Path, action: str, passphrase: str | None = None) -> int:
+    """The key file gate's answer (``opti_oignon.keyfile_gate``) for the key file of the project at ``root``, the
+    one its backend reads: 0 yes, 3 no, anything else cannot tell, its reason said here.
+
+    Asked in this process: run as a process of its own, as ``scripts/launch.sh``
+    runs it, it would be one more interpreter launched, which the egress census
+    charges as a network sink, and this module owes no more than it has. The
+    key the gate opens to check a passphrase is wiped where the gate holds it,
+    but a copy may stay in this process's memory while it runs.
+    """
+    try:
+        from opti_oignon import keyfile_gate
+    except ImportError as exc:
+        print(f"keyfile_gate: it does not import here: {exc}")
+        return -1
+    try:
+        if action == "wrapped":
+            return keyfile_gate.YES if keyfile_gate.wrapped(root) else keyfile_gate.NO
+        return keyfile_gate.YES if keyfile_gate.opens(passphrase or "", root) else keyfile_gate.NO
+    except keyfile_gate.GateError as exc:
+        print(f"keyfile_gate: {exc}")
+        return keyfile_gate.CANNOT
+
+
+def _backend_passphrase(given: str | None, root: Path) -> str | None:
+    """The passphrase the backend is started with, checked before the backend starts.
+
+    ``given`` (the one this launcher was started with, or None) as it was given
+    when the key file is not wrapped or not there yet: random-key setup wraps
+    the key it makes under it. For a wrapped key file, ``given`` when it opens
+    it; otherwise one asked on the terminal, without echo, up to three times. A
+    given passphrase of several lines is not taken: no terminal could type it
+    again. When none can be had -- no terminal, three that do not open it, or a
+    key file the gate cannot read or try -- it says so and exits: the backend is
+    not started.
+    """
+    if given is not None and "\n" in given:
+        print(f"{YELLOW}[!] The passphrase this launcher was started with holds several lines: it is not taken.{NC}")
+        given = None
+    answer = _gate(root, "wrapped")
+    if answer == _GATE_NO:
+        return given
+    if answer != _GATE_YES:
+        print(f"{RED}[ERR] Could not tell whether the key file is wrapped under a passphrase (the line above says "
+              f"why). Nothing was started.{NC}")
+        sys.exit(1)
+    if given:
+        answer = _gate(root, "opens", given)
+        if answer == _GATE_YES:
+            return given
+        if answer != _GATE_NO:
+            print(f"{RED}[ERR] Could not try the passphrase on the key file (the line above says why). Nothing "
+                  f"was started.{NC}")
+            sys.exit(1)
+        print(f"{YELLOW}[!] The passphrase this launcher was started with does not open the key file.{NC}")
+    if not sys.stdin.isatty():
+        print(f"{RED}[ERR] The key file is wrapped under a passphrase, and this launcher has no terminal "
+              f"to ask for it on: start it from a terminal. Nothing was started.{NC}")
+        sys.exit(1)
+    import getpass
+
+    for _ in range(_PASSPHRASE_TRIES):
+        try:
+            passphrase = getpass.getpass("Passphrase of the key file: ")
+        except EOFError:
+            print(f"\n{RED}[ERR] No passphrase was read. Nothing was started.{NC}")
+            sys.exit(1)
+        except UnicodeError:
+            # A byte the terminal's encoding cannot carry: no key file was wrapped under it, and it is not shown.
+            print("    That passphrase does not open the key file.")
+            continue
+        answer = _gate(root, "opens", passphrase)
+        if answer == _GATE_YES:
+            return passphrase
+        if answer != _GATE_NO:
+            print(f"{RED}[ERR] Could not try the passphrase on the key file (the line above says why). Nothing "
+                  f"was started.{NC}")
+            sys.exit(1)
+        print("    That passphrase does not open the key file.")
+    print(f"{RED}[ERR] {_PASSPHRASE_TRIES} passphrases did not open the key file. Nothing was started.{NC}")
+    sys.exit(1)
+
+
+def _child_env(secrets: dict | None = None) -> dict:
+    """This process's environment for a child, without the platform's secrets but those of ``secrets`` that are
+    given: the backend's, and the backend's alone."""
+    env = {name: value for name, value in os.environ.items() if name not in _SECRET_VARS}
+    env.update({name: value for name, value in (secrets or {}).items() if value is not None})
+    return env
+
+
+def _status(code) -> str:
+    """A process's end, as its exit status or the signal that ended it."""
+    return f"ended by signal {-code}" if code is not None and code < 0 else f"exit status {code}"
+
+
+def _group_left(pgid: int) -> bool:
+    """Whether anything is left in the process group ``pgid``."""
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _say(text: str = "") -> None:
+    """Print ``text`` at once. Once this launcher's output is gone -- a closed window, a pipe whose reader ended
+    --, what is left to say goes nowhere, the flush at exit included, and nothing fails: what was started is stopped
+    all the same. An output in use by what a signal interrupted takes nothing more: the line is dropped."""
+    try:
+        print(text, flush=True)
+    except RuntimeError:
+        pass
+    except (OSError, ValueError):
+        try:
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            try:
+                os.dup2(devnull, sys.stdout.fileno())
+            finally:
+                os.close(devnull)
+        except (OSError, ValueError):
+            pass
+
+
+def _left(proc) -> bool:
+    """Whether ``proc``, or anything in the process group it leads (it runs in a session of its own), is left."""
+    return proc.poll() is None or _group_left(proc.pid)
+
+
+def _stop_all(started) -> None:
+    """Stop each ``(label, proc)`` of ``started`` by its process group: TERM to every group first, then all awaited
+    together, ``_STOP_GRACE`` s at most, then KILL to every group still holding something; each said."""
+    started = [(label, proc) for label, proc in started if proc is not None and _left(proc)]
+    for _label, proc in started:
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+        except OSError:
+            proc.terminate()
+    deadline = time.monotonic() + _STOP_GRACE
+    while any(_left(proc) for _label, proc in started) and time.monotonic() < deadline:
+        time.sleep(0.1)
+    for label, proc in started:
+        if _left(proc):
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            except OSError:
+                proc.kill()
+            proc.wait()
+            _say(f"    {label} did not end within {_STOP_GRACE} s of being told to: killed.")
+        else:
+            _say(f"    {label} stopped.")
+
+
+def _die_with_launcher(libc, launcher: int) -> None:
+    """In a child, before it runs: the kernel tells it to stop (TERM) when this launcher ends, however it ends --
+    a session of its own keeps the terminal's hangup from it. Its TERM goes back to the default first: the
+    launcher's handler, its own until it runs, would take that TERM and drop it. A launcher that ended already,
+    before the setting held, would never tell it: the child ends at once."""
+    signal.signal(signal.SIGTERM, signal.SIG_DFL)
+    if libc.prctl(_PR_SET_PDEATHSIG, signal.SIGTERM) != 0:
+        raise OSError("the parent-death signal could not be set")
+    if os.getppid() != launcher:
+        os._exit(128 + signal.SIGTERM)
+
+
+def _death_hook():
+    """What a child runs before it starts so that it is told to stop when this launcher ends: Linux's parent-death
+    signal, its library loaded here, in the launcher, so that the child loads nothing. None elsewhere, where a
+    launcher killed outright leaves what it started running."""
+    if not sys.platform.startswith("linux"):
+        return None
+    import ctypes
+
+    return functools.partial(_die_with_launcher, ctypes.CDLL(None, use_errno=True), os.getpid())
+
+
+def _wait_for_backend(port: int, proc) -> bool:
+    """True once the backend answers; False as soon as its process ``proc`` ended. Says every 30 s that it waits."""
     import urllib.request
-    for _ in range(timeout):
+    waited = 0
+    while proc.poll() is None:
         try:
             req = urllib.request.Request(f"http://localhost:{port}/api/health", method="GET")
             with urllib.request.urlopen(req, timeout=2) as resp:
@@ -275,6 +477,9 @@ def _wait_for_backend(port: int, timeout: int = 30) -> bool:
         except Exception:
             pass
         time.sleep(1)
+        waited += 1
+        if waited % 30 == 0:
+            _say(f"\n    Still waiting for the backend ({waited} s)...")
     return False
 
 
@@ -308,6 +513,11 @@ def launch(port: int = 8000, share: bool = False, debug: bool = False) -> None:
         share: Ignored (legacy Gradio parameter).
         debug: Ignored (legacy Gradio parameter).
     """
+    # The secrets handed to this launcher leave its environment at once: the
+    # frontend, the browser and every command run from here start without them.
+    given = os.environ.pop(_PASSPHRASE_VAR, None) or None
+    key_given = os.environ.pop(_KEY_VAR, None) or None
+
     # Override default port 8000 to 8001
     backend_port = port if port != 8000 else DEFAULT_BACKEND_PORT
     frontend_port = DEFAULT_FRONTEND_PORT
@@ -317,21 +527,48 @@ def launch(port: int = 8000, share: bool = False, debug: bool = False) -> None:
 
     backend_proc = None
     frontend_proc = None
+    # A signal that comes while a child is being started waits until it is written down: the stop then reaches it.
+    starting = False
+    held = []
 
-    def cleanup(signum=None, frame=None):
-        """Clean shutdown of both processes."""
-        print(f"\n{YELLOW}[>] Stopping Opti-Oignon...{NC}")
-        if frontend_proc and frontend_proc.poll() is None:
-            frontend_proc.terminate()
-            print("    Frontend stopped.")
-        if backend_proc and backend_proc.poll() is None:
-            backend_proc.terminate()
-            print("    Backend stopped.")
-        print(f"{GREEN}[OK] Opti-Oignon stopped.{NC}")
-        sys.exit(0)
+    def cleanup(code=0, why=None):
+        """Stop what was started, each by its process group, say ``why`` last, and exit with ``code``. While it
+        stops, the launcher hears no other signal: a closing window sends its hangup more than once."""
+        for name in ("SIGINT", "SIGTERM", "SIGHUP"):
+            if hasattr(signal, name):
+                signal.signal(getattr(signal, name), signal.SIG_IGN)
+        started = [(label, proc) for label, proc in (("Frontend", frontend_proc), ("Backend", backend_proc))
+                   if proc is not None]
+        if started:
+            _say(f"\n{YELLOW}[>] Stopping Opti-Oignon...{NC}")
+            _stop_all(started)
+            _say(f"{GREEN}[OK] Opti-Oignon stopped.{NC}")
+        else:
+            _say(f"\n{YELLOW}[>] Nothing was started.{NC}")
+        if why:
+            _say(f"\n{why}")
+        sys.exit(code)
 
-    signal.signal(signal.SIGINT, cleanup)
-    signal.signal(signal.SIGTERM, cleanup)
+    def on_signal(signum, frame=None):
+        """An interruption, a request to end, a hangup: everything stops, and the launcher ends with 128 and the
+        signal's number -- once what is being started is written down."""
+        if starting:
+            held.append(signum)
+            return
+        cleanup(code=128 + signum)
+
+    def heard(sig):
+        # One ignored when this launcher started -- under nohup, as a background job -- stays ignored, as a shell
+        # keeps it.
+        if signal.getsignal(sig) != signal.SIG_IGN:
+            signal.signal(sig, on_signal)
+
+    # A closing window hangs this launcher up: what it started, in sessions of their own, is not, and is stopped
+    # here.
+    heard(signal.SIGINT)
+    heard(signal.SIGTERM)
+    if hasattr(signal, "SIGHUP"):  # not on every system
+        heard(signal.SIGHUP)
 
     # -- Banner --
     print(f"{CYAN}")
@@ -366,6 +603,10 @@ def launch(port: int = 8000, share: bool = False, debug: bool = False) -> None:
     if not _free_port(frontend_port, "frontend"):
         sys.exit(1)
 
+    # -- The key file: a wrapped one opens under a passphrase checked now --
+    passphrase = _backend_passphrase(given, project_root)
+    given = None
+
     # -- Update vite proxy --
     _update_vite_proxy(project_root, backend_port)
 
@@ -379,67 +620,90 @@ def launch(port: int = 8000, share: bool = False, debug: bool = False) -> None:
 
     # -- Start backend --
     print(f"\n{CYAN}[>] Starting backend on port {backend_port}...{NC}")
-    backend_proc = subprocess.Popen(
-        [
-            sys.executable, "-m", "uvicorn",
-            "opti_oignon.api.app:app",
-            "--host", bind_host,
-            "--port", str(backend_port),
-            "--log-level", "warning",
-        ],
-        cwd=str(project_root),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
-    sys.stdout.write("    Waiting")
-    sys.stdout.flush()
-    if _wait_for_backend(backend_port):
-        version = _get_version(backend_port)
-        print(f"\n{GREEN}[OK] Backend ready (v{version}){NC}")
-    else:
-        print(f"\n{RED}[ERR] Backend did not start within 30s{NC}")
-        if backend_proc.poll() is None:
-            backend_proc.terminate()
-        sys.exit(1)
-
-    # -- Start frontend --
-    print(f"{CYAN}[>] Starting frontend on port {frontend_port}...{NC}")
-    frontend_proc = subprocess.Popen(
-        ["npm", "run", "dev", "--", "--port", str(frontend_port)],
-        cwd=str(frontend_dir),
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    time.sleep(3)
-    print(f"{GREEN}[OK] Frontend ready{NC}")
-
-    # -- Ready --
-    browser_url = f"http://localhost:{frontend_port}"
-
-    print()
-    print(f"{BOLD}{GREEN}========================================{NC}")
-    print(f"{BOLD}{GREEN}  Opti-Oignon v{_get_version(backend_port)} is ready!{NC}")
-    print(f"{GREEN}========================================{NC}")
-    print()
-    print(f"  {CYAN}Interface:{NC} {browser_url}")
-    print(f"  {CYAN}API docs:{NC}  http://localhost:{backend_port}/docs")
-    print()
-    print(f"  {YELLOW}Ctrl+C to stop everything{NC}")
-    print()
-
-    _open_browser(browser_url)
-
-    # -- Keep alive --
+    on_death = _death_hook()
     try:
+        starting = True
+        backend_proc = subprocess.Popen(
+            [
+                sys.executable, "-m", "uvicorn",
+                "opti_oignon.api.app:app",
+                "--host", bind_host,
+                "--port", str(backend_port),
+                "--log-level", "warning",
+                "--timeout-graceful-shutdown", "10",
+            ],
+            cwd=str(project_root),
+            env=_child_env({_PASSPHRASE_VAR: passphrase, _KEY_VAR: key_given}),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            # Its errors are on this terminal: a backend that does not start says why.
+            # A session of its own: the terminal neither interrupts nor hangs it up; cleanup stops it, and on Linux
+            # it is told to stop when this launcher ends, however it ends.
+            start_new_session=True,
+            preexec_fn=on_death,
+        )
+        starting = False
+        passphrase = key_given = None
+        if held:
+            cleanup(code=128 + held[0])
+
+        sys.stdout.write("    Waiting")
+        sys.stdout.flush()
+        if _wait_for_backend(backend_port, backend_proc):
+            version = _get_version(backend_port)
+            print(f"\n{GREEN}[OK] Backend ready (v{version}){NC}")
+        else:
+            _stop_all([("What the backend left", backend_proc)])
+            _say(f"\n{RED}[ERR] The backend stopped before it answered ({_status(backend_proc.returncode)}): "
+                 f"its last lines are above. The frontend was not started.{NC}")
+            sys.exit(1)
+
+        # -- Start frontend --
+        print(f"{CYAN}[>] Starting frontend on port {frontend_port}...{NC}")
+        starting = True
+        frontend_proc = subprocess.Popen(
+            ["npm", "run", "dev", "--", "--port", str(frontend_port)],
+            cwd=str(frontend_dir),
+            env=_child_env(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            preexec_fn=on_death,
+        )
+        starting = False
+        if held:
+            cleanup(code=128 + held[0])
+        time.sleep(3)
+        print(f"{GREEN}[OK] Frontend ready{NC}")
+
+        # -- Ready --
+        browser_url = f"http://localhost:{frontend_port}"
+
+        print()
+        print(f"{BOLD}{GREEN}========================================{NC}")
+        print(f"{BOLD}{GREEN}  Opti-Oignon v{_get_version(backend_port)} is ready!{NC}")
+        print(f"{GREEN}========================================{NC}")
+        print()
+        print(f"  {CYAN}Interface:{NC} {browser_url}")
+        print(f"  {CYAN}API docs:{NC}  http://localhost:{backend_port}/docs")
+        print()
+        print(f"  {YELLOW}Ctrl+C to stop everything{NC}")
+        print()
+
+        _open_browser(browser_url)
+
+        # -- Keep alive: one that stops is said once the other one is stopped --
         while True:
-            # Check if processes are still running
             if backend_proc.poll() is not None:
-                print(f"\n{RED}[!] Backend stopped unexpectedly.{NC}")
-                cleanup()
+                cleanup(code=1, why=f"{RED}[!] The backend stopped ({_status(backend_proc.returncode)}): its last "
+                                    f"lines are above.{NC}")
             if frontend_proc.poll() is not None:
-                print(f"\n{RED}[!] Frontend stopped unexpectedly.{NC}")
-                cleanup()
+                cleanup(code=1, why=f"{RED}[!] The frontend stopped ({_status(frontend_proc.returncode)}).{NC}")
             time.sleep(2)
     except KeyboardInterrupt:
-        cleanup()
+        cleanup(code=130)
+    except Exception as exc:  # noqa: BLE001 - whatever ends the launcher stops what it started
+        # Its output gone -- a closed window, a pipe whose reader ended --, a child that could not start, anything
+        # else: what was started is stopped, and why is said where it still can be.
+        cleanup(code=1, why=f"{RED}[ERR] {type(exc).__name__}: {exc}{NC}")

@@ -3382,6 +3382,48 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] The launchers start a platform whose key file is wrapped,
+  and hand the platform's secrets to the backend alone. Since the stores
+  are encrypted, the backend needs the key file's passphrase to open its
+  key file, and neither `scripts/launch.sh` (the desktop icon's) nor
+  `python -m opti_oignon` asked for it: started from the icon, the
+  backend stopped at once, its error scrolled away by the frontend's
+  proxy errors, or thrown away by the Python launcher, which said only
+  that it had not started within 30 s. Both handed
+  `OPTI_KEYFILE_PASSPHRASE` and `OPTI_ENCRYPTION_KEY`, when set, to the
+  frontend's dev server -- every package of `node_modules` -- and to the
+  browser they opened. Both now ask for the passphrase on their terminal
+  when the key file is wrapped and none is set, and check it with
+  `opti_oignon.keyfile_gate` before the backend starts -- `launch.sh`
+  before it starts anything, running the gate in a process of its own
+  that reads the passphrase on its standard input --, three tries,
+  refusing without a terminal; a key file damaged in a way its format
+  shows, or a key derivation that cannot run here, is said as such, while
+  a byte of its salt, or of its wrapped key past the version byte,
+  changed for another cannot be told from a wrong passphrase. The two
+  secrets go into the backend's environment alone, those an activated
+  conda base sets included; `launch.sh`, run as it is, runs itself and
+  the backend's script under `bash -p`, which reads no `BASH_ENV` and
+  takes no function from the environment, and resets its shell options
+  after a conda activation. A passphrase given for a key file not
+  wrapped, or not there yet, goes there as it was given. The backend
+  starts first and the frontend only once it answers, each in a session
+  of its own that the terminal neither interrupts nor hangs up, each told
+  to stop when the launcher ends, however it ends (on Linux); Ctrl+C or a
+  closing window makes the launcher tell both to stop, wait 15 s at
+  most, and kill only what did not end, saying so, even with nowhere left
+  to say it; a signal ignored when it started stays ignored; a backend or
+  a frontend that stops is said with its exit status once the other one
+  is stopped. `launch.sh` needs Linux (util-linux 2.33 or later for
+  `setsid` and `setpriv`, an `env` that knows `-S`, a `/proc` of its own)
+  and says what it lacks, but for that `env`: one without `-S` fails at
+  its first line. It refuses to start beside a port that already
+  answers, and looks for the frontend at `localhost`, where the browser
+  goes. The backend itself still hands both secrets to the commands it
+  runs outside its sandbox; `launch.sh` killed outright in the
+  milliseconds while it starts one of them leaves that one running; and
+  what the Python launcher's interpreter runs as it starts runs before
+  it takes the secrets out.
 - [SECURITY] The platform signs only under the key that loads. A key
   file that did not load -- wrapped under a passphrase the process
   lacked, or damaged -- gave as its key its first 32 bytes, the same

@@ -467,6 +467,21 @@ class KeyfileExists(RuntimeError):
     """A key file is already at this path: setup never replaces one."""
 
 
+class PassphraseRefused(ValueError):
+    """The key file's envelope did not open under the passphrase given: its blob, of the right length and version,
+    failed its authentication under the key the passphrase derives by the derivation the envelope names. A
+    ``ValueError``, as it always was, with the same message. A damage the format shows -- a length, a version, a
+    derivation unknown or that cannot run here -- is another ``ValueError``; a byte changed for another in the
+    salt, or in the blob past its version byte -- its nonce, the wrapped key, its tag --, fails the authentication
+    as a wrong passphrase does, and cannot be told from one."""
+
+
+# The derivations an envelope may name, with the length of the salt each writes, and the length of the blob that
+# wraps a key (version, nonce, the 32-byte key, tag): what the format lets a damaged envelope be told by.
+_ENVELOPE_KDFS = {"argon2id": _ARGON2_SALT_LENGTH, "pbkdf2": _PBKDF2_SALT_LENGTH}
+_ENVELOPE_BLOB = 1 + _GCM_NONCE_SIZE + _KEY_SIZE + 16
+
+
 def keyfile_present(path: Path | None = None) -> bool:
     """Whether anything is at the key file's path (default: the data key file).
 
@@ -475,6 +490,52 @@ def keyfile_present(path: Path | None = None) -> bool:
     where this answers True.
     """
     return os.path.lexists(path or _DEFAULT_KEYFILE)
+
+
+def _envelope(text: str) -> dict | None:
+    """The key file's envelope when ``text`` is one, or None: the legacy unprotected format."""
+    try:
+        candidate = json.loads(text)
+    except (ValueError, TypeError):
+        return None
+    if isinstance(candidate, dict) and candidate.get("version") == _KEYFILE_ENVELOPE_VERSION:
+        return candidate
+    return None
+
+
+def _legacy_key(text: str) -> bool:
+    """Whether ``text`` is a key file in the legacy unprotected format, read as ``load_keyfile`` reads one: its first
+    line decodes to bytes. A text that opens an object is an envelope that does not parse, never this format."""
+    if text.startswith("{"):
+        return False
+    try:
+        return bool(base64.urlsafe_b64decode(text.split("\n")[0]))
+    except ValueError:
+        return False
+
+
+def keyfile_under(root: Path) -> Path:
+    """The key file of the platform whose project root is ``root``, where its loader reads it."""
+    return Path(root) / "data" / _DEFAULT_KEYFILE.name
+
+
+def keyfile_wrapped(path: Path | None = None) -> bool:
+    """Whether the key file (default: the data key file) is wrapped under a passphrase, told as ``load_keyfile``
+    tells it.
+
+    False when nothing is at its path, a symbolic link included, or it is in the legacy unprotected format. A key
+    file that is there and cannot be read raises (``OSError``, ``UnicodeError``), and so does one that is neither
+    an envelope nor a key in the legacy format (``ValueError``): whoever asks cannot tell, and says so.
+    """
+    fpath = path or _DEFAULT_KEYFILE
+    if not os.path.lexists(fpath):
+        return False
+    text = fpath.read_text(encoding="ascii").strip()
+    if _envelope(text) is not None:
+        return True
+    if not _legacy_key(text):
+        raise ValueError("the key file is neither wrapped under a passphrase nor a key in the unprotected format")
+    return False
 
 
 def _write_keyfile(fpath: Path, data: bytes) -> None:
@@ -675,16 +736,7 @@ def load_keyfile(
     _verify_keyfile_perms(fpath)
     text = fpath.read_text(encoding="ascii").strip()
 
-    payload = None
-    try:
-        candidate = json.loads(text)
-        if (
-            isinstance(candidate, dict)
-            and candidate.get("version") == _KEYFILE_ENVELOPE_VERSION
-        ):
-            payload = candidate
-    except (ValueError, TypeError):
-        payload = None
+    payload = _envelope(text)
 
     if payload is not None:
         effective_pass = passphrase or os.environ.get(_ENV_KEYFILE_PASS)
@@ -695,12 +747,25 @@ def load_keyfile(
             )
         kek_salt = base64.urlsafe_b64decode(payload["kek_salt"])
         kdf_name = payload.get("kdf", "")
+        # The derivation the envelope names, or none: a key derived another way opens nothing, and would be
+        # said a wrong passphrase.
+        if kdf_name not in _ENVELOPE_KDFS:
+            raise ValueError(f"Keyfile envelope names a key derivation this version does not know: {kdf_name!r}")
+        if kdf_name == "argon2id" and not _ARGON2_AVAILABLE:
+            raise ValueError("Keyfile is wrapped with argon2id, and argon2-cffi does not import here")
+        if len(kek_salt) != _ENVELOPE_KDFS[kdf_name]:
+            raise ValueError("Keyfile envelope is damaged: its salt is not of the length its derivation writes")
+        blob = base64.urlsafe_b64decode(payload["blob"])
+        if len(blob) != _ENVELOPE_BLOB or blob[0] != _FORMAT_VERSION:
+            raise ValueError("Keyfile envelope is damaged: its blob is not the wrapped key of this format")
         kek, _, _ = derive_key_from_passphrase(
             effective_pass, salt=kek_salt, force_pbkdf2=(kdf_name == "pbkdf2"),
         )
         try:
-            blob = base64.urlsafe_b64decode(payload["blob"])
-            raw_key = decrypt_bytes(kek, blob)
+            try:
+                raw_key = decrypt_bytes(kek, blob)
+            except ValueError as exc:
+                raise PassphraseRefused(str(exc)) from exc
         finally:
             kek = b"\x00" * len(kek)
         return secure_key_from_bytes(raw_key), kek_salt, kdf_name
