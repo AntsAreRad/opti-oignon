@@ -953,7 +953,10 @@ async def get_security_mode() -> dict[str, Any]:
 
 
 @router.post("/mode")
-async def set_security_mode(body: SecurityModeChangeRequest) -> dict[str, Any]:
+async def set_security_mode(
+    body: SecurityModeChangeRequest,
+    current: dict = Depends(_get_current_user),
+) -> dict[str, Any]:
     """Escalate to Bulbe mode (immediate, no ceremony needed).
 
     Only supports escalation (Daily -> Bulbe).  Degradation requires
@@ -981,10 +984,8 @@ async def set_security_mode(body: SecurityModeChangeRequest) -> dict[str, Any]:
             ),
         )
 
-    # Escalation to Bulbe -- immediate
-    # In production, user_id comes from the authenticated session.
-    # For now, use a placeholder that routes_auth will fill.
-    user_id = "admin"
+    # Escalation to Bulbe -- immediate, open to every session, recorded in the session's name.
+    user_id = _session_actor(current)
     result = security_mode_manager.escalate_to_bulbe(user_id, force=body.force)
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result)
@@ -1059,6 +1060,84 @@ async def get_visual_code() -> dict[str, Any]:
     return {"visual_code": code}
 
 
+def _session_account(current: dict = Depends(_get_current_user)) -> Any:
+    """The account the session stands for (``ceremony_factors.session_account``), for the routes that act on an
+    account's own second factors: 401 when the session names no account or one that no longer exists, 403 when the
+    synthetic session of single-user mode stands for no single owner -- there is no account to give a factor to --,
+    503 when the account store cannot be read. A plain function: FastAPI runs it off the event loop."""
+    from opti_oignon.ceremony_factors import session_account
+
+    sub = current.get("sub") if isinstance(current, dict) else None
+    if not isinstance(sub, str) or not sub:
+        raise HTTPException(status_code=401, detail="This session names no account.")
+    try:
+        account = session_account(current)
+    except Exception as exc:  # noqa: BLE001 - an account that cannot be told is no account
+        raise HTTPException(
+            status_code=503, detail=f"The account store cannot be read here ({type(exc).__name__}).",
+        ) from exc
+    if account is None:
+        if sub == "local":
+            raise HTTPException(
+                status_code=403,
+                detail="Create the account first: this is an account's to do, and single-user mode has none.",
+            )
+        raise HTTPException(status_code=401, detail="The account of this session no longer exists.")
+    return account
+
+
+def _session_actor(current: Any) -> str:
+    """Who acts, for the record of a protective action -- escalating to Bulbe mode, the kill switch, the emergency
+    stop, a tool call's approval: the account the session stands for, or the session's own name when the account
+    store cannot say. It never refuses: a protective action that could say no would not be one."""
+    sub = current.get("sub") if isinstance(current, dict) else None
+    name = sub if isinstance(sub, str) and sub else "unknown"
+    try:
+        from opti_oignon.ceremony_factors import session_account
+        account = session_account(current)
+    except Exception:  # noqa: BLE001 - the record keeps the session's name; the action stands
+        return name
+    return account.account_id if account is not None else name
+
+
+def _password_verdict(check: Any, event: str, label: dict, current: dict, password: str, request: Request) -> str:
+    """A password checked by ``check`` (``ceremony_factors``): the account's id, or a refusal raised with the
+    verdict's status and audited as ``event`` by name, with no secret, where the audit can write."""
+    try:
+        from .routes_auth import _extract_client_ip
+        client_ip = _extract_client_ip(request)
+    except Exception:  # noqa: BLE001 - the address only feeds the limiter
+        client_ip = "unknown"
+    verdict = check(current, password, client_ip=client_ip)
+    if verdict.passed:
+        return verdict.account_id
+    logger.warning("%s: %s", event, verdict.error)
+    try:
+        from opti_oignon.security_mode import _audit_log
+        _audit_log(
+            event,
+            severity="WARNING",
+            **label,
+            error=verdict.error,
+            user_id=(current.get("sub") if isinstance(current, dict) else None) or "",
+        )
+    except Exception:  # noqa: BLE001 - the audit is best effort; the refusal stands
+        pass
+    raise HTTPException(status_code=verdict.status, detail=verdict.message)
+
+
+def _account_password(action: str, current: dict, password: str, request: Request) -> str:
+    """The password of the account the session stands for, owner or not (``ceremony_factors.check_own_password``):
+    the step-up before a second factor of that account is added or removed. Its id, or a refusal raised -- 403 for no
+    account or a wrong password, 429 for a password being checked already or an account the login limiter holds
+    back, 503 for a password that cannot be checked -- and audited by name, with no secret. A route awaits it in a
+    worker thread and changes the store back on the event loop."""
+    from opti_oignon.ceremony_factors import check_own_password
+
+    return _password_verdict(check_own_password, "account_password_refused", {"action": action}, current, password,
+                             request)
+
+
 def _ceremony_password(ceremony: str, current: dict, password: str, request: Request) -> str:
     """The owner's password, asked through the owner's own session and checked so that nothing else passes
     (``ceremony_factors``): the account's id, or a refusal raised -- 403 for no account, another account's session or
@@ -1069,27 +1148,8 @@ def _ceremony_password(ceremony: str, current: dict, password: str, request: Req
     its breaker engages from worker threads, holds a lock of its own and asks again under it."""
     from opti_oignon.ceremony_factors import check_password
 
-    try:
-        from .routes_auth import _extract_client_ip
-        client_ip = _extract_client_ip(request)
-    except Exception:  # noqa: BLE001 - the address only feeds the limiter
-        client_ip = "unknown"
-    verdict = check_password(current, password, client_ip=client_ip)
-    if verdict.passed:
-        return verdict.account_id
-    logger.warning("Ceremony %s refused: %s", ceremony, verdict.error)
-    try:
-        from opti_oignon.security_mode import _audit_log
-        _audit_log(
-            "ceremony_password_refused",
-            severity="WARNING",
-            ceremony=ceremony,
-            error=verdict.error,
-            user_id=(current.get("sub") if isinstance(current, dict) else None) or "",
-        )
-    except Exception:  # noqa: BLE001 - the audit is best effort; the refusal stands
-        pass
-    raise HTTPException(status_code=verdict.status, detail=verdict.message)
+    return _password_verdict(check_password, "ceremony_password_refused", {"ceremony": ceremony}, current,
+                             password, request)
 
 
 @router.post("/mode/confirm-downgrade")
@@ -1371,21 +1431,22 @@ async def get_search_killswitch_status() -> dict[str, Any]:
 
 
 @router.post("/search-killswitch/kill")
-async def kill_search(body: SearchKillRequest) -> dict[str, Any]:
-    """Engage the search kill switch. No ceremony needed."""
+async def kill_search(body: SearchKillRequest, current: dict = Depends(_get_current_user)) -> dict[str, Any]:
+    """Engage the search kill switch. No ceremony needed: any session may, and the kill is recorded in its name."""
     if not SEARCH_KILLSWITCH_AVAILABLE:
         raise HTTPException(status_code=503, detail="Kill switch not available")
-    user_id = "admin"  # From authenticated session in production
-    return search_killswitch.kill(user_id=user_id, reason=body.reason)
+    return search_killswitch.kill(user_id=_session_actor(current), reason=body.reason)
 
 
 @router.post("/search-killswitch/request-reenable")
-async def request_search_reenable() -> dict[str, Any]:
-    """Start the search re-enable ceremony."""
+async def request_search_reenable(account: Any = Depends(_session_account)) -> dict[str, Any]:
+    """Start the search re-enable ceremony: the owner's to ask (403 for another account's session), bound to the
+    owner who asked -- the confirmation is refused to any other."""
     if not SEARCH_KILLSWITCH_AVAILABLE:
         raise HTTPException(status_code=503, detail="Kill switch not available")
-    user_id = "admin"
-    result = search_killswitch.request_reenable(user_id)
+    if not account.owner:
+        raise HTTPException(status_code=403, detail="Only the owner may ask to re-enable search: nothing is pending.")
+    result = search_killswitch.request_reenable(account.account_id)
     if not result.get("success"):
         status_code = 403 if result.get("error") == "bulbe_mode" else 400
         raise HTTPException(status_code=status_code, detail=result.get("message", ""))
@@ -1428,7 +1489,7 @@ async def confirm_search_reenable(
             code = 403
         elif error == "cooldown_active":
             code = 425
-        elif error in ("invalid_code", "invalid_request"):
+        elif error in ("invalid_code", "invalid_request", "user_mismatch"):
             code = 403
         elif error == "not_recorded":
             code = 503
@@ -1439,10 +1500,12 @@ async def confirm_search_reenable(
 
 
 @router.post("/search-killswitch/cancel-reenable")
-async def cancel_search_reenable() -> dict[str, Any]:
-    """Cancel a pending re-enable request."""
+async def cancel_search_reenable(account: Any = Depends(_session_account)) -> dict[str, Any]:
+    """Cancel a pending re-enable request: the owner's, who alone may ask one (403 for another account's session)."""
     if not SEARCH_KILLSWITCH_AVAILABLE:
         raise HTTPException(status_code=503, detail="Kill switch not available")
+    if not account.owner:
+        raise HTTPException(status_code=403, detail="Only the owner may cancel the re-enable of search.")
     return search_killswitch.cancel_reenable()
 
 
@@ -1517,7 +1580,10 @@ async def get_emergency_stop_status() -> dict[str, Any]:
 
 
 @router.post("/estop")
-async def engage_emergency_stop(body: EmergencyStopRequest) -> dict[str, Any]:
+async def engage_emergency_stop(
+    body: EmergencyStopRequest,
+    current: dict = Depends(_get_current_user),
+) -> dict[str, Any]:
     """Engage the emergency stop: the ordered fail-tolerant drain.
 
     The flag is set first (admission closes before the drain), then every
@@ -1528,15 +1594,15 @@ async def engage_emergency_stop(body: EmergencyStopRequest) -> dict[str, Any]:
         raise HTTPException(
             status_code=503, detail="Emergency stop not available"
         )
-    user_id = "admin"  # From the authenticated session in production
     return _emergency_stop.stop(
-        user_id=user_id, drop_to_bulbe=body.drop_to_bulbe
+        user_id=_session_actor(current), drop_to_bulbe=body.drop_to_bulbe
     )
 
 
 @router.post("/estop/resume")
 async def resume_from_emergency_stop(
     body: EmergencyResumeRequest,
+    current: dict = Depends(_get_current_user),
 ) -> dict[str, Any]:
     """Resume: clear the flag, reconnect the client, Daily-only node restart.
 
@@ -1548,9 +1614,8 @@ async def resume_from_emergency_stop(
         raise HTTPException(
             status_code=503, detail="Emergency stop not available"
         )
-    user_id = "admin"  # From the authenticated session in production
     return _emergency_stop.resume(
-        user_id=user_id, warmup_model=body.warmup_model
+        user_id=_session_actor(current), warmup_model=body.warmup_model
     )
 
 
@@ -1581,15 +1646,15 @@ class TOTPVerifyRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=8)
 
 
-class TwoFAValidateRequest(BaseModel):
-    """Validate any 2FA method."""
-    code: str
-    method: str = Field("auto", description="auto, totp, recovery, app_password")
+class StepUp(BaseModel):
+    """The password of the session's own account, asked before a credential of that account is added or removed."""
+    password: str = Field(..., description="The password of the session's own account")
 
 
 class AppPasswordCreateRequest(BaseModel):
     """Create an app-specific password."""
     name: str = Field(..., description="Label for this app password")
+    password: str = Field(..., description="The password of the session's own account")
 
 
 class WebAuthnRegCompleteRequest(BaseModel):
@@ -1598,23 +1663,53 @@ class WebAuthnRegCompleteRequest(BaseModel):
     response: dict[str, Any]
 
 
-class WebAuthnAuthCompleteRequest(BaseModel):
-    """Complete WebAuthn authentication."""
-    response: dict[str, Any]
+def _two_fa_or_503() -> None:
+    if not TWO_FA_AVAILABLE:
+        raise HTTPException(status_code=503, detail="2FA not available")
+
+
+def _asked_at_login() -> bool:
+    """Whether the login asks a second factor now: not while single-user mode lets every request through -- in Bulbe
+    mode it never does --, and yes when the mode cannot be read."""
+    try:
+        from opti_oignon.auth import auth_manager
+        single_user = bool(auth_manager is not None and auth_manager.single_user_mode)
+    except Exception:  # noqa: BLE001 - when it cannot be told, the factor is said to be asked
+        return True
+    if not single_user:
+        return True
+    try:
+        from opti_oignon.security_mode import is_bulbe
+        return bool(is_bulbe())
+    except Exception:  # noqa: BLE001 - an unreadable mode is taken for Bulbe, where the factor is asked
+        return True
 
 
 @router.get("/2fa/status")
-async def get_2fa_status() -> dict[str, Any]:
-    """Return 2FA status for the current user."""
+async def get_2fa_status(current: dict = Depends(_get_current_user)) -> dict[str, Any]:
+    """The second factors of the account the session stands for. The synthetic session of single-user mode with no
+    owner to stand for is told an account is needed (``account_required``); the owner whose earlier factors were
+    retired, and who has none active, is told so (``retired_unbound``)."""
     if not TWO_FA_AVAILABLE:
         return {
             "available": False,
             "webauthn_available": False,
             "totp_available": False,
         }
-    user_id = "admin"  # From authenticated session
-    status = two_factor_manager.get_status(user_id)
-    return {
+    try:
+        account = await run_in_threadpool(_session_account, current)
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        return {
+            "available": True,
+            "webauthn_available": _WEBAUTHN_OK,
+            "totp_available": _TOTP_OK,
+            "account_required": True,
+            "message": exc.detail,
+        }
+    status = two_factor_manager.get_status(account.account_id)
+    answer = {
         "available": True,
         "webauthn_available": _WEBAUTHN_OK,
         "totp_available": _TOTP_OK,
@@ -1626,54 +1721,73 @@ async def get_2fa_status() -> dict[str, Any]:
         "app_passwords_count": status.app_passwords_count,
         "any_method_active": status.any_method_active,
         "recovery_reissue_required": status.recovery_reissue_required,
+        "asked_at_login": _asked_at_login(),
     }
+    if account.owner and not status.any_method_active:
+        retired = two_factor_manager.retired_unbound()
+        if retired is not None:
+            answer["retired_unbound"] = retired
+    return answer
 
 
 # -- TOTP --
 
 @router.post("/2fa/totp/setup")
-async def totp_setup() -> dict[str, Any]:
-    """Generate TOTP secret and QR code."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
-    result = two_factor_manager.totp_setup(user_id)
+async def totp_setup(
+    body: StepUp,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+    account: Any = Depends(_session_account),
+) -> dict[str, Any]:
+    """Generate a TOTP secret and its QR code for the session's own account, after its password: 409 while a
+    verified secret is active -- setting up again would turn it off; disable it first."""
+    _two_fa_or_503()
+    user_id = await run_in_threadpool(_account_password, "totp_setup", current, body.password, request)
+    if two_factor_manager.get_status(user_id).totp_verified:
+        raise HTTPException(status_code=409, detail="TOTP is already active: disable it first to set it up again.")
+    result = two_factor_manager.totp_setup(user_id, label=account.username)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", ""))
     return result
 
 
 @router.post("/2fa/totp/verify")
-async def totp_verify(body: TOTPVerifyRequest) -> dict[str, Any]:
-    """Verify TOTP code to activate the method."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
-    result = two_factor_manager.totp_verify(user_id, body.code)
+async def totp_verify(body: TOTPVerifyRequest, account: Any = Depends(_session_account)) -> dict[str, Any]:
+    """Verify a TOTP code to activate the method a setup began (the setup asked the password)."""
+    _two_fa_or_503()
+    result = two_factor_manager.totp_verify(account.account_id, body.code)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", ""))
     return result
 
 
 @router.delete("/2fa/totp")
-async def totp_disable() -> dict[str, Any]:
-    """Disable TOTP for the current user."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
-    success = two_factor_manager.totp_disable(user_id)
-    return {"success": success}
+async def totp_disable(
+    body: StepUp,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+    account: Any = Depends(_session_account),
+) -> dict[str, Any]:
+    """Disable TOTP for the session's own account, after its password."""
+    _two_fa_or_503()
+    user_id = await run_in_threadpool(_account_password, "totp_disable", current, body.password, request)
+    return {"success": two_factor_manager.totp_disable(user_id)}
 
 
 # -- WebAuthn --
 
 @router.post("/2fa/webauthn/register/begin")
-async def webauthn_register_begin() -> dict[str, Any]:
-    """Begin WebAuthn credential registration."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
-    result = two_factor_manager.webauthn_register_begin(user_id, "admin")
+async def webauthn_register_begin(
+    body: StepUp,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+    account: Any = Depends(_session_account),
+) -> dict[str, Any]:
+    """Begin registering a security key for the session's own account, after its password: the key's user handle
+    is the account's id, its name the account's username."""
+    _two_fa_or_503()
+    user_id = await run_in_threadpool(_account_password, "webauthn_register", current, body.password, request)
+    result = two_factor_manager.webauthn_register_begin(user_id, account.username)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", ""))
     return result
@@ -1682,62 +1796,44 @@ async def webauthn_register_begin() -> dict[str, Any]:
 @router.post("/2fa/webauthn/register/complete")
 async def webauthn_register_complete(
     body: WebAuthnRegCompleteRequest,
+    account: Any = Depends(_session_account),
 ) -> dict[str, Any]:
-    """Complete WebAuthn credential registration."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
+    """Complete the registration a begin started (the begin asked the password)."""
+    _two_fa_or_503()
     result = two_factor_manager.webauthn_register_complete(
-        user_id, body.credential_name, body.response,
+        account.account_id, body.credential_name, body.response,
     )
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", ""))
     return result
 
 
-@router.post("/2fa/webauthn/auth/begin")
-async def webauthn_auth_begin() -> dict[str, Any]:
-    """Begin WebAuthn authentication challenge."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
-    result = two_factor_manager.webauthn_auth_begin(user_id)
-    if not result.get("success"):
-        raise HTTPException(status_code=400, detail=result.get("message", ""))
-    return result
-
-
-@router.post("/2fa/webauthn/auth/complete")
-async def webauthn_auth_complete(
-    body: WebAuthnAuthCompleteRequest,
-) -> dict[str, Any]:
-    """Complete WebAuthn authentication."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
-    result = two_factor_manager.webauthn_auth_complete(user_id, body.response)
-    if not result.get("success"):
-        raise HTTPException(status_code=403, detail=result.get("message", ""))
-    return result
-
-
 @router.get("/2fa/webauthn/credentials")
-async def list_webauthn_credentials() -> dict[str, Any]:
-    """List registered WebAuthn credentials."""
+async def list_webauthn_credentials(current: dict = Depends(_get_current_user)) -> dict[str, Any]:
+    """List the security keys of the session's own account."""
     if not TWO_FA_AVAILABLE:
         return {"credentials": []}
-    user_id = "admin"
-    return {"credentials": two_factor_manager.list_webauthn_credentials(user_id)}
+    try:
+        account = await run_in_threadpool(_session_account, current)
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        return {"credentials": [], "account_required": True, "message": exc.detail}
+    return {"credentials": two_factor_manager.list_webauthn_credentials(account.account_id)}
 
 
 @router.delete("/2fa/webauthn/credentials/{credential_id}")
-async def remove_webauthn_credential(credential_id: str) -> dict[str, Any]:
-    """Remove a WebAuthn credential."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
-    success = two_factor_manager.remove_webauthn_credential(user_id, credential_id)
-    if not success:
+async def remove_webauthn_credential(
+    credential_id: str,
+    body: StepUp,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+    account: Any = Depends(_session_account),
+) -> dict[str, Any]:
+    """Remove one security key of the session's own account, after its password: 404 for another account's key."""
+    _two_fa_or_503()
+    user_id = await run_in_threadpool(_account_password, "webauthn_remove", current, body.password, request)
+    if not two_factor_manager.remove_webauthn_credential(user_id, credential_id):
         raise HTTPException(status_code=404, detail="Credential not found")
     return {"success": True}
 
@@ -1745,11 +1841,15 @@ async def remove_webauthn_credential(credential_id: str) -> dict[str, Any]:
 # -- Recovery codes --
 
 @router.post("/2fa/recovery-codes/generate")
-async def generate_recovery_codes() -> dict[str, Any]:
-    """Generate new recovery codes.  Shown ONCE."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
+async def generate_recovery_codes(
+    body: StepUp,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+    account: Any = Depends(_session_account),
+) -> dict[str, Any]:
+    """Generate new recovery codes for the session's own account, after its password. Shown ONCE."""
+    _two_fa_or_503()
+    user_id = await run_in_threadpool(_account_password, "recovery_codes", current, body.password, request)
     codes = two_factor_manager.generate_recovery_codes(user_id)
     return {"success": True, "codes": codes, "count": len(codes)}
 
@@ -1757,57 +1857,62 @@ async def generate_recovery_codes() -> dict[str, Any]:
 # -- App-specific passwords --
 
 @router.post("/2fa/app-passwords")
-async def create_app_password(body: AppPasswordCreateRequest) -> dict[str, Any]:
-    """Create an app-specific password.  Shown ONCE."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
+async def create_app_password(
+    body: AppPasswordCreateRequest,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+    account: Any = Depends(_session_account),
+) -> dict[str, Any]:
+    """Create an app-specific password for the session's own account, after its password. Shown ONCE. It is never
+    a second factor at login, and no client signs in with one yet."""
+    _two_fa_or_503()
+    user_id = await run_in_threadpool(_account_password, "app_password_create", current, body.password, request)
     return two_factor_manager.create_app_password(user_id, body.name)
 
 
 @router.get("/2fa/app-passwords")
-async def list_app_passwords() -> dict[str, Any]:
-    """List app-specific passwords (without secrets)."""
+async def list_app_passwords(current: dict = Depends(_get_current_user)) -> dict[str, Any]:
+    """List the app-specific passwords of the session's own account (without secrets)."""
     if not TWO_FA_AVAILABLE:
         return {"passwords": []}
-    user_id = "admin"
-    return {"passwords": two_factor_manager.list_app_passwords(user_id)}
+    try:
+        account = await run_in_threadpool(_session_account, current)
+    except HTTPException as exc:
+        if exc.status_code != 403:
+            raise
+        return {"passwords": [], "account_required": True, "message": exc.detail}
+    return {"passwords": two_factor_manager.list_app_passwords(account.account_id)}
 
 
 @router.delete("/2fa/app-passwords/{password_id}")
-async def revoke_app_password(password_id: str) -> dict[str, Any]:
-    """Revoke an app-specific password."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
-    success = two_factor_manager.revoke_app_password(user_id, password_id)
-    if not success:
+async def revoke_app_password(
+    password_id: str,
+    body: StepUp,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+    account: Any = Depends(_session_account),
+) -> dict[str, Any]:
+    """Revoke an app-specific password of the session's own account, after its password: 404 for another
+    account's."""
+    _two_fa_or_503()
+    user_id = await run_in_threadpool(_account_password, "app_password_revoke", current, body.password, request)
+    if not two_factor_manager.revoke_app_password(user_id, password_id):
         raise HTTPException(status_code=404, detail="App password not found")
     return {"success": True}
-
-
-# -- Unified 2FA validation --
-
-@router.post("/2fa/validate")
-async def validate_2fa(body: TwoFAValidateRequest) -> dict[str, Any]:
-    """Validate a 2FA code (TOTP, recovery, or app password)."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
-    result = two_factor_manager.validate_2fa(user_id, body.code, body.method)
-    if not result.get("success"):
-        raise HTTPException(status_code=403, detail=result.get("message", ""))
-    return result
 
 
 # -- Disable all --
 
 @router.delete("/2fa/all")
-async def disable_all_2fa() -> dict[str, Any]:
-    """Disable all 2FA methods for the current user."""
-    if not TWO_FA_AVAILABLE:
-        raise HTTPException(status_code=503, detail="2FA not available")
-    user_id = "admin"
+async def disable_all_2fa(
+    body: StepUp,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+    account: Any = Depends(_session_account),
+) -> dict[str, Any]:
+    """Disable every second factor of the session's own account, after its password."""
+    _two_fa_or_503()
+    user_id = await run_in_threadpool(_account_password, "disable_all", current, body.password, request)
     return two_factor_manager.disable_all(user_id)
 
 
@@ -1836,24 +1941,22 @@ async def get_pending_tool_approvals() -> dict[str, Any]:
 
 
 @router.post("/tool-approval/{approval_id}/approve")
-async def approve_tool_call(approval_id: str) -> dict[str, Any]:
-    """Approve a pending tool call."""
+async def approve_tool_call(approval_id: str, current: dict = Depends(_get_current_user)) -> dict[str, Any]:
+    """Approve a pending tool call, in the name of the session's account."""
     if not TOOL_CALL_APPROVAL_AVAILABLE:
         raise HTTPException(status_code=503, detail="Tool call approval not available")
-    user_id = "admin"
-    success = tool_call_approval.approve(approval_id, user_id)
+    success = tool_call_approval.approve(approval_id, _session_actor(current))
     if not success:
         raise HTTPException(status_code=404, detail="Approval request not found or already resolved")
     return {"success": True, "approval_id": approval_id, "status": "approved"}
 
 
 @router.post("/tool-approval/{approval_id}/deny")
-async def deny_tool_call(approval_id: str) -> dict[str, Any]:
-    """Deny a pending tool call."""
+async def deny_tool_call(approval_id: str, current: dict = Depends(_get_current_user)) -> dict[str, Any]:
+    """Deny a pending tool call, in the name of the session's account."""
     if not TOOL_CALL_APPROVAL_AVAILABLE:
         raise HTTPException(status_code=503, detail="Tool call approval not available")
-    user_id = "admin"
-    success = tool_call_approval.deny(approval_id, user_id)
+    success = tool_call_approval.deny(approval_id, _session_actor(current))
     if not success:
         raise HTTPException(status_code=404, detail="Approval request not found or already resolved")
     return {"success": True, "approval_id": approval_id, "status": "denied"}

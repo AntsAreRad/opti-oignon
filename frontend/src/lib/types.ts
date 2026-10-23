@@ -2778,6 +2778,23 @@ export interface AuthTokens {
 	user_id: string;
 }
 
+/** The login's first step when the account has a second factor: no token yet, the methods it may answer with. */
+export interface TwoFactorChallenge {
+	requires_2fa: true;
+	challenge_id: string;
+	methods: Array<'webauthn' | 'totp' | 'recovery'>;
+	/** The security key's request options, when `webauthn` is offered (python-fido2's shape). */
+	webauthn_options?: Record<string, unknown>;
+}
+
+/** The login's second step: a code (TOTP or recovery), or a security key's assertion. */
+export interface TwoFactorAnswer {
+	challenge_id: string;
+	method: 'auto' | 'totp' | 'recovery' | 'webauthn';
+	code?: string;
+	webauthn_response?: Record<string, unknown>;
+}
+
 export interface AuthStatus {
 	available: boolean;
 	single_user_mode: boolean;

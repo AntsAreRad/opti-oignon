@@ -62,8 +62,8 @@ To enable full security (recommended for any networked use):
 2. Create your account first, with a strong password: the first account
    registered is the platform's owner -- the one whose password the
    security ceremonies ask for -- as long as no account is an admin's
-3. Optionally enable 2FA (TOTP or WebAuthn/FIDO2), in
-   **Preferences > Account**
+3. Optionally enable 2FA for your account (TOTP or WebAuthn/FIDO2), in
+   **Preferences > Account**: the login asks it once authentication is on
 4. Consider enabling **Bulbe mode** for maximum security
    (see [Bulbe Mode](../security/bulbe-mode.md))
 

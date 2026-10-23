@@ -36,11 +36,10 @@ bytes instead --, and nothing is approved, confirmed or re-enabled. A
 remote-session guard that cannot be read gives the hardened cookies. Not
 yet: the login limiter, when it cannot be loaded, limits nothing, and
 the login itself checks tries sent together before it counts the first;
-a second factor enabled from the settings is enrolled under `admin`, an
-identity the login does not read; registration is open by default, so
-that on an install with no account the first to register is the owner;
-and a configuration that gives every new account the admin role
-(`users.default_role: admin`) makes each one an owner.
+registration is open by default, so that on an install with no account
+the first to register is the owner; and a configuration that gives every
+new account the admin role (`users.default_role: admin`) makes each one
+an owner.
 
 
 ## User accounts
@@ -64,7 +63,28 @@ ceremony passes until one is registered.
 ## Two-factor authentication (2FA)
 
 Opti-Oignon supports two 2FA methods, which can be used independently
-or together:
+or together, each described below.
+
+A second factor belongs to the account that sets it up, and the login
+asks it of that account alone: a security key, whose request options the
+first step of the login carries, a TOTP code, or a recovery code -- only
+what the first step offered; a code is tried as a recovery code only
+when it has one's shape (sixteen hexadecimal characters), whichever
+method names it, any other as a TOTP code, read in its plain form: the
+spaces an app shows inside it ignored, fullwidth digits read as plain
+ones. A security key's answer is checked against the keys the account
+holds when it arrives, and of two answers that pass together, one signs
+in. An app password is never a second factor, and no client signs in
+with one yet. Adding or removing a factor asks the account's own
+password first (403 for a wrong one, 429 for one held back). Setting a
+TOTP up over an active one is refused: disable it first. In single-user
+mode nothing asks a factor at login until authentication is on, and with
+no account at all there is none to give a factor to. Deleting an account
+deletes its factors, where the store can write. Factors set up before
+they belonged to an account were stored under the identity `admin`,
+never asked at login, and are removed at the first start of this version
+that can write to the store, their counts audited: the owner is told to
+set them up again.
 
 ### WebAuthn / FIDO2
 
@@ -75,9 +95,9 @@ Supports USB keys (YubiKey, SoloKeys), platform authenticators
 Setup:
 
 1. Go to **Preferences > Account > Two-factor (WebAuthn)**
-2. Click **Register Security Key**
-3. Follow the browser prompt to touch your key
-4. Name the key for identification
+2. Click **Register New Key**
+3. Name the key, and enter your account's password
+4. Follow the browser prompt to touch your key
 
 Multiple keys can be registered for backup purposes.
 
@@ -89,7 +109,7 @@ Authenticator, Authy, KeePassXC, etc.).
 Setup:
 
 1. Go to **Preferences > Account > Two-factor (TOTP)**
-2. Click **Enable TOTP**
+2. Click **Set Up Authenticator**, and enter your account's password
 3. Scan the QR code with your authenticator app
 4. Enter the verification code to confirm
 
@@ -100,21 +120,20 @@ time-step is recorded, so a code that was just used cannot be replayed during th
 ### Recovery codes and app passwords
 
 Recovery codes (one-time, shown once at generation) and app-specific passwords
-(for CLI use) are never stored in clear: only a keyed hash is persisted. The hash
-is an HMAC-SHA256 under a subkey derived from the master encryption key on its own
-domain, so the master key is the only secret (Kerckhoffs). Without a master key
-configured, the at-rest protection of these hashes rests on SQLCipher.
+(meant for clients that sign in with one; none does yet) are never stored in clear:
+only a keyed hash is persisted. The hash is an HMAC-SHA256 under a subkey derived
+from the master encryption key on its own domain, so the master key is the only
+secret (Kerckhoffs). Without a master key configured, the at-rest protection of
+these hashes rests on SQLCipher.
 
-Migration (one-time, automatic). Recovery codes and app passwords created before
-this re-keying were hashed under the previous scheme. They are not rejected:
-
-- A pre-existing **app password** is transparently re-hashed to the new scheme the
-  next time it is used (the plaintext is available at that moment).
-- Pre-existing **recovery codes** cannot be re-hashed in place (their plaintext is
-  not stored). After any successful 2FA, the 2FA status reports
-  `recovery_reissue_required: true` until you regenerate your recovery codes; the
-  regenerated set is keyed under the new scheme. Regenerate them from
-  **Preferences > Account > Recovery codes** to re-key.
+Migration. Recovery codes and app passwords created before this re-keying were
+hashed under the previous scheme, and every one of them was stored under the
+identity `admin`: those are removed at the first start that can write to the
+store (see above), and none is left after it. Should a recovery code under the
+previous scheme still be met, it is accepted -- once, as any recovery code --
+and the 2FA status reports `recovery_reissue_required: true` while such codes
+remain unused; regenerating them from **Preferences > Account > Recovery codes**
+keys the new set under the new scheme.
 
 
 ## Session management

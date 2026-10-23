@@ -67,9 +67,10 @@ dependencies = [
 llama = [
     "llama-cpp-python>=0.2.0",
 ]
-# Two-factor authentication (WebAuthn + TOTP)
+# Two-factor authentication (WebAuthn + TOTP); the WebAuthn code is written
+# against python-fido2's 2.x interface.
 auth = [
-    "fido2>=1.1.0",
+    "fido2>=2.0",
     "pyotp>=2.9.0",
     "qrcode[pil]>=7.4",
 ]
@@ -1113,6 +1114,14 @@ fail_under = 0
 # repeats its walk word for word and counts that site. a34 stays in the tree
 # word for word.
 #
+# c5 of tests/test_auth_2fa_routes_seam_contracts.py froze the second-factor
+# module's statement census at thirty-six sites. The module now retires the
+# factors no account held, records the counts, and deletes an account's
+# factors when the account is deleted, with constant statements alone. c5
+# gives way to tf20 of tests/test_two_factor_account_contracts.py, which
+# repeats its walk word for word at the new count. c5 stays in the tree word
+# for word.
+#
 # ks3 of the web-gates suite held, in its c9, that the search re-enable
 # route checks a password of its own: the one of the account named `admin`,
 # for any session, through no limiter -- an oracle on that password. The
@@ -1515,4 +1524,5 @@ addopts = """
     --deselect=tests/test_auth_2fa_routes_seam_contracts.py::test_c3_missing_code_and_absent_second_factor_fail_correctly
     --deselect=tests/test_search_gates_contracts.py::test_ks3_the_engaged_switch_survives_a_restart_and_fails_closed
     --deselect=tests/test_auth_core_contracts.py::test_a34_sql_is_parameterised_never_f_string
+    --deselect=tests/test_auth_2fa_routes_seam_contracts.py::test_c5_statement_census_is_frozen
 """

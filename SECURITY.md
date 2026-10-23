@@ -232,7 +232,10 @@ binding at the OS level. The backend literally cannot accept connections
 from external hosts. Additionally:
 
 - Authentication is always enforced
-- 2FA is mandatory
+- A TOTP or a security key is asked at login of every account that set
+  one up, a recovery code standing in for either; an account none of
+  whose factors can be checked here is refused at login (an account
+  with neither is not refused yet)
 - Web search is disabled
 - Ollama bind guard blocks 0.0.0.0 exposure
 - Per-turn RAM wipe of sensitive context

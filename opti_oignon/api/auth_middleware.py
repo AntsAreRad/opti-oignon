@@ -45,7 +45,7 @@ _PUBLIC_PREFIXES = (
     "/api/auth/login",
     "/api/auth/register",
     "/api/auth/refresh",
-    "/api/auth/2fa-challenge",
+    "/api/auth/login/2fa",
     "/docs/",
     "/redoc/",
     "/openapi",

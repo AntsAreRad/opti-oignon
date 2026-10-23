@@ -10,6 +10,8 @@ import type {
 	AuthUser,
 	AuthTokens,
 	AuthStatus,
+	TwoFactorAnswer,
+	TwoFactorChallenge,
 	UserSettings,
 	RegisterRequest,
 	LoginRequest,
@@ -35,9 +37,14 @@ export async function register(req: RegisterRequest): Promise<AuthTokens> {
 	return apiPost<AuthTokens>(`${BASE}/register`, req);
 }
 
-/** Log in and get tokens. */
-export async function login(req: LoginRequest): Promise<AuthTokens> {
-	return apiPost<AuthTokens>(`${BASE}/login`, req);
+/** Log in: tokens, or -- for an account with a second factor -- the challenge its second step answers. */
+export async function login(req: LoginRequest): Promise<AuthTokens | TwoFactorChallenge> {
+	return apiPost<AuthTokens | TwoFactorChallenge>(`${BASE}/login`, req);
+}
+
+/** The login's second step: tokens once the factor is right. */
+export async function login2fa(req: TwoFactorAnswer): Promise<AuthTokens> {
+	return apiPost<AuthTokens>(`${BASE}/login/2fa`, req);
 }
 
 /** Refresh token pair. */

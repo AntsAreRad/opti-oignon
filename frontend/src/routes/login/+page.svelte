@@ -8,10 +8,16 @@
   is applied via data-oo-theme on <html> here too. Card / Input / Button and
   the --oo-bg-base background all read palette tokens, so login matches the
   app in all five palettes with no per-page theme code.
+
+  Two steps: the password, then -- for an account with a second factor -- a
+  code (TOTP or recovery) or the security key the first step offered.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { doLogin } from '$lib/stores/auth';
+	import { doLogin, doLoginSecondStep } from '$lib/stores/auth';
+	import { requestOptions, serializeAssertion } from '$lib/webauthn';
+	import { httpRefusal } from '$lib/switches/serverSwitch';
+	import type { TwoFactorChallenge } from '$lib/types';
 	import Card from '$lib/ds/Card.svelte';
 	import Input from '$lib/ds/Input.svelte';
 	import Button from '$lib/ds/Button.svelte';
@@ -20,6 +26,13 @@
 	let password = '';
 	let loading = false;
 	let errorMsg = '';
+
+	// The second step, once the first answered a challenge.
+	let challenge: TwoFactorChallenge | null = null;
+	let code = '';
+
+	$: offersCode = !!challenge && (challenge.methods.includes('totp') || challenge.methods.includes('recovery'));
+	$: offersKey = !!challenge && challenge.methods.includes('webauthn') && !!challenge.webauthn_options;
 
 	async function handleLogin() {
 		if (!username.trim() || !password) {
@@ -31,17 +44,23 @@
 		errorMsg = '';
 
 		try {
-			await doLogin(username.trim(), password);
+			const outcome = await doLogin(username.trim(), password);
+			if ('challenge' in outcome) {
+				challenge = outcome.challenge;
+				password = '';
+				return;
+			}
 			goto('/chat');
 		} catch (err: unknown) {
 			const msg = err instanceof Error ? err.message : 'Login failed';
+			const status = httpRefusal(err)?.status;
 			// Detect rate limiting from 429 responses
-			if (msg.includes('429') || msg.toLowerCase().includes('too many')) {
+			if (status === 429 || msg.includes('429') || msg.toLowerCase().includes('too many')) {
 				errorMsg = 'Too many login attempts. Please wait a moment and try again.';
-			} else if (msg.includes('401')) {
+			} else if (status === 401 || msg.includes('401')) {
 				errorMsg = 'Invalid username or password.';
 			} else {
-				errorMsg = msg;
+				errorMsg = reason(err, msg);
 			}
 		} finally {
 			loading = false;
@@ -50,6 +69,75 @@
 
 	function handleKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter') handleLogin();
+	}
+
+	/** The server's own reason -- a wrong code and the tries left, a challenge to start over --, or the error's text. */
+	function reason(err: unknown, fallback: string): string {
+		const refusal = httpRefusal(err);
+		if (refusal && refusal.detail) return refusal.detail;
+		return err instanceof Error && err.message ? err.message : fallback;
+	}
+
+	/** A refusal that ends the challenge -- expired, unknown, locked -- sends back to the first step. */
+	function endsChallenge(message: string): boolean {
+		return message.toLowerCase().includes('log in again');
+	}
+
+	async function answer(send: () => Promise<unknown>) {
+		if (!challenge) return;
+		loading = true;
+		errorMsg = '';
+		try {
+			await send();
+			goto('/chat');
+		} catch (err: unknown) {
+			const message = reason(err, 'The second step failed.');
+			if (endsChallenge(message)) {
+				challenge = null;
+				code = '';
+			}
+			errorMsg = message;
+		} finally {
+			loading = false;
+		}
+	}
+
+	function submitCode() {
+		const given = code.trim();
+		if (!challenge || !given) {
+			errorMsg = 'Enter the code from your authenticator app, or a recovery code.';
+			return;
+		}
+		const challengeId = challenge.challenge_id;
+		code = '';
+		answer(() => doLoginSecondStep({ challenge_id: challengeId, method: 'auto', code: given }));
+	}
+
+	function useKey() {
+		if (!challenge || !challenge.webauthn_options) return;
+		const { challenge_id: challengeId, webauthn_options: options } = challenge;
+		answer(async () => {
+			if (!window.PublicKeyCredential) {
+				throw new Error('This browser cannot use a security key here.');
+			}
+			const credential = await navigator.credentials.get({ publicKey: requestOptions(options) });
+			if (!credential) throw new Error('The security key gave no answer.');
+			return doLoginSecondStep({
+				challenge_id: challengeId,
+				method: 'webauthn',
+				webauthn_response: serializeAssertion(credential as PublicKeyCredential)
+			});
+		});
+	}
+
+	function startOver() {
+		challenge = null;
+		code = '';
+		errorMsg = '';
+	}
+
+	function handleCodeKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') submitCode();
 	}
 </script>
 
@@ -61,12 +149,39 @@
 				<h1 class="oo-auth-title">Opti-Oignon</h1>
 			</div>
 
-			<p class="oo-auth-subtitle">Sign in to your account</p>
+			<p class="oo-auth-subtitle">
+				{challenge ? 'Confirm it is you: a second factor' : 'Sign in to your account'}
+			</p>
 
 			{#if errorMsg}
 				<div class="oo-auth-error" role="alert">{errorMsg}</div>
 			{/if}
 
+			{#if challenge}
+			<div class="oo-auth-form">
+				{#if offersCode}
+					<Input
+						label="Code"
+						bind:value={code}
+						placeholder="From your authenticator app, or a recovery code"
+						autocomplete="one-time-code"
+						disabled={loading}
+						on:keydown={handleCodeKeydown}
+					/>
+					<Button variant="primary" block loading={loading} on:click={submitCode}>
+						Verify
+					</Button>
+				{/if}
+				{#if offersKey}
+					<Button variant={offersCode ? 'secondary' : 'primary'} block loading={loading} on:click={useKey}>
+						Use your security key
+					</Button>
+				{/if}
+				<Button variant="link" size="sm" disabled={loading} on:click={startOver}>
+					Start over
+				</Button>
+			</div>
+			{:else}
 			<div class="oo-auth-form">
 				<Input
 					label="Username"
@@ -89,6 +204,7 @@
 					Sign in
 				</Button>
 			</div>
+			{/if}
 
 			<p class="oo-auth-footer">
 				Don't have an account?

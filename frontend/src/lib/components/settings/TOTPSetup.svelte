@@ -8,15 +8,33 @@
   - 6-digit verification input with auto-submit
   - Success confirmation
   - Disable TOTP option
+  - Setting up and disabling ask the account's password first (StepUpPrompt)
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { apiGet, apiPost, apiDelete } from '$lib/api/client';
+	import StepUpPrompt from './StepUpPrompt.svelte';
+	import { httpRefusal } from '$lib/switches/serverSwitch';
+
+	interface RetiredFactors {
+		at: number;
+		totp: number;
+		webauthn: number;
+		recovery_codes: number;
+		app_passwords: number;
+	}
 
 	interface TwoFAStatus {
 		totp_available: boolean;
 		totp_enabled: boolean;
 		totp_verified: boolean;
+		/** Single-user mode with no account to give a factor to. */
+		account_required?: boolean;
+		message?: string;
+		/** False while single-user mode lets every request through: nothing asks the factor yet. */
+		asked_at_login?: boolean;
+		/** The factors set up before they belonged to an account, removed: never asked at login. */
+		retired_unbound?: RetiredFactors;
 	}
 
 	let status: TwoFAStatus | null = null;
@@ -41,6 +59,11 @@
 	let confirmDisable = false;
 	let disableLoading = false;
 
+	// The password asked before setting up or disabling
+	let stepUpFor: 'setup' | 'disable' | null = null;
+	let stepUpBusy = false;
+	let stepUpError = '';
+
 	onMount(async () => {
 		await loadStatus();
 		loading = false;
@@ -55,29 +78,41 @@
 		}
 	}
 
-	async function beginSetup() {
-		setupActive = true;
-		setupLoading = true;
+	function askStepUp(action: 'setup' | 'disable') {
+		stepUpFor = action;
+		stepUpError = '';
+	}
+
+	async function onStepUp(event: CustomEvent<{ password: string }>) {
+		const { password } = event.detail;
+		stepUpBusy = true;
+		stepUpError = '';
+		try {
+			if (stepUpFor === 'setup') await beginSetup(password);
+			else if (stepUpFor === 'disable') await disableTotp(password);
+			stepUpFor = null;
+		} catch (e: any) {
+			// The server's reason: a wrong password, a wait, TOTP already active.
+			stepUpError = httpRefusal(e)?.detail || e.message || 'Refused.';
+		} finally {
+			stepUpBusy = false;
+		}
+	}
+
+	async function beginSetup(password: string) {
 		verifyError = '';
 		verifySuccess = '';
-
-		try {
-			const result = await apiPost<Record<string, any>>(
-				'/api/security/2fa/totp/setup'
-			);
-			if (result.success) {
-				qrCodeBase64 = result.qr_code_base64 || '';
-				secret = result.secret || '';
-				uri = result.uri || '';
-			} else {
-				error = result.message || 'Failed to generate TOTP secret.';
-				setupActive = false;
-			}
-		} catch (e: any) {
-			error = e.detail || 'Failed to start TOTP setup.';
-			setupActive = false;
-		} finally {
-			setupLoading = false;
+		const result = await apiPost<Record<string, any>>(
+			'/api/security/2fa/totp/setup',
+			{ password }
+		);
+		if (result.success) {
+			setupActive = true;
+			qrCodeBase64 = result.qr_code_base64 || '';
+			secret = result.secret || '';
+			uri = result.uri || '';
+		} else {
+			throw new Error(result.message || 'Failed to generate TOTP secret.');
 		}
 	}
 
@@ -111,15 +146,13 @@
 		}
 	}
 
-	async function disableTotp() {
+	async function disableTotp(password: string) {
 		disableLoading = true;
 		try {
-			await apiDelete<{ success: boolean }>('/api/security/2fa/totp');
+			await apiDelete<{ success: boolean }>('/api/security/2fa/totp', { password });
 			confirmDisable = false;
 			verifySuccess = '';
 			await loadStatus();
-		} catch (e: any) {
-			error = e.detail || 'Failed to disable TOTP.';
 		} finally {
 			disableLoading = false;
 		}
@@ -143,6 +176,10 @@
 		verifyCode = '';
 		verifyError = '';
 	}
+	/** A count with its noun, singular for one. */
+	function counted(n: number, one: string, many: string): string {
+		return `${n} ${n === 1 ? one : many}`;
+	}
 </script>
 
 <div class="space-y-4">
@@ -164,7 +201,24 @@
 		</div>
 	{/if}
 
-	{#if !loading && status}
+	{#if !loading && status?.account_required}
+		<p class="text-sm oo-account-required">{status.message}</p>
+	{:else if !loading && status}
+		{#if status.retired_unbound}
+			<div class="rounded p-3 text-xs" style="background-color: var(--oo-bg-tertiary); color: var(--oo-fg-secondary); border: 1px solid var(--oo-bd-subtle);" role="status">
+				Second factors set up here before factors belonged to an account were never asked at login, and were
+				removed ({counted(status.retired_unbound.totp, 'authenticator app', 'authenticator apps')},
+				{counted(status.retired_unbound.webauthn, 'security key', 'security keys')},
+				{counted(status.retired_unbound.recovery_codes, 'recovery code', 'recovery codes')},
+				{counted(status.retired_unbound.app_passwords, 'app password', 'app passwords')}). Set up again the
+				ones you use.
+			</div>
+		{/if}
+		{#if status.asked_at_login === false}
+			<p class="text-xs" style="color: var(--oo-fg-muted);">
+				Single-user mode: nothing asks a second factor at login until authentication is on.
+			</p>
+		{/if}
 		{#if status.totp_verified && !setupActive}
 			<!-- TOTP is active -->
 			<div class="rounded-lg p-4" style="background-color: var(--oo-card-bg); border: 1px solid var(--oo-bd-subtle);">
@@ -180,29 +234,18 @@
 					Use your authenticator app (Google Authenticator, Authy, etc.) to generate codes during login.
 				</p>
 				{#if confirmDisable}
-					<div class="flex items-center gap-2">
-						<span class="text-xs" style="color: var(--oo-fg-warning);">Are you sure?</span>
-						<button
-							class="px-2 py-1 rounded text-xs"
-							style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
-							disabled={disableLoading}
-							on:click={disableTotp}
-						>
-							{disableLoading ? 'Disabling...' : 'Yes, Disable'}
-						</button>
-						<button
-							class="px-2 py-1 rounded text-xs"
-							style="color: var(--oo-fg-muted); border: 1px solid var(--oo-bd-subtle);"
-							on:click={() => { confirmDisable = false; }}
-						>
-							Cancel
-						</button>
-					</div>
+					<StepUpPrompt
+						action="Disable TOTP"
+						busy={stepUpBusy || disableLoading}
+						error={stepUpError}
+						on:confirm={onStepUp}
+						on:cancel={() => { confirmDisable = false; stepUpFor = null; }}
+					/>
 				{:else}
 					<button
 						class="px-3 py-1.5 rounded text-xs transition-colors"
 						style="color: var(--oo-fg-error); border: 1px solid var(--oo-bd-subtle);"
-						on:click={() => { confirmDisable = true; }}
+						on:click={() => { confirmDisable = true; askStepUp('disable'); }}
 					>
 						Disable TOTP
 					</button>
@@ -308,14 +351,30 @@
 				<p class="text-sm mb-3" style="color: var(--oo-fg-secondary);">
 					Add an authenticator app as a backup 2FA method. Works with Google Authenticator, Authy, and other TOTP-compatible apps.
 				</p>
-				<button
-					class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
-					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
-					on:click={beginSetup}
-				>
-					Set Up Authenticator
-				</button>
+				{#if stepUpFor === 'setup'}
+					<StepUpPrompt
+						action="Set up"
+						busy={stepUpBusy}
+						error={stepUpError}
+						on:confirm={onStepUp}
+						on:cancel={() => { stepUpFor = null; }}
+					/>
+				{:else}
+					<button
+						class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
+						style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
+						on:click={() => askStepUp('setup')}
+					>
+						Set Up Authenticator
+					</button>
+				{/if}
 			</div>
 		{/if}
 	{/if}
 </div>
+
+<style>
+	.oo-account-required {
+		color: var(--oo-fg-secondary);
+	}
+</style>

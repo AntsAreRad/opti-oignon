@@ -8,10 +8,13 @@
   - Print-friendly display
   - Warning when remaining codes < 3
   - Remaining count indicator
+  - Generating asks the account's password first (StepUpPrompt)
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { apiGet, apiPost } from '$lib/api/client';
+	import StepUpPrompt from './StepUpPrompt.svelte';
+	import { httpRefusal } from '$lib/switches/serverSwitch';
 
 	let remaining = 0;
 	let loading = true;
@@ -23,6 +26,8 @@
 	let generating = false;
 	let copied = false;
 	let confirmGenerate = false;
+	let generateError = '';
+	let accountRequired = '';
 
 	onMount(async () => {
 		await loadStatus();
@@ -33,25 +38,28 @@
 		try {
 			const data = await apiGet<Record<string, any>>('/api/security/2fa/status');
 			remaining = data.recovery_codes_remaining ?? 0;
+			accountRequired = data.account_required ? data.message || 'Create the account first.' : '';
 		} catch (e: any) {
 			error = e.detail || 'Failed to load recovery code status';
 		}
 	}
 
-	async function generateCodes() {
+	async function generateCodes(event: CustomEvent<{ password: string }>) {
 		generating = true;
-		error = '';
+		generateError = '';
 
 		try {
 			const result = await apiPost<{ codes: string[] }>(
-				'/api/security/2fa/recovery-codes/generate'
+				'/api/security/2fa/recovery-codes/generate',
+				{ password: event.detail.password }
 			);
 			generatedCodes = result.codes || [];
 			showCodes = true;
 			confirmGenerate = false;
 			await loadStatus();
 		} catch (e: any) {
-			error = e.detail || 'Failed to generate recovery codes.';
+			// The server's reason: a wrong password, a wait.
+			generateError = httpRefusal(e)?.detail || 'Failed to generate recovery codes.';
 		} finally {
 			generating = false;
 		}
@@ -178,8 +186,12 @@
 		</div>
 	{/if}
 
+	{#if accountRequired}
+		<p class="text-sm oo-account-required">{accountRequired}</p>
+	{/if}
+
 	<!-- Generate / regenerate button -->
-	{#if !showCodes && !loading}
+	{#if !showCodes && !loading && !accountRequired}
 		<div class="rounded-lg p-4" style="background-color: var(--oo-card-bg); border: 1px solid var(--oo-bd-subtle);">
 			<p class="text-sm mb-3" style="color: var(--oo-fg-secondary);">
 				{#if remaining === 0}
@@ -190,33 +202,23 @@
 			</p>
 
 			{#if confirmGenerate}
-				<div class="flex items-center gap-2">
-					{#if remaining > 0}
-						<span class="text-xs" style="color: var(--oo-fg-warning);">
-							This will replace your existing {remaining} codes. Continue?
-						</span>
-					{/if}
-					<button
-						class="px-3 py-1.5 rounded text-xs font-medium"
-						style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
-						disabled={generating}
-						on:click={generateCodes}
-					>
-						{generating ? 'Generating...' : 'Yes, Generate'}
-					</button>
-					<button
-						class="px-2 py-1.5 rounded text-xs"
-						style="color: var(--oo-fg-muted); border: 1px solid var(--oo-bd-subtle);"
-						on:click={() => { confirmGenerate = false; }}
-					>
-						Cancel
-					</button>
-				</div>
+				{#if remaining > 0}
+					<p class="text-xs" style="color: var(--oo-fg-warning);">
+						This will replace your existing {remaining} codes.
+					</p>
+				{/if}
+				<StepUpPrompt
+					action={generating ? 'Generating...' : 'Generate'}
+					busy={generating}
+					error={generateError}
+					on:confirm={generateCodes}
+					on:cancel={() => { confirmGenerate = false; }}
+				/>
 			{:else}
 				<button
 					class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
 					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
-					on:click={() => { confirmGenerate = remaining > 0; if (!confirmGenerate) generateCodes(); }}
+					on:click={() => { confirmGenerate = true; generateError = ''; }}
 				>
 					{remaining > 0 ? 'Regenerate Codes' : 'Generate Recovery Codes'}
 				</button>
@@ -224,3 +226,9 @@
 		</div>
 	{/if}
 </div>
+
+<style>
+	.oo-account-required {
+		color: var(--oo-fg-secondary);
+	}
+</style>

@@ -100,6 +100,7 @@ class KillSwitchState:
     reenable_request_id: str = ""
     reenable_requested_at: float = 0.0
     reenable_visual_code: str = ""
+    reenable_requested_by: str = ""
 
 
 @dataclass
@@ -545,6 +546,7 @@ class SearchKillSwitch:
         self._state.reenable_request_id = request_id
         self._state.reenable_requested_at = now
         self._state.reenable_visual_code = code
+        self._state.reenable_requested_by = user_id
 
         return {
             "success": True,
@@ -607,6 +609,14 @@ class SearchKillSwitch:
                 "success": False,
                 "error": "invalid_request",
                 "message": "Invalid request ID",
+            }
+
+        # The one who asked confirms: another account's confirmation is refused, as the downgrade's is.
+        if not same(user_id, self._state.reenable_requested_by):
+            return {
+                "success": False,
+                "error": "user_mismatch",
+                "message": "The re-enable must be confirmed by the account that asked for it.",
             }
 
         # Verify cooldown

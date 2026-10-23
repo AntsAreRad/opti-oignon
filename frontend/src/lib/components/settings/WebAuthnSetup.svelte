@@ -7,10 +7,14 @@
   - "Register new key" button that begins the WebAuthn ceremony
   - Calls navigator.credentials.create() with server-provided options
   - Delete button per credential with confirmation
+  - Registering and removing a key ask the account's password first (StepUpPrompt)
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { apiGet, apiPost, apiDelete } from '$lib/api/client';
+	import { creationOptions, serializeAttestation } from '$lib/webauthn';
+	import StepUpPrompt from './StepUpPrompt.svelte';
+	import { httpRefusal } from '$lib/switches/serverSwitch';
 
 	interface WebAuthnCredential {
 		credential_id: string;
@@ -26,10 +30,12 @@
 	let registerError = '';
 	let registerSuccess = '';
 	let deletingId = '';
+	let deleteError = '';
 	let confirmDeleteId = '';
 	let newKeyName = '';
 	let showRegisterForm = false;
 	let webauthnAvailable = false;
+	let accountRequired = '';
 
 	onMount(async () => {
 		// Check browser WebAuthn support
@@ -40,51 +46,50 @@
 
 	async function loadCredentials() {
 		try {
-			const data = await apiGet<{ credentials: WebAuthnCredential[] }>(
+			const data = await apiGet<{ credentials: WebAuthnCredential[]; account_required?: boolean; message?: string }>(
 				'/api/security/2fa/webauthn/credentials'
 			);
 			credentials = data.credentials || [];
+			accountRequired = data.account_required ? data.message || 'Create the account first.' : '';
 		} catch (e: any) {
 			error = e.detail || 'Failed to load security keys';
 		}
 	}
 
-	async function beginRegistration() {
+	async function beginRegistration(event: CustomEvent<{ password: string }>) {
 		registerError = '';
 		registerSuccess = '';
 		registerLoading = true;
 
 		try {
-			// Step 1: Get registration options from server
-			const options = await apiPost<Record<string, any>>(
-				'/api/security/2fa/webauthn/register/begin'
+			// Step 1: the account's password, then the registration options from the server
+			const answer = await apiPost<Record<string, any>>(
+				'/api/security/2fa/webauthn/register/begin',
+				{ password: event.detail.password }
 			);
 
-			if (!options.success && options.success !== undefined) {
-				registerError = options.message || 'Server rejected registration request';
-				registerLoading = false;
+			if (!answer.success || !answer.options) {
+				registerError = answer.message || 'Server rejected registration request';
 				return;
 			}
 
-			// Step 2: Convert base64url fields to ArrayBuffer for WebAuthn API
-			const publicKey = prepareCreateOptions(options);
+			// Step 2: the server's base64url fields as the browser's buffers
+			const publicKey = creationOptions(answer.options);
 
 			// Step 3: Call browser WebAuthn API
 			const credential = await navigator.credentials.create({ publicKey });
 
 			if (!credential) {
 				registerError = 'Registration cancelled or timed out.';
-				registerLoading = false;
 				return;
 			}
 
 			// Step 4: Send response back to server
-			const attestation = serializeCredential(credential as PublicKeyCredential);
 			const result = await apiPost<Record<string, any>>(
 				'/api/security/2fa/webauthn/register/complete',
 				{
-					response: attestation,
-					name: newKeyName || 'Security Key',
+					response: serializeAttestation(credential as PublicKeyCredential),
+					credential_name: newKeyName || 'Security Key',
 				}
 			);
 
@@ -102,27 +107,30 @@
 			} else if (e.name === 'SecurityError') {
 				registerError = 'Security error. Ensure you are using HTTPS or localhost.';
 			} else {
-				registerError = e.detail || e.message || 'Registration failed.';
+				registerError = httpRefusal(e)?.detail || e.message || 'Registration failed.';
 			}
 		} finally {
 			registerLoading = false;
 		}
 	}
 
-	async function deleteCredential(credentialId: string) {
+	async function deleteCredential(credentialId: string, event: CustomEvent<{ password: string }>) {
 		deletingId = credentialId;
+		deleteError = '';
 		try {
 			const result = await apiDelete<{ success: boolean }>(
-				`/api/security/2fa/webauthn/credentials/${encodeURIComponent(credentialId)}`
+				`/api/security/2fa/webauthn/credentials/${encodeURIComponent(credentialId)}`,
+				{ password: event.detail.password }
 			);
 			if (result.success) {
 				credentials = credentials.filter(c => c.credential_id !== credentialId);
+				confirmDeleteId = '';
 			}
 		} catch (e: any) {
-			error = e.detail || 'Failed to delete key';
+			// The server's reason: a wrong password, a wait.
+			deleteError = httpRefusal(e)?.detail || 'Failed to delete key';
 		} finally {
 			deletingId = '';
-			confirmDeleteId = '';
 		}
 	}
 
@@ -133,70 +141,11 @@
 			hour: '2-digit', minute: '2-digit',
 		});
 	}
-
-	// -- WebAuthn helpers -------------------------------------------------------
-
-	function base64urlToBuffer(base64url: string): ArrayBuffer {
-		let base64 = base64url.replace(/-/g, '+').replace(/_/g, '/');
-		while (base64.length % 4 !== 0) base64 += '=';
-		const binary = atob(base64);
-		const bytes = new Uint8Array(binary.length);
-		for (let i = 0; i < binary.length; i++) {
-			bytes[i] = binary.charCodeAt(i);
-		}
-		return bytes.buffer;
-	}
-
-	function bufferToBase64url(buffer: ArrayBuffer): string {
-		const bytes = new Uint8Array(buffer);
-		let binary = '';
-		for (const byte of bytes) {
-			binary += String.fromCharCode(byte);
-		}
-		return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-	}
-
-	function prepareCreateOptions(serverOptions: Record<string, any>): PublicKeyCredentialCreationOptions {
-		const opts: any = { ...serverOptions };
-
-		// Convert challenge
-		if (typeof opts.challenge === 'string') {
-			opts.challenge = base64urlToBuffer(opts.challenge);
-		}
-
-		// Convert user.id
-		if (opts.user && typeof opts.user.id === 'string') {
-			opts.user = { ...opts.user, id: base64urlToBuffer(opts.user.id) };
-		}
-
-		// Convert excludeCredentials[].id
-		if (opts.excludeCredentials) {
-			opts.excludeCredentials = opts.excludeCredentials.map((c: any) => ({
-				...c,
-				id: typeof c.id === 'string' ? base64urlToBuffer(c.id) : c.id,
-			}));
-		}
-
-		return opts as PublicKeyCredentialCreationOptions;
-	}
-
-	function serializeCredential(cred: PublicKeyCredential): Record<string, any> {
-		const response = cred.response as AuthenticatorAttestationResponse;
-		return {
-			id: cred.id,
-			rawId: bufferToBase64url(cred.rawId),
-			type: cred.type,
-			response: {
-				clientDataJSON: bufferToBase64url(response.clientDataJSON),
-				attestationObject: bufferToBase64url(response.attestationObject),
-			},
-		};
-	}
 </script>
 
 <div class="space-y-4">
 	<div class="flex items-center justify-end">
-		{#if webauthnAvailable && !showRegisterForm}
+		{#if webauthnAvailable && !showRegisterForm && !accountRequired}
 			<button
 				class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
 				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
@@ -206,6 +155,10 @@
 			</button>
 		{/if}
 	</div>
+
+	{#if accountRequired}
+		<p class="text-sm oo-account-required">{accountRequired}</p>
+	{/if}
 
 	{#if !webauthnAvailable}
 		<p class="text-xs" style="color: var(--oo-fg-warning);">
@@ -233,27 +186,14 @@
 					class="flex-1 px-3 py-2 rounded text-sm"
 					style="background-color: var(--oo-input-bg); color: var(--oo-fg-primary); border: 1px solid var(--oo-bd-subtle);"
 				/>
-				<button
-					class="px-4 py-2 rounded text-sm font-medium transition-colors"
-					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
-					disabled={registerLoading}
-					on:click={beginRegistration}
-				>
-					{#if registerLoading}
-						Waiting...
-					{:else}
-						Register
-					{/if}
-				</button>
-				<button
-					class="px-3 py-2 rounded text-sm"
-					style="color: var(--oo-fg-muted); border: 1px solid var(--oo-bd-subtle);"
-					on:click={() => { showRegisterForm = false; }}
-					disabled={registerLoading}
-				>
-					Cancel
-				</button>
 			</div>
+			<StepUpPrompt
+				action="Register"
+				busy={registerLoading}
+				error={registerError}
+				on:confirm={beginRegistration}
+				on:cancel={() => { showRegisterForm = false; }}
+			/>
 			{#if registerLoading}
 				<div class="flex items-center gap-2 text-sm" style="color: var(--oo-tobacco);">
 					<svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
@@ -262,9 +202,6 @@
 					</svg>
 					Tap your security key or follow the browser prompt...
 				</div>
-			{/if}
-			{#if registerError}
-				<p class="text-xs" style="color: var(--oo-fg-error);">{registerError}</p>
 			{/if}
 		</div>
 	{/if}
@@ -280,6 +217,7 @@
 	{:else}
 		<div class="space-y-2">
 			{#each credentials as cred (cred.credential_id)}
+				<div class="space-y-2">
 				<div
 					class="flex items-center justify-between rounded-lg p-3"
 					style="background-color: var(--oo-card-bg); border: 1px solid var(--oo-bd-subtle);"
@@ -299,29 +237,11 @@
 						</div>
 					</div>
 					<div class="shrink-0 ml-3">
-						{#if confirmDeleteId === cred.credential_id}
-							<div class="flex gap-1">
-								<button
-									class="px-2 py-1 rounded text-xs"
-									style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
-									disabled={deletingId === cred.credential_id}
-									on:click={() => deleteCredential(cred.credential_id)}
-								>
-									{deletingId === cred.credential_id ? '...' : 'Confirm'}
-								</button>
-								<button
-									class="px-2 py-1 rounded text-xs"
-									style="color: var(--oo-fg-muted); border: 1px solid var(--oo-bd-subtle);"
-									on:click={() => { confirmDeleteId = ''; }}
-								>
-									No
-								</button>
-							</div>
-						{:else}
+						{#if confirmDeleteId !== cred.credential_id}
 							<button
 								class="px-2 py-1 rounded text-xs transition-colors"
 								style="color: var(--oo-fg-error); border: 1px solid transparent;"
-								on:click={() => { confirmDeleteId = cred.credential_id; }}
+								on:click={() => { confirmDeleteId = cred.credential_id; deleteError = ''; }}
 								title="Remove this key"
 							>
 								Remove
@@ -329,7 +249,23 @@
 						{/if}
 					</div>
 				</div>
+				{#if confirmDeleteId === cred.credential_id}
+					<StepUpPrompt
+						action="Remove key"
+						busy={deletingId === cred.credential_id}
+						error={deleteError}
+						on:confirm={(e) => deleteCredential(cred.credential_id, e)}
+						on:cancel={() => { confirmDeleteId = ''; }}
+					/>
+				{/if}
+				</div>
 			{/each}
 		</div>
 	{/if}
 </div>
+
+<style>
+	.oo-account-required {
+		color: var(--oo-fg-secondary);
+	}
+</style>

@@ -3382,6 +3382,59 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] A second factor belongs to the account. Every factor
+  enrolled from the settings -- a TOTP, a security key, recovery codes,
+  app passwords -- was stored under the literal identity `admin`: the
+  login read the account's own id and never asked it, so an account that
+  turned 2FA on signed in with its password alone while the page said it
+  was on, and any session could write, overwrite or disable those
+  factors. Each route now acts on the account the session stands for:
+  401 for a session that names no account or one that is gone, and, for
+  the session of single-user mode when there is no account to give a
+  factor to, 403 where a route would act -- the status and the lists say
+  an account is needed. Adding or removing a credential -- a TOTP, a
+  security key, recovery codes, an app password, or all of them -- asks
+  the account's own password first, through the login limiter and off
+  the event loop: 403 for a wrong one, 429 for one held back or being
+  checked already, 503 for one that cannot be checked, 422 when none is
+  sent. Setting a TOTP up over an active one is refused (409), where it
+  silently replaced the verified secret and turned the factor off. The
+  login's second step takes only the methods its first step offered: an
+  app password is never a second factor -- no client signs in with one
+  yet --, where any method the client named was taken; a code is tried
+  as a recovery code only when it has one's shape -- sixteen hexadecimal
+  characters --, whichever method names it, and otherwise as a TOTP
+  code, read in its plain form (the spaces an app shows inside it
+  ignored, fullwidth digits read as plain ones), so that mistyped TOTP
+  codes never spend the recovery codes' few tries; of two answers that
+  pass together, one signs in; a TOTP is offered only where its library
+  is installed; a security key is offered with its request options, and
+  an account left with no method that can be checked here is refused
+  (503). The factors stored under `admin` are retired at the first start
+  that can write to the store: deleted, never handed to an account --
+  any session could have written them --, their counts kept and audited
+  with no secret, and the owner told to set them up again. Deleting an
+  account deletes its factors, where the store can write. Escalating to
+  Bulbe mode, the kill switch, the emergency stop and a tool call's
+  approval are recorded in the name of the session's account, where they
+  named `admin`; asking to re-enable search, or cancelling the request,
+  is the owner's, and the re-enable is confirmed by the account that
+  asked. The page answers the login's second step -- a code, or the
+  security key the first step offered --, asks the password before a
+  factor is added or removed, and registers a security key with the
+  options the server gives, where it handed the browser the whole
+  answer; the second-factor module called the security-key library in a
+  form its current version refuses, so that no key could be registered
+  or asked at all; it now names its arguments, the `auth` extra asks
+  python-fido2 2.0 or later -- the interface it is written against,
+  where the floor of 1.1 admitted versions it never ran on --, and a
+  key's answer is checked against the keys the account holds when it
+  arrives -- a key removed, or an account deleted, while a login waits
+  no longer answers it --; one that fails leaves the challenge to the
+  next try rather than spending it, one that passes is no longer refused
+  because the store cannot record when the key was last used, and
+  another login of the same account no longer overwrites it.
+
 - [SECURITY] The checks that decide allow or deny fail closed. The
   approval of a batch of plugins took any password its check could not
   handle for a valid one -- bcrypt 5 refuses a password of more than 72

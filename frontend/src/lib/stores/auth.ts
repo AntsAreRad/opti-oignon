@@ -16,7 +16,14 @@
 import { writable, derived, get } from 'svelte/store';
 import { setAccessToken } from '$lib/api/client';
 import * as authApi from '$lib/api/auth';
-import type { AuthUser, AuthTokens, AuthStatus, UserSettings } from '$lib/types';
+import type {
+	AuthUser,
+	AuthTokens,
+	AuthStatus,
+	UserSettings,
+	TwoFactorAnswer,
+	TwoFactorChallenge,
+} from '$lib/types';
 
 // ---------------------------------------------------------------------------
 // Stores
@@ -271,9 +278,24 @@ export async function doRegister(
 	return user;
 }
 
-/** Log in with username and password. */
-export async function doLogin(username: string, password: string): Promise<AuthUser> {
-	const tokens = await authApi.login({ username, password });
+/** What the login's first step gives: the user, or the challenge its second step answers. */
+export type LoginOutcome = { user: AuthUser } | { challenge: TwoFactorChallenge };
+
+/** Log in with username and password: the user, or -- for an account with a second factor -- its challenge. */
+export async function doLogin(username: string, password: string): Promise<LoginOutcome> {
+	const answer = await authApi.login({ username, password });
+	if ('requires_2fa' in answer && answer.requires_2fa) {
+		return { challenge: answer };
+	}
+	return { user: await finishLogin(answer as AuthTokens) };
+}
+
+/** The login's second step: the code or the security key's assertion the challenge asked for. */
+export async function doLoginSecondStep(answer: TwoFactorAnswer): Promise<AuthUser> {
+	return finishLogin(await authApi.login2fa(answer));
+}
+
+async function finishLogin(tokens: AuthTokens): Promise<AuthUser> {
 	storeTokens(tokens);
 	scheduleRefresh(tokens.expires_in);
 

@@ -146,7 +146,7 @@ const AUTH_PATHS_NO_REDIRECT = [
 	'/api/auth/register',
 	'/api/auth/refresh',
 	'/api/auth/status',
-	'/api/auth/2fa-challenge',
+	'/api/auth/login/2fa',
 	'/api/auth/me',
 ];
 
@@ -288,12 +288,19 @@ export async function apiPatch<T>(path: string, body?: unknown): Promise<T> {
 	}
 }
 
-export async function apiDelete<T>(path: string): Promise<T> {
+/** DELETE, with a JSON body when one is given -- the password a second factor's removal asks. */
+export async function apiDelete<T>(path: string, body?: unknown): Promise<T> {
 	try {
 		const response = await fetch(buildUrl(path), {
 			method: 'DELETE',
-			headers: { 'Accept': 'application/json', ...authHeaders(), ...csrfHeader() },
+			headers: {
+				'Accept': 'application/json',
+				...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+				...authHeaders(),
+				...csrfHeader(),
+			},
 			credentials: 'include',
+			...(body !== undefined ? { body: JSON.stringify(body) } : {}),
 		});
 		return handleResponse<T>(response, path);
 	} catch (err) {

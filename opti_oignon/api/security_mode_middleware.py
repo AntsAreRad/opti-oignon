@@ -295,8 +295,8 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
         if not getattr(policy, "bearer_auth_allowed", False):
             auth_header = request.headers.get("authorization", "")
             if auth_header.lower().startswith("bearer "):
-                # Exception: app passwords are allowed for CLI
-                # They go through /api/auth/login, already in _ALWAYS_ALLOWED
+                # App passwords make no exception: no client signs in
+                # with one yet (docs/security/authentication.md).
                 logger.warning(
                     "Bulbe: rejected Bearer token auth for %s", path,
                 )

@@ -34,6 +34,8 @@ import hmac as _hmac
 import logging
 import secrets
 import sqlite3
+import string
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -252,8 +254,76 @@ def _init_2fa_db() -> None:
                 "ALTER TABLE totp_config ADD COLUMN last_step INTEGER DEFAULT 0"
             )
         conn.commit()
+        _retire_unbound(conn)
     finally:
         conn.close()
+
+
+# The identities no account holds. Up to block 176, every second factor enrolled from the settings was stored under
+# the literal "admin", which no login ever read and which any session could write or overwrite: no account can
+# vouch for those rows. They are retired -- deleted once, their counts kept in ``retired_factors`` and audited --
+# and never handed to an account.
+_UNBOUND_IDS = ("admin",)
+
+
+def _retire_unbound(conn: Any) -> None:
+    """Delete, in one transaction, the factors stored under an identity no account holds, and keep their counts.
+
+    Run at the first connection of each process, after the schema; the next process finds nothing, records nothing
+    and audits nothing. Best effort: a store that refuses -- read-only, locked -- keeps the rows, which nothing reads
+    any more, and the connection still serves, so a retirement never turns into a refused login; the refusal is
+    audited. Its record's table is its own, made here, so that the schema every connection needs writes nothing new
+    on an old store. It never decrypts a secret, and its audit names counts alone.
+    """
+    counts = {"totp": 0, "webauthn": 0, "recovery_codes": 0, "app_passwords": 0}
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS retired_factors ("
+            "id INTEGER PRIMARY KEY AUTOINCREMENT, retired_at REAL NOT NULL, totp INTEGER NOT NULL, "
+            "webauthn INTEGER NOT NULL, recovery_codes INTEGER NOT NULL, app_passwords INTEGER NOT NULL)"
+        )
+        for unbound in _UNBOUND_IDS:
+            counts["totp"] += conn.execute(
+                "SELECT COUNT(*) FROM totp_config WHERE user_id = ?", (unbound,)).fetchone()[0]
+            counts["webauthn"] += conn.execute(
+                "SELECT COUNT(*) FROM webauthn_credentials WHERE user_id = ?", (unbound,)).fetchone()[0]
+            counts["recovery_codes"] += conn.execute(
+                "SELECT COUNT(*) FROM recovery_codes WHERE user_id = ?", (unbound,)).fetchone()[0]
+            counts["app_passwords"] += conn.execute(
+                "SELECT COUNT(*) FROM app_passwords WHERE user_id = ?", (unbound,)).fetchone()[0]
+            conn.execute("DELETE FROM totp_config WHERE user_id = ?", (unbound,))
+            conn.execute("DELETE FROM webauthn_credentials WHERE user_id = ?", (unbound,))
+            conn.execute("DELETE FROM recovery_codes WHERE user_id = ?", (unbound,))
+            conn.execute("DELETE FROM app_passwords WHERE user_id = ?", (unbound,))
+        if sum(counts.values()):
+            conn.execute(
+                "INSERT INTO retired_factors (retired_at, totp, webauthn, recovery_codes, app_passwords) "
+                "VALUES (?, ?, ?, ?, ?)",
+                (time.time(), counts["totp"], counts["webauthn"], counts["recovery_codes"],
+                 counts["app_passwords"]),
+            )
+        conn.commit()
+    except Exception as exc:  # noqa: BLE001 - a retirement that cannot be written keeps rows nothing reads
+        try:
+            conn.rollback()
+        except Exception:  # noqa: BLE001 - nothing to undo when the transaction never opened
+            pass
+        logger.warning("Unbound second factors not retired (%s): the rows stay, unread", type(exc).__name__)
+        try:
+            from opti_oignon.security_mode import _audit_log
+            _audit_log("two_factor_unbound_not_retired", severity="WARNING", error=type(exc).__name__)
+        except Exception:  # noqa: BLE001 - the audit is best effort
+            pass
+        return
+    if not sum(counts.values()):
+        return
+    logger.warning("Retired the second factors of no account: %s", counts)
+    try:
+        from opti_oignon.security_mode import _audit_log
+        _audit_log("two_factor_unbound_retired", severity="WARNING", **counts)
+    except Exception:  # noqa: BLE001 - the audit is best effort; the retirement stands
+        pass
 
 
 
@@ -439,7 +509,10 @@ class TwoFactorAuthManager:
     """
 
     def __init__(self) -> None:
+        # Every pending key ceremony -- a registration under the user id, a login under its own key --, written and
+        # read under the lock: a login's sweep walks them while other requests add and claim theirs.
         self._webauthn_challenges: dict[str, Any] = {}
+        self._challenges_lock = threading.Lock()
         self._totp_attempts: dict[str, list[float]] = {}  # user_id -> timestamps
         self._recovery_attempts: dict[str, list[float]] = {}
 
@@ -501,6 +574,37 @@ class TwoFactorAuthManager:
         finally:
             conn.close()
 
+    def retired_unbound(self) -> dict[str, Any] | None:
+        """The latest retirement of factors no account held: when, and how many of each; None when there was none,
+        or when the record cannot be read -- it informs, it never refuses."""
+        try:
+            conn = _get_2fa_conn()
+        except Exception:  # noqa: BLE001 - a store that cannot be opened has no record to tell
+            return None
+        try:
+            row = conn.execute(
+                "SELECT retired_at, totp, webauthn, recovery_codes, app_passwords "
+                "FROM retired_factors ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        except sqlite3.Error:
+            return None
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        return {"at": row["retired_at"], "totp": row["totp"], "webauthn": row["webauthn"],
+                "recovery_codes": row["recovery_codes"], "app_passwords": row["app_passwords"]}
+
+    @staticmethod
+    def totp_checkable() -> bool:
+        """Whether a TOTP code can be checked here: the library that computes them is installed."""
+        return TOTP_AVAILABLE
+
+    @staticmethod
+    def recovery_shaped(code: str) -> bool:
+        """Whether a code has a recovery code's shape: as many hexadecimal characters as the generator makes."""
+        return len(code) == RECOVERY_CODE_LENGTH and all(c in string.hexdigits for c in code)
+
     def is_2fa_required(self, user_id: str) -> bool:
         """Check if 2FA is required for this user based on mode."""
         try:
@@ -526,7 +630,7 @@ class TwoFactorAuthManager:
             return {"success": False, "error": "webauthn_unavailable",
                     "message": "python-fido2 not installed"}
 
-        rp = PublicKeyCredentialRpEntity(RP_ID, RP_NAME)
+        rp = PublicKeyCredentialRpEntity(id=RP_ID, name=RP_NAME)
         user_entity = PublicKeyCredentialUserEntity(
             id=user_id.encode("utf-8"),
             name=username,
@@ -559,11 +663,12 @@ class TwoFactorAuthManager:
         )
 
         # Store challenge in memory (per-user, short-lived)
-        self._webauthn_challenges[user_id] = {
-            "state": state,
-            "type": "register",
-            "timestamp": time.time(),
-        }
+        with self._challenges_lock:
+            self._webauthn_challenges[user_id] = {
+                "state": state,
+                "type": "register",
+                "timestamp": time.time(),
+            }
 
         # Serialize for JSON transport
         options = dict(registration_data)
@@ -579,7 +684,8 @@ class TwoFactorAuthManager:
         if not WEBAUTHN_AVAILABLE:
             return {"success": False, "error": "webauthn_unavailable"}
 
-        challenge = self._webauthn_challenges.pop(user_id, None)
+        with self._challenges_lock:
+            challenge = self._webauthn_challenges.pop(user_id, None)
         if not challenge or challenge.get("type") != "register":
             return {"success": False, "error": "no_challenge",
                     "message": "No pending registration challenge"}
@@ -590,7 +696,7 @@ class TwoFactorAuthManager:
                     "message": "Registration challenge expired"}
 
         try:
-            rp = PublicKeyCredentialRpEntity(RP_ID, RP_NAME)
+            rp = PublicKeyCredentialRpEntity(id=RP_ID, name=RP_NAME)
             server = Fido2Server(rp)
             auth_data = server.register_complete(
                 challenge["state"],
@@ -628,11 +734,96 @@ class TwoFactorAuthManager:
             return {"success": False, "error": "registration_failed",
                     "message": str(exc)}
 
-    def webauthn_auth_begin(self, user_id: str) -> dict[str, Any]:
-        """Begin WebAuthn authentication challenge."""
+    def webauthn_auth_begin(self, user_id: str, *, key: str | None = None) -> dict[str, Any]:
+        """Begin WebAuthn authentication challenge. The state is kept under ``key`` -- one login's own, so that
+        another login of the same account, or a pending registration, never overwrites it -- or under the user id."""
         if not WEBAUTHN_AVAILABLE:
             return {"success": False, "error": "webauthn_unavailable"}
 
+        found, credentials = self._held_credentials(user_id)
+        if not found:
+            return {"success": False, "error": "no_credentials",
+                    "message": "No WebAuthn credentials registered"}
+
+        if not credentials:
+            return {"success": False, "error": "invalid_credentials"}
+
+        rp = PublicKeyCredentialRpEntity(id=RP_ID, name=RP_NAME)
+        server = Fido2Server(rp)
+        auth_data, state = server.authenticate_begin(credentials)
+
+        now = time.time()
+        with self._challenges_lock:
+            for stale in [k for k, v in self._webauthn_challenges.items() if now - v.get("timestamp", 0) > 300]:
+                del self._webauthn_challenges[stale]
+            self._webauthn_challenges[key or user_id] = {
+                "state": state,
+                "type": "auth",
+                "timestamp": now,
+                "user_id": user_id,
+            }
+
+        return {
+            "success": True,
+            "options": _serialize_webauthn_options(dict(auth_data)),
+        }
+
+    def webauthn_auth_complete(
+        self, user_id: str, response_data: dict[str, Any], *, key: str | None = None
+    ) -> dict[str, Any]:
+        """Complete WebAuthn authentication, against the keys the account holds NOW: a key removed, or an account
+        purged, while a login waits no longer answers it. The challenge is claimed while one assertion is checked --
+        the same answer sent twice at once passes once -- and spent by the assertion that passes, or by its expiry;
+        an assertion that fails gives it back to the next try, which the login's own attempt count bounds."""
+        if not WEBAUTHN_AVAILABLE:
+            return {"success": False, "error": "webauthn_unavailable"}
+
+        slot = key or user_id
+        with self._challenges_lock:
+            challenge = self._webauthn_challenges.get(slot)
+            if not challenge or challenge.get("type") != "auth" or challenge.get("user_id", user_id) != user_id:
+                return {"success": False, "error": "no_challenge"}
+            del self._webauthn_challenges[slot]
+
+        if time.time() - challenge["timestamp"] > 300:
+            return {"success": False, "error": "expired"}
+
+        try:
+            _found, credentials = self._held_credentials(user_id)
+            rp = PublicKeyCredentialRpEntity(id=RP_ID, name=RP_NAME)
+            server = Fido2Server(rp)
+            server.authenticate_complete(
+                challenge["state"],
+                credentials,
+                response_data,
+            )
+
+            # The assertion passed, and its challenge stays spent whatever follows: when the key was last used is
+            # recorded where the store can write, and a store that cannot is no reason to refuse a verified key.
+            try:
+                conn = _get_2fa_conn()
+                try:
+                    conn.execute(
+                        "UPDATE webauthn_credentials SET last_used = ? "
+                        "WHERE user_id = ?",
+                        (time.time(), user_id),
+                    )
+                    conn.commit()
+                finally:
+                    conn.close()
+            except Exception as exc:  # noqa: BLE001 - the last use is best effort
+                logger.warning("Security key's last use not recorded (%s)", type(exc).__name__)
+
+            return {"success": True, "method": "webauthn"}
+        except Exception as exc:
+            logger.warning("WebAuthn authentication failed: %s", exc)
+            with self._challenges_lock:
+                self._webauthn_challenges.setdefault(slot, challenge)
+            return {"success": False, "error": "auth_failed",
+                    "message": str(exc)}
+
+    def _held_credentials(self, user_id: str) -> tuple[int, list[Any]]:
+        """The account's security keys as the store holds them now: how many rows, and those the library reads."""
         conn = _get_2fa_conn()
         try:
             rows = conn.execute(
@@ -642,11 +833,6 @@ class TwoFactorAuthManager:
             ).fetchall()
         finally:
             conn.close()
-
-        if not rows:
-            return {"success": False, "error": "no_credentials",
-                    "message": "No WebAuthn credentials registered"}
-
         credentials = []
         for row in rows:
             try:
@@ -654,67 +840,7 @@ class TwoFactorAuthManager:
                 credentials.append(AttestedCredentialData(cred_data))
             except Exception:
                 pass
-
-        if not credentials:
-            return {"success": False, "error": "invalid_credentials"}
-
-        rp = PublicKeyCredentialRpEntity(RP_ID, RP_NAME)
-        server = Fido2Server(rp)
-        auth_data, state = server.authenticate_begin(credentials)
-
-        self._webauthn_challenges[user_id] = {
-            "state": state,
-            "type": "auth",
-            "timestamp": time.time(),
-            "credentials": credentials,
-        }
-
-        return {
-            "success": True,
-            "options": _serialize_webauthn_options(dict(auth_data)),
-        }
-
-    def webauthn_auth_complete(
-        self, user_id: str, response_data: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Complete WebAuthn authentication."""
-        if not WEBAUTHN_AVAILABLE:
-            return {"success": False, "error": "webauthn_unavailable"}
-
-        challenge = self._webauthn_challenges.pop(user_id, None)
-        if not challenge or challenge.get("type") != "auth":
-            return {"success": False, "error": "no_challenge"}
-
-        if time.time() - challenge["timestamp"] > 300:
-            return {"success": False, "error": "expired"}
-
-        try:
-            rp = PublicKeyCredentialRpEntity(RP_ID, RP_NAME)
-            server = Fido2Server(rp)
-            server.authenticate_complete(
-                challenge["state"],
-                challenge["credentials"],
-                response_data,
-            )
-
-            # Update last_used
-            conn = _get_2fa_conn()
-            try:
-                # Update based on matching credential
-                conn.execute(
-                    "UPDATE webauthn_credentials SET last_used = ? "
-                    "WHERE user_id = ?",
-                    (time.time(), user_id),
-                )
-                conn.commit()
-            finally:
-                conn.close()
-
-            return {"success": True, "method": "webauthn"}
-        except Exception as exc:
-            logger.warning("WebAuthn authentication failed: %s", exc)
-            return {"success": False, "error": "auth_failed",
-                    "message": str(exc)}
+        return len(rows), credentials
 
     def list_webauthn_credentials(self, user_id: str) -> list[dict[str, Any]]:
         """List all WebAuthn credentials for a user."""
@@ -747,11 +873,11 @@ class TwoFactorAuthManager:
 
     # -- TOTP -----------------------------------------------------------------
 
-    def totp_setup(self, user_id: str) -> dict[str, Any]:
+    def totp_setup(self, user_id: str, *, label: str | None = None) -> dict[str, Any]:
         """Generate a new TOTP secret for a user.
 
-        Returns the secret and provisioning URI.  The secret must
-        be verified with totp_verify() before it becomes active.
+        Returns the secret and provisioning URI, whose account name is ``label`` (the account's username) when
+        given, else the user id.  The secret must be verified with totp_verify() before it becomes active.
         """
         if not TOTP_AVAILABLE:
             return {"success": False, "error": "totp_unavailable",
@@ -774,7 +900,7 @@ class TwoFactorAuthManager:
             conn.close()
 
         totp = pyotp.TOTP(secret)
-        uri = totp.provisioning_uri(name=user_id, issuer_name=RP_NAME)
+        uri = totp.provisioning_uri(name=label or user_id, issuer_name=RP_NAME)
 
         result: dict[str, Any] = {
             "success": True,
@@ -1141,6 +1267,31 @@ class TwoFactorAuthManager:
                 "message": "Invalid 2FA code"}
 
     # -- Cleanup ---------------------------------------------------------------
+
+    def purge_account(self, user_id: str) -> dict[str, int]:
+        """Delete every factor of an account that is gone -- keys, TOTP, recovery codes and app passwords, deleted
+        rather than revoked -- and forget its pending challenges and attempt counts. Returns the counts deleted."""
+        conn = _get_2fa_conn()
+        try:
+            counts = {
+                "webauthn": conn.execute(
+                    "DELETE FROM webauthn_credentials WHERE user_id = ?", (user_id,)).rowcount,
+                "totp": conn.execute("DELETE FROM totp_config WHERE user_id = ?", (user_id,)).rowcount,
+                "recovery_codes": conn.execute(
+                    "DELETE FROM recovery_codes WHERE user_id = ?", (user_id,)).rowcount,
+                "app_passwords": conn.execute(
+                    "DELETE FROM app_passwords WHERE user_id = ?", (user_id,)).rowcount,
+            }
+            conn.commit()
+        finally:
+            conn.close()
+        with self._challenges_lock:
+            for slot in [k for k, v in self._webauthn_challenges.items()
+                         if k == user_id or v.get("user_id") == user_id]:
+                del self._webauthn_challenges[slot]
+        self._totp_attempts.pop(user_id, None)
+        self._recovery_attempts.pop(user_id, None)
+        return counts
 
     def disable_all(self, user_id: str) -> dict[str, Any]:
         """Disable all 2FA methods for a user."""

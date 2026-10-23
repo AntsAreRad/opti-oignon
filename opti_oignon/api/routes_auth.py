@@ -25,6 +25,7 @@ import logging
 import secrets
 import threading
 import time
+import unicodedata
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -149,8 +150,9 @@ class _ChallengeStore:
         self._store: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-    def create(self, user_id: str, methods: list[str]) -> str:
-        """Create a new challenge and return its ID."""
+    def create(self, user_id: str, methods: list[str], *, webauthn_key: str = "") -> str:
+        """Create a new challenge and return its ID; ``webauthn_key`` names the security key's assertion state this
+        login began, its own."""
         self._cleanup()
         challenge_id = secrets.token_urlsafe(32)
         with self._lock:
@@ -160,6 +162,7 @@ class _ChallengeStore:
                 "attempts": 0,
                 "locked": False,
                 "methods": methods,
+                "webauthn_key": webauthn_key,
             }
         return challenge_id
 
@@ -185,10 +188,10 @@ class _ChallengeStore:
                 entry["locked"] = True
             return entry["locked"]
 
-    def consume(self, challenge_id: str) -> None:
-        """Remove a challenge after successful 2FA validation."""
+    def consume(self, challenge_id: str) -> bool:
+        """Remove a challenge after successful 2FA validation; True for the one caller that removed it."""
         with self._lock:
-            self._store.pop(challenge_id, None)
+            return self._store.pop(challenge_id, None) is not None
 
     def _cleanup(self) -> None:
         """Remove expired challenges."""
@@ -800,32 +803,51 @@ def login(req: LoginRequest, request: Request, response: Response) -> dict:
             detail="The second factor's state cannot be read: login refused.",
         ) from exc
     if status.any_method_active:
-        # Build list of available methods
+        # The methods this account can answer with, among those that can be checked here: a security key only when
+        # its assertion can be asked now -- its options travel with this answer --, a TOTP once verified, a recovery
+        # code while one remains. App passwords are never a second factor. None that can be checked refuses.
         methods: list[str] = []
+        webauthn_options = None
+        webauthn_key = ""
         if status.webauthn_enabled:
-            methods.append("webauthn")
-        if status.totp_enabled and status.totp_verified:
+            # The assertion's state is this login's own: another login of the account never overwrites it.
+            webauthn_key = "login:" + secrets.token_urlsafe(16)
+            try:
+                begun = tfa_mgr.webauthn_auth_begin(user.user_id, key=webauthn_key)
+            except Exception as exc:  # noqa: BLE001 - a key that cannot be asked is not offered
+                begun = {"success": False, "error": type(exc).__name__}
+            if begun.get("success"):
+                methods.append("webauthn")
+                webauthn_options = begun.get("options")
+            else:
+                logger.warning("Security key not asked at login (%s): user=%s", begun.get("error"), user.user_id)
+        if status.totp_enabled and status.totp_verified and tfa_mgr.totp_checkable():
             methods.append("totp")
         if status.recovery_codes_remaining > 0:
             methods.append("recovery")
         if not methods:
-            methods.append("totp")  # Fallback
+            logger.warning("No second factor of user=%s can be checked here: login refused", user.user_id)
+            raise HTTPException(
+                status_code=503,
+                detail="The second factor cannot be checked here: login refused.",
+            )
 
         challenge_id = _challenge_store.create(
             user_id=user.user_id, methods=methods,
+            webauthn_key=webauthn_key if "webauthn" in methods else "",
         )
         logger.info(
             "2FA challenge issued: user=%s, methods=%s",
             user.user_id, methods,
         )
-        return JSONResponse(
-            status_code=200,
-            content={
-                "requires_2fa": True,
-                "challenge_id": challenge_id,
-                "methods": methods,
-            },
-        )
+        content: dict[str, Any] = {
+            "requires_2fa": True,
+            "challenge_id": challenge_id,
+            "methods": methods,
+        }
+        if webauthn_options is not None:
+            content["webauthn_options"] = webauthn_options
+        return JSONResponse(status_code=200, content=content)
 
     # No 2FA required: issue tokens immediately
     mgr._log_audit(user.user_id, "login", "user", user.user_id)
@@ -876,15 +898,30 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
             detail="2FA module not available.",
         )
 
+    # Only what the first step offered: a method it did not offer -- an app password among them -- is a failed try.
+    offered = list(challenge.get("methods") or [])
+    if req.method != "auto" and req.method not in offered:
+        locked = _challenge_store.record_attempt(req.challenge_id)
+        raise HTTPException(
+            status_code=403,
+            detail=("Too many 2FA attempts. Please log in again." if locked
+                    else "This method was not offered for this login."),
+        )
+
     # Validate 2FA based on method
     success = False
     method_used = req.method
 
-    if req.method == "webauthn" and req.webauthn_response:
-        # WebAuthn assertion validation
+    if req.method == "webauthn":
+        # WebAuthn assertion validation, against the options the first step gave
+        if not req.webauthn_response:
+            raise HTTPException(
+                status_code=400,
+                detail="A security key's answer is required for this method.",
+            )
         try:
             result = tfa_mgr.webauthn_auth_complete(
-                user_id, req.webauthn_response,
+                user_id, req.webauthn_response, key=challenge.get("webauthn_key") or None,
             )
             success = result.get("success", False)
             method_used = "webauthn"
@@ -892,15 +929,30 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
             logger.warning("WebAuthn validation error: %s", exc)
             success = False
     else:
-        # TOTP, recovery, or auto
-        if not req.code:
+        # TOTP or recovery, as offered: the code in its plain form -- the spaces an app shows inside it removed,
+        # compatibility forms (fullwidth digits) folded as the TOTP library folds them. A code is tried as a recovery
+        # code only when it has one's shape (as many hexadecimal characters as the generator makes), whichever method
+        # names it, and auto tries any other as a TOTP code -- so that only a well-formed recovery code ever spends
+        # one of their few tries.
+        code = "".join(unicodedata.normalize("NFKC", req.code or "").split())
+        if not code:
             raise HTTPException(
                 status_code=400,
                 detail="A 2FA code is required for this method.",
             )
-        result = tfa_mgr.validate_2fa(user_id, req.code, req.method)
-        success = result.get("success", False)
-        method_used = result.get("method", req.method)
+        if req.method == "auto":
+            shaped = "recovery" if tfa_mgr.recovery_shaped(code) else "totp"
+            tried = [shaped] if shaped in offered else []
+        elif req.method == "recovery" and not tfa_mgr.recovery_shaped(code):
+            tried = []
+        else:
+            tried = [req.method]
+        for method in tried:
+            result = tfa_mgr.validate_2fa(user_id, code.lower() if method == "recovery" else code, method)
+            if result.get("success", False):
+                success = True
+                method_used = result.get("method", method)
+                break
 
     if not success:
         locked = _challenge_store.record_attempt(req.challenge_id)
@@ -912,8 +964,13 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
             detail = f"Invalid 2FA code. {remaining} attempt(s) remaining."
         raise HTTPException(status_code=403, detail=detail)
 
-    # 2FA success: consume challenge and issue tokens
-    _challenge_store.consume(req.challenge_id)
+    # 2FA success: consume the challenge and issue tokens -- once: of two answers that pass together, one signs in,
+    # and a challenge that expired while the answer was checked has ended as well
+    if not _challenge_store.consume(req.challenge_id):
+        raise HTTPException(
+            status_code=403,
+            detail="This login has ended. Please log in again.",
+        )
 
     mgr = _get_auth_manager()
 
@@ -921,8 +978,8 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
     user = mgr.get_user(user_id)
     if not user:
         raise HTTPException(
-            status_code=500,
-            detail="User not found after 2FA validation.",
+            status_code=403,
+            detail="This account no longer exists. Please log in again.",
         )
 
     mgr._log_audit(
@@ -1155,6 +1212,14 @@ def delete_user(
     ok = mgr.delete_user(user_id)
     if not ok:
         raise HTTPException(status_code=404, detail="User not found")
+
+    # The account's second factors go with it: secrets at rest that no account holds any more.
+    tfa_mgr = _get_2fa_manager()
+    if tfa_mgr is not None:
+        try:
+            tfa_mgr.purge_account(user_id)
+        except Exception as exc:  # noqa: BLE001 - the account is gone; its factors are inert under its id
+            logger.warning("Second factors of deleted user=%s not purged (%s)", user_id, type(exc).__name__)
 
     mgr._log_audit(admin["sub"], "delete_user", "user", user_id)
     return {"deleted": True, "user_id": user_id}

@@ -24,6 +24,11 @@ sentence that says why:
   password, as the login reads it.
 
 Nothing it cannot check passes. It writes nothing but the limiter's count of a failed try, and says no password.
+
+``check_own_password`` is the same check without the owner: the password of the account the session stands for,
+whoever it is -- the step-up an account gives before a second factor of its own is added or removed. It refuses as
+``check_password`` does, ``not_owner`` aside. ``session_account`` says which account a session stands for, read from
+the account store, and whether it is the owner's.
 """
 
 from __future__ import annotations
@@ -51,6 +56,15 @@ def _claim(account_id: str) -> bool:
 def _release(account_id: str) -> None:
     with _checking_lock:
         _checking.discard(account_id)
+
+
+@dataclass(frozen=True)
+class SessionAccount:
+    """The account a session stands for, as the account store holds it now."""
+
+    account_id: str
+    username: str
+    owner: bool
 
 
 @dataclass(frozen=True)
@@ -86,8 +100,33 @@ def _account(session: Any, auth: Any) -> Any:
     return auth.get_user(user_id)
 
 
+def session_account(session: Any) -> SessionAccount | None:
+    """The account ``session`` stands for -- the one its ``sub`` names, or for the synthetic session of single-user
+    mode the owner's when exactly one account is an owner's -- read from the account store now, with whether it is
+    the owner's; None when it stands for none. Raises when the store did not load or cannot be read."""
+    from opti_oignon.auth import auth_manager
+
+    if auth_manager is None:
+        raise RuntimeError("the account store did not load")
+    account = _account(session, auth_manager)
+    if account is None:
+        return None
+    return SessionAccount(account.user_id, account.username, bool(auth_manager.is_owner(account.user_id)))
+
+
 def check_password(session: Any, password: str, *, client_ip: str = "unknown") -> Verdict:
-    """Whether ``password`` is the password of the account ``session`` stands for; see the module's docstring."""
+    """Whether ``password`` is the password of the owner's account ``session`` stands for; see the module's
+    docstring."""
+    return _check(session, password, client_ip, owner_only=True)
+
+
+def check_own_password(session: Any, password: str, *, client_ip: str = "unknown") -> Verdict:
+    """Whether ``password`` is the password of the account ``session`` stands for, owner or not: the step-up before
+    a second factor of its own is added or removed. Refuses as ``check_password`` does, ``not_owner`` aside."""
+    return _check(session, password, client_ip, owner_only=False)
+
+
+def _check(session: Any, password: str, client_ip: str, *, owner_only: bool) -> Verdict:
     try:
         from opti_oignon.auth import auth_manager, login_rate_limiter, verify_password
 
@@ -95,8 +134,8 @@ def check_password(session: Any, password: str, *, client_ip: str = "unknown") -
             raise RuntimeError("the account store did not load")
         account = _account(session, auth_manager)
         if account is None:
-            return _refused(403, "no_account", "No account stands behind this session: the ceremony needs its password.")
-        if not auth_manager.is_owner(account.user_id):
+            return _refused(403, "no_account", "No account stands behind this session: its password is needed.")
+        if owner_only and not auth_manager.is_owner(account.user_id):
             return _refused(403, "not_owner", "Only the owner's password approves this ceremony: nothing was done.")
         if not _claim(account.user_id):
             return _refused(429, "password_busy",

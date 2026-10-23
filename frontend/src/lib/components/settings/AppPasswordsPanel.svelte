@@ -7,10 +7,14 @@
   - Show generated password ONCE with copy button
   - List existing app passwords (name, created, last used, status)
   - Revoke button per password with confirmation
+  - Creating and revoking ask the account's password first (StepUpPrompt)
+  - An app password is never a second factor at login, and no client signs in with one yet
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { apiGet, apiPost, apiDelete } from '$lib/api/client';
+	import StepUpPrompt from './StepUpPrompt.svelte';
+	import { httpRefusal } from '$lib/switches/serverSwitch';
 
 	interface AppPassword {
 		password_id: string;
@@ -35,6 +39,9 @@
 	// Revoke
 	let confirmRevokeId = '';
 	let revoking = '';
+	let createError = '';
+	let revokeError = '';
+	let accountRequired = '';
 
 	onMount(async () => {
 		await loadPasswords();
@@ -43,24 +50,28 @@
 
 	async function loadPasswords() {
 		try {
-			const data = await apiGet<{ passwords: AppPassword[] }>(
+			const data = await apiGet<{ passwords: AppPassword[]; account_required?: boolean; message?: string }>(
 				'/api/security/2fa/app-passwords'
 			);
 			passwords = (data.passwords || []).filter(p => !p.revoked);
+			accountRequired = data.account_required ? data.message || 'Create the account first.' : '';
 		} catch (e: any) {
 			error = e.detail || 'Failed to load app passwords';
 		}
 	}
 
-	async function createPassword() {
-		if (!newLabel.trim()) return;
+	async function createPassword(event: CustomEvent<{ password: string }>) {
+		if (!newLabel.trim()) {
+			createError = 'Give the password a label first.';
+			return;
+		}
 		creating = true;
-		error = '';
+		createError = '';
 
 		try {
 			const result = await apiPost<Record<string, any>>(
 				'/api/security/2fa/app-passwords',
-				{ name: newLabel.trim() }
+				{ name: newLabel.trim(), password: event.detail.password }
 			);
 			if (result.success) {
 				createdPassword = result.password || '';
@@ -69,27 +80,30 @@
 				showCreate = false;
 				await loadPasswords();
 			} else {
-				error = result.message || 'Failed to create app password.';
+				createError = result.message || 'Failed to create app password.';
 			}
 		} catch (e: any) {
-			error = e.detail || 'Failed to create app password.';
+			// The server's reason: a wrong password, a wait.
+			createError = httpRefusal(e)?.detail || 'Failed to create app password.';
 		} finally {
 			creating = false;
 		}
 	}
 
-	async function revokePassword(passwordId: string) {
+	async function revokePassword(passwordId: string, event: CustomEvent<{ password: string }>) {
 		revoking = passwordId;
+		revokeError = '';
 		try {
 			await apiDelete<{ success: boolean }>(
-				`/api/security/2fa/app-passwords/${encodeURIComponent(passwordId)}`
+				`/api/security/2fa/app-passwords/${encodeURIComponent(passwordId)}`,
+				{ password: event.detail.password }
 			);
+			confirmRevokeId = '';
 			await loadPasswords();
 		} catch (e: any) {
-			error = e.detail || 'Failed to revoke password.';
+			revokeError = httpRefusal(e)?.detail || 'Failed to revoke password.';
 		} finally {
 			revoking = '';
-			confirmRevokeId = '';
 		}
 	}
 
@@ -115,16 +129,14 @@
 		});
 	}
 
-	function handleKeydown(event: KeyboardEvent) {
-		if (event.key === 'Enter' && newLabel.trim()) {
-			createPassword();
-		}
-	}
 </script>
 
 <div class="space-y-4">
+	{#if accountRequired}
+		<p class="text-sm oo-account-required">{accountRequired}</p>
+	{/if}
 	<div class="flex items-center justify-end">
-		{#if !showCreate && !createdPassword}
+		{#if !showCreate && !createdPassword && !accountRequired}
 			<button
 				class="px-3 py-1.5 rounded text-xs font-medium transition-colors"
 				style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
@@ -136,7 +148,7 @@
 	</div>
 
 	<p class="text-xs" style="color: var(--oo-fg-muted);">
-		App passwords let CLI tools and scripts authenticate without interactive 2FA. Each password is revocable and usage is logged.
+		An app password is meant for a CLI tool or a script, but no client signs in with one yet. Each one can be revoked.
 	</p>
 
 	{#if error}
@@ -198,28 +210,19 @@
 				<input
 					type="text"
 					bind:value={newLabel}
-					on:keydown={handleKeydown}
 					placeholder="e.g. CLI on workstation, backup script"
 					aria-label="App password description"
 					class="flex-1 px-3 py-2 rounded text-sm"
 					style="background-color: var(--oo-input-bg); color: var(--oo-fg-primary); border: 1px solid var(--oo-bd-subtle);"
 				/>
-				<button
-					class="px-4 py-2 rounded text-sm font-medium transition-colors"
-					style="background-color: var(--oo-acc-fill); color: var(--oo-fg-on-accent);"
-					disabled={creating || !newLabel.trim()}
-					on:click={createPassword}
-				>
-					{creating ? 'Creating...' : 'Create'}
-				</button>
-				<button
-					class="px-3 py-2 rounded text-sm"
-					style="color: var(--oo-fg-muted); border: 1px solid var(--oo-bd-subtle);"
-					on:click={() => { showCreate = false; newLabel = ''; }}
-				>
-					Cancel
-				</button>
 			</div>
+			<StepUpPrompt
+				action={creating ? 'Creating...' : 'Create'}
+				busy={creating}
+				error={createError}
+				on:confirm={createPassword}
+				on:cancel={() => { showCreate = false; newLabel = ''; createError = ''; }}
+			/>
 		</div>
 	{/if}
 
@@ -233,6 +236,7 @@
 	{:else if passwords.length > 0}
 		<div class="space-y-2">
 			{#each passwords as pw (pw.password_id)}
+				<div class="space-y-2">
 				<div
 					class="flex items-center justify-between rounded-lg p-3"
 					style="background-color: var(--oo-card-bg); border: 1px solid var(--oo-bd-subtle);"
@@ -247,29 +251,11 @@
 						</div>
 					</div>
 					<div class="shrink-0 ml-3">
-						{#if confirmRevokeId === pw.password_id}
-							<div class="flex gap-1">
-								<button
-									class="px-2 py-1 rounded text-xs"
-									style="background-color: var(--oo-fg-error); color: var(--oo-fg-on-semantic);"
-									disabled={revoking === pw.password_id}
-									on:click={() => revokePassword(pw.password_id)}
-								>
-									{revoking === pw.password_id ? '...' : 'Revoke'}
-								</button>
-								<button
-									class="px-2 py-1 rounded text-xs"
-									style="color: var(--oo-fg-muted); border: 1px solid var(--oo-bd-subtle);"
-									on:click={() => { confirmRevokeId = ''; }}
-								>
-									No
-								</button>
-							</div>
-						{:else}
+						{#if confirmRevokeId !== pw.password_id}
 							<button
 								class="px-2 py-1 rounded text-xs transition-colors"
 								style="color: var(--oo-fg-error);"
-								on:click={() => { confirmRevokeId = pw.password_id; }}
+								on:click={() => { confirmRevokeId = pw.password_id; revokeError = ''; }}
 								title="Revoke this password"
 							>
 								Revoke
@@ -277,7 +263,23 @@
 						{/if}
 					</div>
 				</div>
+				{#if confirmRevokeId === pw.password_id}
+					<StepUpPrompt
+						action={revoking === pw.password_id ? 'Revoking...' : 'Revoke'}
+						busy={revoking === pw.password_id}
+						error={revokeError}
+						on:confirm={(e) => revokePassword(pw.password_id, e)}
+						on:cancel={() => { confirmRevokeId = ''; }}
+					/>
+				{/if}
+				</div>
 			{/each}
 		</div>
 	{/if}
 </div>
+
+<style>
+	.oo-account-required {
+		color: var(--oo-fg-secondary);
+	}
+</style>
