@@ -3382,49 +3382,126 @@ package costs.
 ### Fixed
 
 
-- [SECURITY] The launchers start a platform whose key file is wrapped,
-  and hand the platform's secrets to the backend alone. Since the stores
-  are encrypted, the backend needs the key file's passphrase to open its
-  key file, and neither `scripts/launch.sh` (the desktop icon's) nor
-  `python -m opti_oignon` asked for it: started from the icon, the
-  backend stopped at once, its error scrolled away by the frontend's
-  proxy errors, or thrown away by the Python launcher, which said only
-  that it had not started within 30 s. Both handed
-  `OPTI_KEYFILE_PASSPHRASE` and `OPTI_ENCRYPTION_KEY`, when set, to the
-  frontend's dev server -- every package of `node_modules` -- and to the
-  browser they opened. Both now ask for the passphrase on their terminal
-  when the key file is wrapped and none is set, and check it with
-  `opti_oignon.keyfile_gate` before the backend starts -- `launch.sh`
-  before it starts anything, running the gate in a process of its own
-  that reads the passphrase on its standard input --, three tries,
-  refusing without a terminal; a key file damaged in a way its format
-  shows, or a key derivation that cannot run here, is said as such, while
-  a byte of its salt, or of its wrapped key past the version byte,
-  changed for another cannot be told from a wrong passphrase. The two
-  secrets go into the backend's environment alone, those an activated
-  conda base sets included; `launch.sh`, run as it is, runs itself and
-  the backend's script under `bash -p`, which reads no `BASH_ENV` and
-  takes no function from the environment, and resets its shell options
-  after a conda activation. A passphrase given for a key file not
-  wrapped, or not there yet, goes there as it was given. The backend
-  starts first and the frontend only once it answers, each in a session
-  of its own that the terminal neither interrupts nor hangs up, each told
-  to stop when the launcher ends, however it ends (on Linux); Ctrl+C or a
-  closing window makes the launcher tell both to stop, wait 15 s at
-  most, and kill only what did not end, saying so, even with nowhere left
-  to say it; a signal ignored when it started stays ignored; a backend or
-  a frontend that stops is said with its exit status once the other one
-  is stopped. `launch.sh` needs Linux (util-linux 2.33 or later for
-  `setsid` and `setpriv`, an `env` that knows `-S`, a `/proc` of its own)
-  and says what it lacks, but for that `env`: one without `-S` fails at
-  its first line. It refuses to start beside a port that already
-  answers, and looks for the frontend at `localhost`, where the browser
-  goes. The backend itself still hands both secrets to the commands it
-  runs outside its sandbox; `launch.sh` killed outright in the
-  milliseconds while it starts one of them leaves that one running; and
-  what the Python launcher's interpreter runs as it starts runs before
-  it takes the secrets out.
-- [SECURITY] The platform signs only under the key that loads. A key
+- [SECURITY] The checks that decide allow or deny fail closed. The
+  approval of a batch of plugins took any password its check could not
+  handle for a valid one -- bcrypt 5 refuses a password of more than 72
+  bytes, and the refusal read as a match, so a session approved a
+  prepared batch with any 73 characters -- and checked the password of
+  an account named `admin`, which need not exist. Leaving Bulbe mode
+  passed the password the same way, and passed it when no account stood
+  behind the session. Re-enabling search checked the password of the
+  account named `admin` for any session, through no limiter: any session
+  could guess that password without end. The three ceremonies now take
+  the owner's password, asked through the owner's own session: the owner
+  is an admin's account or, while no account is an admin's --
+  registration gives the default role --, the first registered of those
+  still there, by the store's order and never by a clock that can step
+  back, so that an account registered later approves nothing with its
+  own password, and the synthetic session of single-user mode stands for
+  the owner when there is exactly one; the password is checked through
+  the login limiter, one check at a time per account -- a try sent while
+  another is checked is refused with a 429 --, so that a wrong one
+  counts as a failed login and tries sent together cannot all pass the
+  limiter before the first is counted. A wrong password, or a session
+  that is not the owner's, refuses with a 403 rather than the 401 that
+  sent the page to the login, an account the limiter holds back with a
+  429, a password that cannot be checked with a 503, and nothing is
+  approved, confirmed or re-enabled; each refusal is audited by name,
+  with no secret, where the audit can write. The password is checked in
+  a worker thread, never on the event loop, and the change made back on
+  the loop, where the revocations and the cancellations run: an approval
+  that took its view before a revocation can no longer undo it, nor a
+  confirmation a cancelled downgrade. A kill of search ends a re-enable
+  asked before it, and the confirmation asks again under the switch's
+  lock, so that a kill -- the breaker's, from a worker thread -- that
+  comes while the owner's factors are checked is not undone; a request
+  id or a visual code beyond ASCII is a mismatch there too. The
+  allowlist trusted a batch's entries in memory before it wrote them, so
+  a write that failed left them verified until a restart; a write the
+  disk refuses now approves nothing, and says so with a 503 -- a file it
+  cut short reads as empty, every approval lost and none gained. A
+  plugin loader that could not import the security mode, or in Bulbe
+  mode the allowlist, loaded the plugin without its check; it now loads
+  nothing and says why. A login whose second factor cannot be checked --
+  the two-factor module unreachable, its store unreadable -- is refused
+  with a 503, where it went through without the factor; a security mode
+  that cannot be read is taken for Bulbe mode -- by the session check,
+  the socket handshake, the global authentication middleware, the role
+  checks and the CSRF middleware alike --, so that the single-user
+  bypass never applies; and a remote-session guard that cannot be read
+  gives the hardened cookies. The agent's live stream, a WebSocket,
+  checked neither a session nor the page's origin: any page in a browser
+  on the machine could read an agent's run; it now checks its handshake
+  as the other sockets do. That handshake let through an opaque origin
+  -- `null`, which a sandboxed frame on any site or a local file sends
+  -- as if no browser had asked: in single-user mode such a page held
+  every socket as the local admin; it is now refused, and only a client
+  that sends no origin at all, a client that is no browser, is taken
+  without one. The global authentication middleware let through,
+  unchecked, any HTTP request that merely carried an `Upgrade:
+  websocket` header, and served every route when the account store did
+  not load; it now checks every HTTP request -- a WebSocket never
+  reaches it -- and serves nothing but the public paths without the
+  account store (503). The app started without its authentication, CSRF
+  or security-mode middleware when one could not be registered, saying
+  so in a log line; it now does not start. The CSRF middleware skipped,
+  the same way, a request that said `Upgrade: websocket`; it checks it
+  now. Once its secret was wiped, as at shutdown, the session's token
+  check verified under the empty key, so a token anyone could sign
+  passed; an empty secret now signs and verifies nothing. Any session
+  could write the flag that switches authentication off -- with two
+  accounts or more, the store keeps authentication on whatever the flag
+  says --; that route is now the owner's, asked of the account store
+  rather than of the role a token was signed with, and it answers the
+  mode in force rather than the one asked, which the settings' switch
+  now shows. A page's live agent stream reconnected without end, every
+  second, to a socket that refused its handshake; it now stops once
+  refused. The security mode compared its lock file's HMAC, and a
+  downgrade's request id and visual code, in a way that raised on a text
+  beyond ASCII; a mismatch is now a mismatch. The ceremonies do not read
+  the visual code of a batch or a second factor yet. - [SECURITY] The
+  launchers start a platform whose key file is wrapped, and hand the
+  platform's secrets to the backend alone. Since the stores are
+  encrypted, the backend needs the key file's passphrase to open its key
+  file, and neither `scripts/launch.sh` (the desktop icon's) nor `python
+  -m opti_oignon` asked for it: started from the icon, the backend
+  stopped at once, its error scrolled away by the frontend's proxy
+  errors, or thrown away by the Python launcher, which said only that it
+  had not started within 30 s. Both handed `OPTI_KEYFILE_PASSPHRASE` and
+  `OPTI_ENCRYPTION_KEY`, when set, to the frontend's dev server -- every
+  package of `node_modules` -- and to the browser they opened. Both now
+  ask for the passphrase on their terminal when the key file is wrapped
+  and none is set, and check it with `opti_oignon.keyfile_gate` before
+  the backend starts -- `launch.sh` before it starts anything, running
+  the gate in a process of its own that reads the passphrase on its
+  standard input --, three tries, refusing without a terminal; a key
+  file damaged in a way its format shows, or a key derivation that
+  cannot run here, is said as such, while a byte of its salt, or of its
+  wrapped key past the version byte, changed for another cannot be told
+  from a wrong passphrase. The two secrets go into the backend's
+  environment alone, those an activated conda base sets included;
+  `launch.sh`, run as it is, runs itself and the backend's script under
+  `bash -p`, which reads no `BASH_ENV` and takes no function from the
+  environment, and resets its shell options after a conda activation. A
+  passphrase given for a key file not wrapped, or not there yet, goes
+  there as it was given. The backend starts first and the frontend only
+  once it answers, each in a session of its own that the terminal
+  neither interrupts nor hangs up, each told to stop when the launcher
+  ends, however it ends (on Linux); Ctrl+C or a closing window makes the
+  launcher tell both to stop, wait 15 s at most, and kill only what did
+  not end, saying so, even with nowhere left to say it; a signal ignored
+  when it started stays ignored; a backend or a frontend that stops is
+  said with its exit status once the other one is stopped. `launch.sh`
+  needs Linux (util-linux 2.33 or later for `setsid` and `setpriv`, an
+  `env` that knows `-S`, a `/proc` of its own) and says what it lacks,
+  but for that `env`: one without `-S` fails at its first line. It
+  refuses to start beside a port that already answers, and looks for the
+  frontend at `localhost`, where the browser goes. The backend itself
+  still hands both secrets to the commands it runs outside its sandbox;
+  `launch.sh` killed outright in the milliseconds while it starts one of
+  them leaves that one running; and what the Python launcher's
+  interpreter runs as it starts runs before it takes the secrets out. -
+  [SECURITY] The platform signs only under the key that loads. A key
   file that did not load -- wrapped under a passphrase the process
   lacked, or damaged -- gave as its key its first 32 bytes, the same
   text in every wrapped key file: the security mode's lockfile, the
@@ -3435,79 +3512,78 @@ package costs.
   that does not load, the mode reads Bulbe as soon as a lockfile is
   there, its escalation and its downgrade ceremony refuse, and the
   emergency stop still escalates; the allowlist verifies no entry and
-  approves none, saying why; and no provenance MAC is made or checked,
-  a model whose provenance is enforced being refused. Without a key
-  file the allowlist verifies no entry either, where it skipped the
+  approves none, saying why; and no provenance MAC is made or checked, a
+  model whose provenance is enforced being refused. Without a key file
+  the allowlist verifies no entry either, where it skipped the
   signature: in Bulbe mode a plugin loads only under a signature that
   verifies. Making the key file -- at setup, or by `encrypt` -- first
   signs a lockfile that agrees with `security.yaml` under it, so the
   mode read stays what it was, and `check` says the mode the platform
   reads and why. A model manifest sealed by a process that lacked the
-  passphrase was sealed under that public text: it now reads as
-  invalid, and vouches for nothing. Before any model download, re-seal
-  or enrolment -- each seals every entry it finds -- move it aside, and
+  passphrase was sealed under that public text: it now reads as invalid,
+  and vouches for nothing. Before any model download, re-seal or
+  enrolment -- each seals every entry it finds -- move it aside, and
   never re-seal it; enrol the models again (`scripts/enroll_models.py`)
   once their weights are checked against where they came from. A key
   file that is empty or cut now makes the mode read Bulbe where a
   lockfile is there, and setup and `encrypt` refuse: put back the copy
-  of the key file kept elsewhere.
-- [SECURITY] The plugin allowlist signs under a key of its own, and a
-  plugin's hash covers everything its folder holds. Its entries and the
-  mode's lockfile were both an HMAC-SHA512 under the master key over
-  fields joined by `||`: a plugin id approved as `daily||1.0||x` gave a
-  signature that, laid out as a lockfile, read Daily -- Bulbe left
-  without its downgrade ceremony. An entry is now signed under a key
-  derived from the master key for the allowlist alone, over all its
-  fields -- the approver and the time included -- as one canonical
-  record; an entry signed before reads as outdated, saying so. A
-  plugin's hash covered only its `.py`, `.yaml`, `.yml` and `.json`
-  files: bytecode planted beside a source -- in `__pycache__`, stamped
-  with the source's time and size, or in a package folder of its own,
-  which the import system finds first -- and native code ran unhashed.
-  The hash now covers every file and folder the plugin's folder holds
-  when the load checks it, and a folder holding a symbolic link, a
-  special file or something unreadable is never approved and never
-  loads; the worker compiles the entry point from its source, and no
-  import reads bytecode cached beside a source or writes any. The
-  folder is still read by its path before and after it is hashed: a
-  process of the same user that writes it in between is not stopped.
-  Approve the plugins again, once their files are checked against where
-  they came from: their hashes changed, and while one signature could
-  stand in for another, anything on disk could have been changed.
-- [SECURITY] The security mode's fail-secure read no longer waits on
-  itself. A lockfile that did not verify, or sources that disagreed,
-  made the mode read Bulbe and record why in the audit chain, whose
-  store, as it opened, read the mode again on the same thread: that read
-  recorded the verdict anew and waited for ever on the chain the first
-  one held, which hung `migrate`. The verdict is kept before it is
-  recorded, a read on the recording thread is answered it, and an entry
-  the thread already writing one asks for is chained right after it.
-- [SECURITY] Encryption setup no longer makes a key while a database is
-  kept in plaintext: once a key loads, every connection keys its
-  database, and each plaintext one stopped opening (409, naming the
+  of the key file kept elsewhere. - [SECURITY] The plugin allowlist
+  signs under a key of its own, and a plugin's hash covers everything
+  its folder holds. Its entries and the mode's lockfile were both an
+  HMAC-SHA512 under the master key over fields joined by `||`: a plugin
+  id approved as `daily||1.0||x` gave a signature that, laid out as a
+  lockfile, read Daily -- Bulbe left without its downgrade ceremony. An
+  entry is now signed under a key derived from the master key for the
+  allowlist alone, over all its fields -- the approver and the time
+  included -- as one canonical record; an entry signed before reads as
+  outdated, saying so. A plugin's hash covered only its `.py`, `.yaml`,
+  `.yml` and `.json` files: bytecode planted beside a source -- in
+  `__pycache__`, stamped with the source's time and size, or in a
+  package folder of its own, which the import system finds first -- and
+  native code ran unhashed. The hash now covers every file and folder
+  the plugin's folder holds when the load checks it, and a folder
+  holding a symbolic link, a special file or something unreadable is
+  never approved and never loads; the worker compiles the entry point
+  from its source, and no import reads bytecode cached beside a source
+  or writes any. The folder is still read by its path before and after
+  it is hashed: a process of the same user that writes it in between is
+  not stopped. Approve the plugins again, once their files are checked
+  against where they came from: their hashes changed, and while one
+  signature could stand in for another, anything on disk could have been
+  changed. - [SECURITY] The security mode's fail-secure read no longer
+  waits on itself. A lockfile that did not verify, or sources that
+  disagreed, made the mode read Bulbe and record why in the audit chain,
+  whose store, as it opened, read the mode again on the same thread:
+  that read recorded the verdict anew and waited for ever on the chain
+  the first one held, which hung `migrate`. The verdict is kept before
+  it is recorded, a read on the recording thread is answered it, and an
+  entry the thread already writing one asks for is chained right after
+  it. - [SECURITY] Encryption setup no longer makes a key while a
+  database is kept in plaintext: once a key loads, every connection keys
+  its database, and each plaintext one stopped opening (409, naming the
   offline command). The in-server migration is refused (409): it moved
   databases under the server's own open connections, saw only the
   repository's `data/` -- not `opti_oignon/data/`, where the
   conversations live --, kept plaintext `.bak` copies beside each
-  database, and proved nothing it wrote.
-- A load of the onion's file reads its rows and their generation inside one
-  read transaction: a save another process committed between two of its
-  reads tore what it read, and the state was refused as moved. A window a
-  store refuses names both stores that can refuse it, where it named the
-  conversation store alone. A `local.yaml` that does not decode as UTF-8 is
-  said as unreadable, where it stopped the onion's configuration and the run
-  journal's switch.
-- The onion carries any text. A surrogate -- half of a pair, the kind a
-  JSON escape decodes into a string, or a pair split in two -- has no form
-  in UTF-8, and a span, a peel, a Core entry and the store's root are
-  named by digests of UTF-8: in a turn's words it stopped the span's
-  eviction, at every burst, and in a summary the model wrote it stopped
-  the peel's. The mirror, the queue's reading of a summary and the user's
-  pins now keep each surrogate as the replacement character, one
-  character for one, so every place in the text -- a part's bounds, an
-  anchor, a reference -- stays where it was, and a conversation seen again
-  is seen as the same; a text that holds none is kept as it was, and so is
-  every digest and root of it. A pin that is no string is refused by name.
+  database, and proved nothing it wrote. - A load of the onion's file
+  reads its rows and their generation inside one read transaction: a
+  save another process committed between two of its reads tore what it
+  read, and the state was refused as moved. A window a store refuses
+  names both stores that can refuse it, where it named the conversation
+  store alone. A `local.yaml` that does not decode as UTF-8 is said as
+  unreadable, where it stopped the onion's configuration and the run
+  journal's switch. - The onion carries any text. A surrogate -- half of
+  a pair, the kind a JSON escape decodes into a string, or a pair split
+  in two -- has no form in UTF-8, and a span, a peel, a Core entry and
+  the store's root are named by digests of UTF-8: in a turn's words it
+  stopped the span's eviction, at every burst, and in a summary the
+  model wrote it stopped the peel's. The mirror, the queue's reading of
+  a summary and the user's pins now keep each surrogate as the
+  replacement character, one character for one, so every place in the
+  text -- a part's bounds, an anchor, a reference -- stays where it was,
+  and a conversation seen again is seen as the same; a text that holds
+  none is kept as it was, and so is every digest and root of it. A pin
+  that is no string is refused by name.
 
 - The memory a question brings shows, in the user's own words, a statement
   newer than an item it lays that answers the question alike. A summary

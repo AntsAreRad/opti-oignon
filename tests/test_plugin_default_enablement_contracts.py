@@ -31,6 +31,7 @@ it. Local-only.
 """
 
 import sys
+import types
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -49,10 +50,16 @@ _DELIVERED = Path(__file__).resolve().parent.parent / "opti_oignon" / "plugins"
 
 
 def _modules(*, loader=False):
+    """The registry, and with ``loader`` the plugin loader, in a window; the loader reads a security mode, here
+    Daily -- one it cannot read loads nothing."""
     targets = {"opti_oignon.plugin_manifest": source("plugin_manifest.py")}
+    seeded = {}
     if loader:
         targets["opti_oignon.plugin_loader"] = source("plugin_loader.py")
-    loaded, restore = isolate(targets=targets)
+        mode = types.ModuleType("opti_oignon.security_mode")
+        mode.is_bulbe = lambda: False
+        seeded["opti_oignon.security_mode"] = mode
+    loaded, restore = isolate(targets=targets, seeded=seeded)
     return loaded, restore
 
 

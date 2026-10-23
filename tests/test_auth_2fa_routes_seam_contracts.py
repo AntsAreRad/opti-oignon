@@ -26,9 +26,19 @@ The second-factor step is bounded server-side: the challenge store's
 time-to-live and attempt cap are frozen, an expired or unknown challenge is
 refused, failed attempts count down and then lock the challenge (c1, c2); a
 missing code is a 400 and an unreachable two-factor module is a 503 on the
-second step while the password step degrades gracefully to direct tokens
-(c3); and a failed refresh clears every credential cookie so no stale
-credential survives in the browser (c4). A final census walks the
+second step, and on the password step too, as is a second factor whose state
+cannot be read: no token without the factor the account may require (c6, in
+place of c3, which let the password step through); a security mode that
+cannot be read is taken for the hardened one on both paths (c7), and a
+remote-session guard that cannot be read takes the client for a remote one
+(c8); the route that switches authentication on and off is the platform
+owner's -- an admin's, or the first registered account's while none is an
+admin's, as the account store says, never the token (c9); a socket handshake of an opaque origin, `null` or one with no host,
+is refused, in single-user mode too (c10); switching authentication off
+answers the mode in force, which the account store may keep on (c11);
+and a failed refresh clears
+every credential cookie so no stale credential survives in the browser
+(c4). A final census walks the
 two-factor module's syntax tree and freezes its statement sites: every
 database statement is a constant, none is dynamic, none is an f-string --
 a quiet edit that interpolates a value anywhere in that file reddens it
@@ -349,7 +359,7 @@ def _load(*, bulbe=False, single_user=False, with_second_factor=True):
     With the second factor present, BOTH modules are targets of one window
     so the route layer's lazy lookup resolves to the in-window singleton.
     Without it, only the route module loads and the two-factor module is
-    proven unreachable, which is the degraded posture under contract in c3.
+    proven unreachable, which is the degraded posture under contract in c6.
     Both modules' clocks are replaced by one deterministic clock shared with
     the code generator.
     """
@@ -939,3 +949,244 @@ if __name__ == "__main__":
                 print(f"FAIL {_name}: {_e!r}")
     print(f"\n{'OK' if _failures == 0 else str(_failures) + ' FAILED'}")
     sys.exit(1 if _failures else 0)
+
+
+def _local_guard():
+    """A remote-session guard that answers, and takes 127.0.0.1 for local: a refusal it lets through is the
+    route's own, not one for remote clients alone. Put in ``sys.modules`` by the caller, taken out after."""
+    guard = types.ModuleType("opti_oignon.remote_session_guard")
+    guard.is_remote_request = lambda host: host not in ("127.0.0.1", "::1")
+    return guard
+
+
+def test_c6_an_unreachable_or_unreadable_second_factor_refuses_both_steps():
+    """c6 (in place of c3): on the second step a missing code is a 400 and an
+    unreachable two-factor module is a 503; on the password step too, an
+    unreachable module, or a second factor whose state cannot be read, refuses
+    with a 503 and sets no credential: no token is issued without the factor
+    the account may require -- a local client's as a remote one's."""
+    import sys
+
+    from fastapi import HTTPException
+
+    grouped = _load()
+    try:
+        sys.modules["opti_oignon.remote_session_guard"] = _local_guard()
+        assert grouped.routes._is_remote_client(_Request()) is False
+        _enroll(grouped)
+        challenge_id = _password_step(grouped)["challenge_id"]
+        with pytest.raises(HTTPException) as caught:
+            grouped.routes.login_2fa(
+                grouped.routes.TwoFALoginRequest(
+                    challenge_id=challenge_id, code="", method="totp"
+                ),
+                _Request(),
+                _Response(),
+            )
+        assert caught.value.status_code == 400
+        assert caught.value.detail == _MISSING_CODE_REFUSAL
+
+        def unreadable(user_id):
+            raise sqlite3.OperationalError("database disk image is malformed")
+
+        grouped.tfa.two_factor_manager.get_status = unreadable
+        response = _Response()
+        with pytest.raises(HTTPException) as caught:
+            grouped.routes.login(
+                grouped.routes.LoginRequest(username=_RESIDENT, password=_RIGHT_PASSWORD),
+                _Request(),
+                response,
+            )
+        assert caught.value.status_code == 503
+        assert caught.value.detail == "The second factor's state cannot be read: login refused."
+        assert response.set_keys == []
+    finally:
+        sys.modules.pop("opti_oignon.remote_session_guard", None)
+        grouped.restore()
+
+    degraded = _load(with_second_factor=False)
+    try:
+        sys.modules["opti_oignon.remote_session_guard"] = _local_guard()
+        assert degraded.routes._get_2fa_manager() is None, (
+            "the lookup must degrade to None when the module is unreachable"
+        )
+        response = _Response()
+        with pytest.raises(HTTPException) as caught:
+            degraded.routes.login(
+                degraded.routes.LoginRequest(username=_RESIDENT, password=_RIGHT_PASSWORD),
+                _Request(),
+                response,
+            )
+        assert caught.value.status_code == 503
+        assert caught.value.detail == "The second factor cannot be checked here: login refused."
+        assert response.set_keys == []
+        challenge_id = degraded.routes._challenge_store.create("uid-stranded", ["totp"])
+        with pytest.raises(HTTPException) as caught:
+            degraded.routes.login_2fa(
+                degraded.routes.TwoFALoginRequest(
+                    challenge_id=challenge_id, code="123456", method="totp"
+                ),
+                _Request(),
+                _Response(),
+            )
+        assert caught.value.status_code == 503
+        assert caught.value.detail == _ABSENT_MODULE_REFUSAL
+    finally:
+        sys.modules.pop("opti_oignon.remote_session_guard", None)
+        degraded.restore()
+
+
+def test_c7_a_security_mode_that_cannot_be_read_never_bypasses_authentication():
+    """c7: with accounts disabled, a security mode that cannot be read -- its
+    module unreachable, or its check raising -- is taken for the hardened mode
+    on both paths: authentication is required, and the synthetic local user is
+    never handed out."""
+    import sys
+
+    from fastapi import HTTPException
+
+    for broken in ("raises", "unreachable"):
+        ctx = _load(single_user=True, bulbe=False)
+        try:
+            sys.modules["opti_oignon.remote_session_guard"] = _local_guard()
+            if broken == "raises":
+                def unreadable():
+                    raise RuntimeError("the lock file cannot be read")
+
+                sys.modules["opti_oignon.security_mode"].is_bulbe = unreadable
+            else:
+                sys.modules["opti_oignon.security_mode"] = None
+            with pytest.raises(HTTPException) as caught:
+                ctx.routes._get_current_user(_Request(), authorization=None)
+            assert caught.value.status_code == 401, broken
+            assert asyncio.run(ctx.routes.authenticate_websocket(_Socket())) is None, broken
+        finally:
+            sys.modules.pop("opti_oignon.remote_session_guard", None)
+            ctx.restore()
+
+
+def test_c8_a_remote_guard_that_cannot_be_read_takes_the_client_for_remote():
+    """c8: the client is taken for a remote one -- its cookies the hardened
+    ones -- when the remote-session guard cannot be read: its module
+    unreachable, or its check raising; a guard that answers is believed."""
+    import sys
+
+    ctx = _load()
+    try:
+        assert ctx.routes._is_remote_client(_Request(host="127.0.0.1")) is True
+        guard = types.ModuleType("opti_oignon.remote_session_guard")
+
+        def raising(host):
+            raise RuntimeError("the guard's configuration cannot be read")
+
+        guard.is_remote_request = raising
+        sys.modules["opti_oignon.remote_session_guard"] = guard
+        assert ctx.routes._is_remote_client(_Request(host="127.0.0.1")) is True
+        guard.is_remote_request = lambda host: host not in ("127.0.0.1", "::1")
+        assert ctx.routes._is_remote_client(_Request(host="127.0.0.1")) is False
+        assert ctx.routes._is_remote_client(_Request(host="203.0.113.9")) is True
+    finally:
+        # Put in by this contract, not by the window: taken out before the window closes.
+        sys.modules.pop("opti_oignon.remote_session_guard", None)
+        ctx.restore()
+
+
+def test_c9_the_authentication_mode_is_the_owners_to_change():
+    """c9: the route that switches authentication on and off takes the
+    platform owner's session alone -- the synthetic single-user session, or
+    an account the store names an owner now: a later account's session, one
+    whose token still says admin but whom the store no longer names, and any
+    session when the owner cannot be told, is refused with a 403 before the
+    mode is touched."""
+    import inspect
+
+    from fastapi import HTTPException
+
+    ctx = _load()
+    try:
+        guard = inspect.signature(ctx.routes.set_auth_mode).parameters["current_user"].default
+        assert guard.dependency is ctx.routes._require_owner
+        owners = {"uid-oldest"}
+        ctx.manager.is_owner = lambda user_id: user_id in owners
+        assert ctx.routes._require_owner({"sub": "uid-oldest", "role": "user"})["sub"] == "uid-oldest"
+        assert ctx.routes._require_owner({"sub": "local", "role": "admin"})["sub"] == "local"
+        for session in ({"sub": "uid-later", "role": "user"}, {"sub": "uid-later", "role": "viewer"},
+                        {"sub": "", "role": "user"}, {"role": "user"}, {"sub": "uid-demoted", "role": "admin"},
+                        {"sub": "", "role": "admin"}, {"role": "admin"}):
+            with pytest.raises(HTTPException) as caught:
+                ctx.routes._require_owner(session)
+            assert caught.value.status_code == 403, session
+
+        def unreadable(user_id):
+            raise OSError("the account store cannot be read")
+
+        ctx.manager.is_owner = unreadable
+        with pytest.raises(HTTPException) as caught:
+            ctx.routes._require_owner({"sub": "uid-oldest", "role": "user"})
+        assert caught.value.status_code == 403
+    finally:
+        ctx.restore()
+
+
+def test_c10_a_socket_from_an_opaque_origin_is_refused_even_in_single_user_mode():
+    """c10: a socket handshake whose origin is opaque -- ``null``, which a
+    sandboxed frame of any site or a local file sends -- or names no host is
+    a page of anywhere, and is refused, in single-user mode too, where a
+    handshake let through holds the synthetic local admin; a local page's
+    origin, and a client that sends no origin at all, are let through."""
+    for single_user in (True, False):
+        ctx = _load(single_user=single_user)
+        try:
+            ctx.manager.tokens["valid-token"] = {
+                "sub": "uid-socket", "username": _RESIDENT, "role": "user", "type": "access",
+            }
+            cookies = {_ACCESS_COOKIE: "valid-token"}
+            for origin in ("null", "", "file://", "http://", "https://", "chrome-extension://abcdef",
+                           "http://localhost.evil.example", "http://127.0.0.1.evil.example"):
+                held = asyncio.run(ctx.routes.authenticate_websocket(_Socket(origin=origin, cookies=cookies)))
+                assert held is None, (single_user, origin, held)
+            for socket in (_Socket(origin="http://localhost:5173", cookies=cookies),
+                           _Socket(origin="http://[::1]:8000", cookies=cookies), _Socket(cookies=cookies)):
+                held = asyncio.run(ctx.routes.authenticate_websocket(socket))
+                assert held is not None, (single_user, socket.headers)
+                assert held["sub"] == ("local" if single_user else "uid-socket"), (single_user, held)
+        finally:
+            ctx.restore()
+
+
+def test_c11_the_authentication_mode_answers_the_mode_in_force(tmp_path):
+    """c11: the route that switches authentication answers the mode in force,
+    not the one asked: with more than one account the store keeps
+    authentication on, and the answer says so; with one, it goes off. The
+    flag is written to the configuration beside the module, here under
+    tmp_path."""
+    import sys
+
+    import yaml
+
+    class Switching:
+        def __init__(self, accounts):
+            self.config = {"single_user_mode": False}
+            self.accounts = accounts
+
+        @property
+        def single_user_mode(self):
+            return bool(self.config.get("single_user_mode", True)) and self.accounts <= 1
+
+    ctx = _load()
+    try:
+        ctx.routes.__file__ = str(tmp_path / "api" / "routes_auth.py")
+        (tmp_path / "config").mkdir()
+        deps = sys.modules["opti_oignon.api.deps"]
+        owner = {"sub": "local", "role": "admin"}
+        for accounts, in_force in ((2, False), (1, True)):
+            deps.auth_manager = Switching(accounts)
+            answer = ctx.routes.set_auth_mode(ctx.routes.AuthModeRequest(single_user_mode=True), owner)
+            assert answer["single_user_mode"] is in_force, (accounts, answer)
+            assert ("stays on" in answer["message"]) is (not in_force), (accounts, answer)
+            written = yaml.safe_load((tmp_path / "config" / "auth.yaml").read_text(encoding="utf-8"))
+            assert written == {"single_user_mode": True}, written
+        answer = ctx.routes.set_auth_mode(ctx.routes.AuthModeRequest(single_user_mode=False), owner)
+        assert answer == {"single_user_mode": False, "message": "Authentication enabled"}, answer
+    finally:
+        ctx.restore()

@@ -11,9 +11,11 @@ Skip conditions (by design):
   - Non-state-changing methods (GET, HEAD, OPTIONS)
   - Requests using Bearer token (API/CLI clients, not browser)
   - Login / register / health / OpenAPI endpoints
-  - WebSocket upgrade requests (handled by WebSocket auth)
   - When cookie_mode is disabled (pure API usage)
   - When csrf_enabled is set to false in security.yaml
+
+A WebSocket never reaches this middleware (it handles HTTP alone); a request
+that merely says "Upgrade: websocket" is an HTTP request, checked as one.
 
 Security: constant-time comparison via hmac.compare_digest.
 """
@@ -55,13 +57,13 @@ def _is_bulbe() -> bool:
     """Return True when Bulbe (hardened) mode is active.
 
     Mirrors the check in auth_middleware so the two middlewares agree on
-    when authentication-related protections apply.
+    when authentication-related protections apply: a mode that cannot be read is taken for Bulbe.
     """
     try:
         from opti_oignon.security_mode import is_bulbe
         return is_bulbe()
-    except Exception:
-        return False
+    except Exception:  # noqa: BLE001 - an unknown mode never skips CSRF
+        return True
 
 
 def _is_single_user_unauthenticated() -> bool:
@@ -141,9 +143,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             if path.startswith(prefix):
                 return await call_next(request)
 
-        # Skip WebSocket upgrades
-        if request.headers.get("upgrade", "").lower() == "websocket":
-            return await call_next(request)
+        # A WebSocket never reaches this middleware (it handles HTTP alone): a request that merely says
+        # "Upgrade: websocket" is an HTTP request, checked as one.
 
         # Skip Bearer token requests (API/CLI clients, not browsers)
         auth_header = request.headers.get("authorization", "")

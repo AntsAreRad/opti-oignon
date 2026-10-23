@@ -23,7 +23,7 @@ the backend is running.
 | `/api/rag/*` | Ingest, query, collections, streaming | User |
 | `/api/plugins/*` | Install, configure, marketplace | User |
 | `/api/sandbox/*` | Tool execution, approval | User |
-| `/api/security/*` | Security settings, red team, audit | Admin |
+| `/api/security/*` | Security settings, red team, audit -- the ceremonies take the owner's password, deleting a red team report an admin's | User |
 | `/api/benchmark/*` | Performance benchmark, history | User |
 | `/api/config/*` | System configuration | Admin |
 | `/api/backup/*` | Export and import | Admin |

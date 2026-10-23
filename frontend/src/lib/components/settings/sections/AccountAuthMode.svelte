@@ -14,6 +14,7 @@
 	import Switch from '$lib/ds/Switch.svelte';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import { apiGet, apiPut } from '$lib/api/client';
+	import { httpRefusal } from '$lib/switches/serverSwitch';
 
 	let singleUserMode = true;
 	let authAvailable = false;
@@ -37,11 +38,14 @@
 		try {
 			// Route through the API client so the httpOnly cookie and CSRF token
 			// are sent. A raw fetch omits both and is rejected under Bulbe.
-			await apiPut('/api/auth/mode', { single_user_mode: newMode });
-			singleUserMode = newMode;
-			toastSuccess(newMode ? 'Authentication disabled' : 'Authentication enabled');
-		} catch {
-			toastError('Failed to change auth mode');
+			// The answer is the mode in force, which the server may keep against the one asked.
+			const answer = await apiPut<{ single_user_mode?: boolean; message?: string }>('/api/auth/mode', {
+				single_user_mode: newMode
+			});
+			singleUserMode = answer.single_user_mode ?? newMode;
+			toastSuccess(answer.message ?? (singleUserMode ? 'Authentication disabled' : 'Authentication enabled'));
+		} catch (e) {
+			toastError(httpRefusal(e)?.detail || 'Failed to change auth mode');
 		} finally {
 			togglingAuth = false;
 		}

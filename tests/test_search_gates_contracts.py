@@ -50,6 +50,15 @@ These contracts pin the gates as they now stand:
     "not engaged"; loading the module reads nothing; the route maps an
     unrecorded re-enable to 503 and refuses when it cannot check the
     password.
+  * KS9 -- in place of KS3, all it holds but the route's password: the
+    re-enable takes the owner's, through the owner's own session, by the
+    ceremonies' one check awaited in a worker thread, and checks no
+    password beside it.
+  * KS10 -- a kill ends a re-enable asked before it, the switch already
+    engaged or not, and says so in the audit; the confirmation asks again
+    under the switch's lock, so that a kill landing while its factors are
+    checked -- the breaker's, from a worker thread -- is not undone; a
+    request id or a visual code beyond ASCII is a mismatch, never an error.
   * KS4 -- web results reach a model only inside the untrusted-data
     envelope: the chat executor (flag off and on), the tool loop and the
     agent loop. The executor still carries the block in a system message,
@@ -116,6 +125,8 @@ BUDGET_S = {
     "test_ks6_an_engaged_switch_is_read_engaged_by_every_reader_the_web_gate_among_them": 2.0,
     "test_ks2_no_web_request_leaves_the_process_outside_daily": 2.0,
     "test_ks3_the_engaged_switch_survives_a_restart_and_fails_closed": 2.0,
+    "test_ks9_the_engaged_switch_survives_a_restart_and_fails_closed_behind_the_owners_ceremony": 2.0,
+    "test_ks10_a_kill_ends_a_re_enable_asked_before_it": 2.0,
     "test_ks4_web_results_reach_a_model_only_inside_the_untrusted_envelope": 2.0,
     "test_ks5_the_allowlist_and_the_breaker_act_on_every_real_search": 2.0,
     "test_ks7_web_results_reach_a_model_only_inside_the_untrusted_envelope_in_the_user_turn": 2.0,
@@ -1679,6 +1690,351 @@ def test_ks3_the_engaged_switch_survives_a_restart_and_fails_closed(tmp_path):
     ]
     assert len(password) == 1, "one password check"
     assert password[0].handlers and all(_raises_status(h, 503) for h in password[0].handlers)
+    assert not [
+        node for node in ast.walk(handler)
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "password_valid" for t in node.targets)
+        and isinstance(node.value, ast.Constant) and node.value.value is True
+    ], "the password is never assumed valid"
+
+    # c10 -- the record is written through a file no one could plant.
+    planted_state = tmp_path / "planted" / "state.json"
+    planted_state.parent.mkdir()
+    victim = tmp_path / "victim.txt"
+    victim.write_bytes(b"victim bytes")
+    Path(str(planted_state) + f".{os.getpid()}.tmp").symlink_to(victim)
+    mod, _sm, restore = _ks_window(tmp_path, planted_state)
+    try:
+        assert mod.search_killswitch.kill(reason="manual").get("persisted") is True
+        assert victim.read_bytes() == b"victim bytes"
+        assert _record(planted_state)["engaged"] is True
+    finally:
+        restore()
+
+    # c11 -- a latched process that later records the engaged state gives up
+    # its latch: the record holds the state, and a re-enable another process
+    # records afterwards is read.
+    relatched = tmp_path / "relatch" / "state.json"
+    lock = relatched.with_name(relatched.name + ".lock")
+    lock.mkdir(parents=True)
+    mod, _sm, restore = _ks_window(tmp_path, relatched)
+    try:
+        first, second = mod.SearchKillSwitch(), mod.SearchKillSwitch()
+        assert first.kill(reason="manual").get("persisted") is False
+        assert first._latched is True, "control: the kill could not be recorded"
+        lock.rmdir()
+        assert first.set_domain_allowlist(True, ["example.org"])["persisted"] is True
+        assert _record(relatched)["engaged"] is True, "the write recorded the latched state"
+        assert first._latched is False, "the record holds the state now"
+        assert _ceremony(mod, switch=second).get("success") is True
+        assert _record(relatched)["engaged"] is False
+        assert first.is_killed() is False, "a re-enable recorded by another process is read"
+    finally:
+        restore()
+        if lock.is_dir():
+            lock.rmdir()
+
+
+# KS10 -- a kill ends a re-enable asked before it
+
+
+def test_ks10_a_kill_ends_a_re_enable_asked_before_it(tmp_path):
+    import threading
+
+    state = tmp_path / "state.json"
+    mod, sm, restore = _ks_window(tmp_path, state)
+    try:
+        switch = mod.search_killswitch
+        clock = [1_000_000.0]
+        mod.time = SimpleNamespace(time=lambda: clock[0])
+        assert switch.kill(reason="manual").get("persisted") is True
+        # c1 -- a kill of a switch already engaged ends the pending request; its confirmation is refused.
+        ask = switch.request_reenable("uid-owner")
+        code = switch.get_reenable_visual_code()
+        assert ask.get("pending") is True and code
+        sm.audit.clear()
+        again = switch.kill(user_id="circuit_breaker", reason="injection_threshold")
+        assert again.get("already_killed") is True, again
+        assert switch.get_reenable_visual_code() is None
+        assert [e for e, _d in sm.audit if e == "search_reenable_cancelled_by_kill"], sm.audit
+        clock[0] += 301
+        refused = switch.confirm_reenable(request_id=ask["request_id"], visual_code=code, user_id="uid-owner")
+        assert refused.get("success") is False and refused.get("error") == "no_pending_request", refused
+        assert switch.is_killed() is True and _record(state)["engaged"] is True
+        # c2 -- a kill that lands while the confirmation's factors are checked, from another thread, is not
+        # undone: the confirmation asks again under the lock.
+        ask = switch.request_reenable("uid-owner")
+        code = switch.get_reenable_visual_code()
+        clock[0] += 301
+        real = switch._lock
+        armed = [True]
+
+        class Interleave:
+            def __enter__(self):
+                if armed[0]:
+                    armed[0] = False
+                    worker = threading.Thread(target=switch.kill,
+                                              kwargs={"user_id": "circuit_breaker", "reason": "injection_threshold"})
+                    worker.start()
+                    worker.join(10)
+                return real.__enter__()
+
+            def __exit__(self, *exc):
+                return real.__exit__(*exc)
+
+        switch._lock = Interleave()
+        try:
+            raced = switch.confirm_reenable(request_id=ask["request_id"], visual_code=code, user_id="uid-owner")
+        finally:
+            switch._lock = real
+        assert armed[0] is False, "the kill ran while the confirmation was under way"
+        assert raced.get("success") is False and raced.get("error") == "no_pending_request", raced
+        assert switch.is_killed() is True and _record(state)["engaged"] is True
+        # c3 -- a request id or a visual code beyond ASCII is a mismatch, never an error.
+        ask = switch.request_reenable("uid-owner")
+        code = switch.get_reenable_visual_code()
+        clock[0] += 301
+        for request_id, visual in ((ask["request_id"] + "\u00e9", code), (ask["request_id"], code[:-1] + "\u0663"),
+                                   ("\udcff", code)):
+            answer = switch.confirm_reenable(request_id=request_id, visual_code=visual, user_id="uid-owner")
+            assert answer.get("success") is False and answer.get("error") in ("invalid_request", "invalid_code"), (
+                request_id, answer)
+        # The ceremony itself still re-enables, once no kill came after its request.
+        confirmed = switch.confirm_reenable(request_id=ask["request_id"], visual_code=code, user_id="uid-owner")
+        assert confirmed.get("success") is True, confirmed
+        assert switch.is_killed() is False and _record(state)["engaged"] is False
+    finally:
+        restore()
+
+
+# KS9 -- in place of KS3, whose parts it holds word for word but c9: the
+# re-enable route takes the owner's password through the ceremonies' one
+# check, where KS3's c9 pinned a check of its own, of the account named
+# ``admin``.
+
+
+def test_ks9_the_engaged_switch_survives_a_restart_and_fails_closed_behind_the_owners_ceremony(tmp_path):
+    state = tmp_path / "state.json"
+
+    # c1 -- a kill is recorded, and a fresh load reads it.
+    mod, _sm, restore = _ks_window(tmp_path, state)
+    try:
+        answer = mod.search_killswitch.kill(reason="manual")
+        assert state.is_file(), "the engaged state is recorded"
+        assert answer.get("persisted") is True, answer
+        assert state.stat().st_mode & 0o777 == 0o600, oct(state.stat().st_mode)
+        record = _record(state)
+        assert record["version"] == 1 and record["engaged"] is True and record["kill_reason"] == "manual", record
+    finally:
+        restore()
+    mod, _sm, restore = _ks_window(tmp_path, state)
+    try:
+        status = mod.search_killswitch.status()
+        assert status["search_enabled"] is False, "a restart does not disengage the switch"
+        assert status["kill_reason"] == "manual" and status["killed_by"] == "system", status
+        assert mod.search_killswitch.is_killed() is True
+        assert mod.SearchKillSwitch().is_killed() is True, "a second instance reads the record too"
+
+        # c2 -- the ceremony records the re-enable, and a fresh load reads it.
+        confirmed = _ceremony(mod)
+        assert confirmed.get("success") is True, confirmed
+        assert _record(state)["engaged"] is False
+    finally:
+        restore()
+    mod, _sm, restore = _ks_window(tmp_path, state)
+    try:
+        assert mod.search_killswitch.is_killed() is False, "the re-enable holds across a restart"
+    finally:
+        restore()
+
+    # c3 -- an unreadable record reads engaged; a missing one does not.
+    mod, _sm, restore = _ks_window(tmp_path, state)
+    try:
+        valid_off = json.dumps({"version": 1, "engaged": False})
+        variants = {
+            "truncated": "{",
+            "a list": "[]",
+            "not a bool": json.dumps({"version": 1, "engaged": "yes"}),
+            "another version": json.dumps({"version": 2, "engaged": False}),
+            "too large": valid_off[:-1] + " " * (64 * 1024 + 16) + "}",
+        }
+        read = 0
+        for label, text in variants.items():
+            path = tmp_path / "c3" / label.replace(" ", "_") / "state.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(text, encoding="utf-8")
+            mod._STATE_PATH = path
+            assert mod.search_killswitch.is_killed() is True, label
+            read += 1
+        directory = tmp_path / "c3" / "directory" / "state.json"
+        directory.mkdir(parents=True)
+        mod._STATE_PATH = directory
+        assert mod.search_killswitch.is_killed() is True, "a directory"
+        target = tmp_path / "c3" / "target.json"
+        target.write_text(valid_off, encoding="utf-8")
+        link = tmp_path / "c3" / "link" / "state.json"
+        link.parent.mkdir()
+        link.symlink_to(target)
+        mod._STATE_PATH = link
+        assert mod.search_killswitch.is_killed() is True, "a link is not followed"
+        fifo = tmp_path / "c3" / "fifo" / "state.json"
+        fifo.parent.mkdir()
+        os.mkfifo(fifo)
+        mod._STATE_PATH = fifo
+        assert mod.search_killswitch.is_killed() is True, "a FIFO is not a record"
+        assert read == len(variants)
+        mod._STATE_PATH = target
+        assert mod.search_killswitch.is_killed() is False, "control: a well-formed disengaged record"
+        mod._STATE_PATH = tmp_path / "c3" / "missing" / "state.json"
+        assert mod.search_killswitch.is_killed() is False, "witness: a missing record was never engaged"
+    finally:
+        restore()
+
+    # c4 -- a kill that cannot be recorded latches; a re-enable that cannot
+    # be recorded fails and leaves the switch engaged.
+    afile = tmp_path / "afile"
+    afile.write_text("a regular file where a directory should be", encoding="utf-8")
+    mod, _sm, restore = _ks_window(tmp_path, afile / "state.json")
+    try:
+        answer = mod.search_killswitch.kill(reason="manual")
+        assert answer.get("persisted") is False, answer
+        assert "not survive a restart" in answer.get("message", ""), answer
+        assert mod.search_killswitch.is_killed() is True
+        refused = _ceremony(mod)
+        assert refused.get("success") is False and refused.get("error") == "not_recorded", refused
+        assert mod.search_killswitch.is_killed() is True, "an unrecorded re-enable does not re-enable"
+
+        # c5 -- the latch is retried by the next kill.
+        moved = tmp_path / "moved" / "state.json"
+        mod._STATE_PATH = moved
+        answer = mod.search_killswitch.kill(reason="manual")
+        assert answer.get("persisted") is True, answer
+        assert mod.search_killswitch._latched is False, "the record now holds the state"
+    finally:
+        restore()
+    mod, _sm, restore = _ks_window(tmp_path, moved)
+    try:
+        assert mod.search_killswitch.is_killed() is True
+    finally:
+        restore()
+
+    # c4, again, with a record that reads missing: an unwritable path above
+    # reads engaged on its own, so there only the latch can hold the switch.
+    latched = tmp_path / "latch" / "state.json"
+    lock = latched.with_name(latched.name + ".lock")
+    lock.mkdir(parents=True)
+    mod, _sm, restore = _ks_window(tmp_path, latched)
+    try:
+        assert mod.search_killswitch.is_killed() is False, "control: nothing recorded, nothing latched"
+        answer = mod.search_killswitch.kill(reason="manual")
+        assert answer.get("persisted") is False, answer
+        assert mod.search_killswitch.is_killed() is True, "the latch holds what the record could not"
+        refused = _ceremony(mod)
+        assert refused.get("error") == "not_recorded", refused
+        assert mod.search_killswitch.is_killed() is True, "a re-enable that was not recorded leaves the latch"
+    finally:
+        restore()
+        lock.rmdir()
+
+    # c6 -- a writer that is not the ceremony cannot undo another's kill.
+    two = tmp_path / "two" / "state.json"
+    mod, _sm, restore = _ks_window(tmp_path, two)
+    try:
+        first, second = mod.SearchKillSwitch(), mod.SearchKillSwitch()
+        second.kill(reason="manual")
+        first.set_domain_allowlist(True, ["example.org"])
+        record = _record(two)
+        assert record["engaged"] is True, record
+        assert record["domain_allowlist"] == {"enabled": True, "domains": ["example.org"]}, record
+    finally:
+        restore()
+
+    # c7 -- the allowlist is recorded, kept across a kill and a re-enable,
+    # and a failed write changes nothing.
+    listed = tmp_path / "listed" / "state.json"
+    mod, _sm, restore = _ks_window(tmp_path, listed)
+    try:
+        answer = mod.search_killswitch.set_domain_allowlist(True, [" Example.org "])
+        assert answer["persisted"] is True, answer
+    finally:
+        restore()
+    mod, _sm, restore = _ks_window(tmp_path, listed)
+    try:
+        applied = mod.search_killswitch.status()["domain_allowlist"]
+        assert applied["enabled"] is True and applied["domains"] == ["example.org"], applied
+        mod.search_killswitch.kill(reason="manual")
+        assert _ceremony(mod).get("success") is True
+        applied = mod.search_killswitch.status()["domain_allowlist"]
+        assert applied["enabled"] is True and applied["domains"] == ["example.org"], applied
+        lock = listed.with_name(listed.name + ".lock")
+        if lock.exists():
+            lock.unlink()
+        lock.mkdir()
+        try:
+            answer = mod.search_killswitch.set_domain_allowlist(True, ["other.example"])
+        finally:
+            lock.rmdir()
+        assert answer["persisted"] is False, answer
+        assert mod.search_killswitch.status()["domain_allowlist"]["domains"] == ["example.org"]
+    finally:
+        restore()
+
+    # c8 -- loading the module reads nothing under data/.
+    touched = []
+    real = {"lstat": os.lstat, "stat": os.stat, "open": os.open, "builtin": builtins.open}
+
+    def _recorder(kind, fn):
+        def wrapper(path, *args, **kwargs):
+            touched.append((kind, os.fspath(path) if isinstance(path, (str, bytes, os.PathLike)) else repr(path)))
+            return fn(path, *args, **kwargs)
+        return wrapper
+
+    os.lstat, os.stat, os.open = (
+        _recorder("lstat", real["lstat"]), _recorder("stat", real["stat"]), _recorder("open", real["open"])
+    )
+    builtins.open = _recorder("builtin", real["builtin"])
+    try:
+        loaded, restore = isolate(targets={_KS: _SOURCES[_KS]}, seeded={_SM: _mode_module("daily")})
+        try:
+            mod = loaded[_KS]
+            during = list(touched)
+            assert not [p for _k, p in during if str(p).endswith(".search_killswitch.json")], during
+            assert mod._STATE_PATH == REPO / "data" / ".search_killswitch.json"
+            mod._STATE_PATH = tmp_path / "loaded" / "state.json"
+            touched.clear()
+            assert mod.search_killswitch.is_killed() is False
+            assert touched.count(("lstat", str(tmp_path / "loaded" / "state.json"))) == 1, (
+                "witness: a check reads the record, loading does not"
+            )
+        finally:
+            restore()
+    finally:
+        os.lstat, os.stat, os.open = real["lstat"], real["stat"], real["open"]
+        builtins.open = real["builtin"]
+
+    # c9 -- the route: an unrecorded re-enable is 503, and the password is the
+    # owner's, through the owner's own session: the ceremonies' one check,
+    # awaited in a worker thread, which refuses a password it cannot check
+    # with a 503 (NF1 and NF2 of tests/test_checks_fail_closed_contracts.py
+    # hold its answers); no password is checked beside it.
+    handler = _function(_routes_tree(), "confirm_search_reenable")
+    mapped = [
+        node for node in ast.walk(handler)
+        if isinstance(node, ast.If) and "not_recorded" in ast.unparse(node.test)
+    ]
+    assert mapped, "the route names the unrecorded re-enable"
+    assert any(
+        isinstance(stmt, ast.Assign) and isinstance(stmt.value, ast.Constant) and stmt.value.value == 503
+        for node in mapped for stmt in node.body
+    ) or any(_raises_status(node, 503) for node in mapped), ast.unparse(mapped[0])
+    checks = [
+        node for node in ast.walk(handler)
+        if isinstance(node, ast.Await) and ast.unparse(node.value)
+        == "run_in_threadpool(_ceremony_password, 'search_reenable', current, body.password, request)"
+    ]
+    assert len(checks) == 1, "one password check, the ceremonies' own, off the event loop"
+    assert "current" in [arg.arg for arg in handler.args.args], "the session is the route's own"
+    said = ast.unparse(handler)
+    assert "verify_password" not in said and "get_user_by_username" not in said, "no password checked beside it"
     assert not [
         node for node in ast.walk(handler)
         if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "password_valid" for t in node.targets)

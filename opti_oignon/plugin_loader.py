@@ -306,28 +306,39 @@ class PluginLoader:
         except PluginManifestError as exc:
             raise PluginLoadError(f"Invalid manifest: {exc}") from exc
 
-        # --- Bulbe mode allowlist check ---
+        # --- Bulbe mode allowlist check: a mode that cannot be read, or in Bulbe an allowlist that cannot be
+        # imported or that cannot check, loads nothing; Daily does not import the allowlist ---
         try:
             from opti_oignon.security_mode import is_bulbe
-            if is_bulbe():
+            bulbe = is_bulbe()
+        except Exception as exc:  # noqa: BLE001 - an unknown mode loads nothing
+            raise PluginLoadError(
+                f"The security mode cannot be read ({type(exc).__name__}): "
+                f"plugin '{manifest.name}' not loaded."
+            ) from exc
+        if bulbe:
+            try:
                 from opti_oignon.plugin_allowlist import plugin_allowlist_manager
                 result = plugin_allowlist_manager.verify_plugin(
                     plugin_id=manifest.name,
                     plugin_dir=plugin_path,
                     permissions=manifest.permissions,
                 )
-                if not result.get("allowed"):
-                    reason = result.get("reason", "Not in allowlist")
-                    logger.critical(
-                        "BULBE MODE: Plugin '%s' REJECTED: %s",
-                        manifest.name, reason,
-                    )
-                    raise PluginLoadError(
-                        f"Bulbe mode: plugin '{manifest.name}' not allowed. "
-                        f"{reason}"
-                    )
-        except ImportError:
-            pass
+            except Exception as exc:  # noqa: BLE001 - a check that cannot run loads nothing
+                raise PluginLoadError(
+                    f"Bulbe mode: plugin '{manifest.name}' not checked "
+                    f"({type(exc).__name__}): not loaded."
+                ) from exc
+            if not result.get("allowed"):
+                reason = result.get("reason", "Not in allowlist")
+                logger.critical(
+                    "BULBE MODE: Plugin '%s' REJECTED: %s",
+                    manifest.name, reason,
+                )
+                raise PluginLoadError(
+                    f"Bulbe mode: plugin '{manifest.name}' not allowed. "
+                    f"{reason}"
+                )
 
         # Already loaded? Unload first
         if manifest.name in self._loaded:

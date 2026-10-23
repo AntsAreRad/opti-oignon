@@ -166,6 +166,9 @@ def jwt_encode(payload: dict[str, Any], secret: str, algorithm: str = "HS512") -
     """
     if algorithm not in _JWT_ALGORITHMS:
         raise ValueError(f"Unsupported JWT algorithm: {algorithm}")
+    if not secret:
+        # A wiped or missing secret signs nothing: an empty key would make tokens anyone can forge.
+        raise ValueError("No JWT secret: nothing is signed")
     hash_fn = _JWT_ALGORITHMS[algorithm]
     header = {"alg": algorithm, "typ": "JWT"}
     header_b64 = _b64url_encode(json.dumps(header, separators=(",", ":")).encode())
@@ -188,6 +191,9 @@ def jwt_decode(token: str, secret: str, algorithm: str = "HS512") -> dict[str, A
     downgrade security (prevents algorithm confusion attacks where
     an attacker sends alg:HS256 to reduce from 256-bit to 128-bit).
     """
+    if not secret:
+        # A wiped or missing secret verifies nothing: under an empty key, anyone signs.
+        return None
     try:
         parts = token.split(".")
         if len(parts) != 3:
@@ -705,6 +711,25 @@ class AuthManager:
             return [self._row_to_user(r) for r in rows]
         finally:
             conn.close()
+
+    def owners(self) -> list[str]:
+        """The ids of the accounts that hold the platform: the admins', or -- while no account is an admin's, as on an
+        install whose accounts all registered with the default role -- the first registered of those still there
+        alone, by the order the store wrote them (its rowid), never by a clock that can step back. An account
+        registered after it holds nothing until an admin's exists; none at all on an install with no account."""
+        conn = self._get_conn()
+        try:
+            rows = conn.execute("SELECT user_id, role, rowid FROM users").fetchall()
+        finally:
+            conn.close()
+        admins = sorted(row[0] for row in rows if row[1] == "admin")
+        if admins or not rows:
+            return admins
+        return [min(rows, key=lambda row: row[2])[0]]
+
+    def is_owner(self, user_id: str) -> bool:
+        """Whether the account ``user_id`` is one of ``owners()``."""
+        return bool(user_id) and user_id in self.owners()
 
     def count_users(self) -> int:
         """Count total users."""

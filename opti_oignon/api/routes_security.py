@@ -36,6 +36,7 @@ from typing import Any
 
 import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -1058,9 +1059,43 @@ async def get_visual_code() -> dict[str, Any]:
     return {"visual_code": code}
 
 
+def _ceremony_password(ceremony: str, current: dict, password: str, request: Request) -> str:
+    """The owner's password, asked through the owner's own session and checked so that nothing else passes
+    (``ceremony_factors``): the account's id, or a refusal raised -- 403 for no account, another account's session or
+    a wrong password, 429 for an account the login limiter holds back, 503 for a password that cannot be checked --
+    and audited by name, with no secret, where the audit can write. A ceremony's route awaits it in a worker thread,
+    so that bcrypt never holds the event loop, and makes its change back on the loop, where the allowlist's
+    revocations and the downgrade's cancellation run, so that the two never interleave; the search switch, which
+    its breaker engages from worker threads, holds a lock of its own and asks again under it."""
+    from opti_oignon.ceremony_factors import check_password
+
+    try:
+        from .routes_auth import _extract_client_ip
+        client_ip = _extract_client_ip(request)
+    except Exception:  # noqa: BLE001 - the address only feeds the limiter
+        client_ip = "unknown"
+    verdict = check_password(current, password, client_ip=client_ip)
+    if verdict.passed:
+        return verdict.account_id
+    logger.warning("Ceremony %s refused: %s", ceremony, verdict.error)
+    try:
+        from opti_oignon.security_mode import _audit_log
+        _audit_log(
+            "ceremony_password_refused",
+            severity="WARNING",
+            ceremony=ceremony,
+            error=verdict.error,
+            user_id=(current.get("sub") if isinstance(current, dict) else None) or "",
+        )
+    except Exception:  # noqa: BLE001 - the audit is best effort; the refusal stands
+        pass
+    raise HTTPException(status_code=verdict.status, detail=verdict.message)
+
+
 @router.post("/mode/confirm-downgrade")
 async def confirm_mode_downgrade(
     body: DowngradeConfirmRequest,
+    request: Request,
     current: dict = Depends(_get_current_user),
 ) -> dict[str, Any]:
     """Confirm the Bulbe -> Daily downgrade ceremony.
@@ -1068,9 +1103,11 @@ async def confirm_mode_downgrade(
     Requires ALL of:
     1. Valid request_id from the original request
     2. Visual code read from screen (human verification)
-    3. Current password
-    4. 2FA code (if 2FA active)
-    5. Cooldown elapsed (>= 5 minutes, server-enforced)
+    3. The owner's password, through the owner's own session, checked so that nothing else passes: none found,
+       another account's, a wrong one, or one that cannot be checked refuses
+    4. Cooldown elapsed (>= 5 minutes, server-enforced)
+
+    A second factor is not asked yet: the 2FA code the request may carry is not read.
     """
     if not SECURITY_MODE_AVAILABLE:
         raise HTTPException(
@@ -1078,39 +1115,15 @@ async def confirm_mode_downgrade(
             detail="Security mode system not available",
         )
 
-    # Verify the password against the authenticated user rather than a
-    # hard-coded "admin" account, which need not exist. The session user_id is
-    # the same expression used by request-downgrade, so the manager's
-    # requester == confirmer check passes. If no distinct account can be
-    # resolved (single-user local session), the visual code and cooldown are
-    # the gate.
+    # The session user_id is the same expression used by request-downgrade, so the manager's requester ==
+    # confirmer check passes. The password is that of the session's account: no account found refuses, as a wrong
+    # password or one that cannot be checked does.
     session_user_id = (
         (current.get("sub") or current.get("user_id") or "local")
         if isinstance(current, dict)
         else "local"
     )
-    username = current.get("username") if isinstance(current, dict) else None
-    password_valid = False
-    try:
-        from opti_oignon.auth import auth_manager, verify_password
-        user = (
-            auth_manager.get_user_by_username(username)
-            if (auth_manager and username)
-            else None
-        )
-        if user:
-            password_valid = verify_password(body.password, user.password_hash)
-        else:
-            password_valid = True
-    except Exception:
-        # Degraded/test mode: the visual code + cooldown remain the gate.
-        password_valid = True
-
-    if not password_valid:
-        raise HTTPException(status_code=401, detail="Invalid password")
-
-    # 2FA verification would go here when auth_2fa is available
-    # For now, we proceed without 2FA (it will be added in Phase 5)
+    await run_in_threadpool(_ceremony_password, "downgrade", current, body.password, request)
 
     result = security_mode_manager.confirm_downgrade(
         user_id=session_user_id,
@@ -1208,40 +1221,25 @@ async def prepare_plugin_batch(body: BatchPrepareRequest) -> dict[str, Any]:
 
 
 @router.post("/plugin-allowlist/approve")
-async def approve_plugin_batch(body: BatchApproveRequest) -> dict[str, Any]:
-    """Approve a prepared batch after ceremony verification.
-
-    Requires visual code + password + 2FA (same as mode degradation).
-    """
+async def approve_plugin_batch(
+    body: BatchApproveRequest,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+) -> dict[str, Any]:
+    """Approve a prepared batch: the owner's password, asked through the owner's own session and checked so that
+    nothing else passes -- none found, another account's, a wrong one, or one that cannot be checked refuses, and
+    nothing is written. The visual code and the second factor the request may carry are not read yet. An allowlist
+    the disk will not write approves nothing (503). The password is checked in a worker thread, the batch approved
+    back on the event loop, where the revocations run: an approval never undoes a revocation it did not name."""
     if not PLUGIN_ALLOWLIST_AVAILABLE:
         raise HTTPException(status_code=503, detail="Plugin allowlist not available")
 
-    # Verify password (same pattern as mode degradation)
-    password_valid = False
-    user_id = "admin"
-    try:
-        from opti_oignon.auth import auth_manager
-        if auth_manager:
-            user = auth_manager.get_user_by_username("admin")
-            if user:
-                from opti_oignon.auth import verify_password
-                password_valid = verify_password(body.password, user.password_hash)
-                user_id = user.user_id
-    except Exception:
-        password_valid = True  # Single-user / test mode
-
-    if not password_valid:
-        raise HTTPException(status_code=401, detail="Invalid password")
-
-    # Verify visual code via security mode manager pending downgrade
-    # For plugin approval, we use the same ceremony infrastructure
-    # but the visual code verification is handled inline here
-    # (the batch ceremony generates its own context)
+    user_id = await run_in_threadpool(_ceremony_password, "plugin_batch", current, body.password, request)
 
     result = plugin_allowlist_manager.approve_batch(body.batch_id, user_id)
     if not result.get("success"):
         raise HTTPException(
-            status_code=400,
+            status_code=503 if result.get("error") == "not_recorded" else 400,
             detail=result.get("message", "Approval failed"),
         )
     return result
@@ -1406,32 +1404,18 @@ async def get_search_reenable_code() -> dict[str, Any]:
 
 
 @router.post("/search-killswitch/confirm-reenable")
-async def confirm_search_reenable(body: SearchReenableConfirm) -> dict[str, Any]:
-    """Confirm the search re-enable ceremony."""
+async def confirm_search_reenable(
+    body: SearchReenableConfirm,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+) -> dict[str, Any]:
+    """Confirm the search re-enable ceremony: the owner's password, through the owner's own session and the login
+    limiter, as the other ceremonies take it (``_ceremony_password``) -- a password that cannot be checked is not a
+    valid one, and search stays disabled: the ceremony is the only way back once the switch is recorded engaged."""
     if not SEARCH_KILLSWITCH_AVAILABLE:
         raise HTTPException(status_code=503, detail="Kill switch not available")
 
-    # Verify password
-    password_valid = False
-    user_id = "admin"
-    try:
-        from opti_oignon.auth import auth_manager
-        if auth_manager:
-            user = auth_manager.get_user_by_username("admin")
-            if user:
-                from opti_oignon.auth import verify_password
-                password_valid = verify_password(body.password, user.password_hash)
-                user_id = user.user_id
-    except Exception:
-        # A password that cannot be checked is not a valid one: the ceremony
-        # is the only way back once the switch is recorded engaged.
-        raise HTTPException(
-            status_code=503,
-            detail="The password cannot be verified; search stays disabled.",
-        )
-
-    if not password_valid:
-        raise HTTPException(status_code=401, detail="Invalid password")
+    user_id = await run_in_threadpool(_ceremony_password, "search_reenable", current, body.password, request)
 
     result = search_killswitch.confirm_reenable(
         request_id=body.request_id,

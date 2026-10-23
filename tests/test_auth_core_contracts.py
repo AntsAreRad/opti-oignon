@@ -39,7 +39,8 @@ A final census walks the module's abstract syntax and pins that every SQL
 site passes a constant (or a ``.format`` over a constant template with
 whitelisted columns, never interpolated values) and that no SQL string is
 an f-string -- a quiet edit that builds a query from an f-string anywhere in
-the file reddens it. Isolation goes through the shared window with ``ollama``
+the file reddens it (a36, in place of a34, with the read of the platform's
+owners counted). Isolation goes through the shared window with ``ollama``
 proven unreachable. The module itself is left byte-identical by this suite.
 """
 
@@ -706,3 +707,58 @@ def test_a34_sql_is_parameterised_never_f_string():
 
     assert fstring == _SQL_FSTRING_SITES
     assert dynamic == _SQL_DYNAMIC_SITES
+
+
+def test_a36_sql_is_parameterised_never_f_string_the_owners_read_among_it():
+    """a36: in place of a34, whose walk it repeats word for word with one
+    site more -- the read of the accounts that hold the platform
+    (``owners``), a constant statement like every other but the one
+    ``.format`` over a constant template (a whitelist of column names)."""
+    tree = ast.parse(source("auth.py").read_text())
+    sites = _sql_sites(tree)
+    assert len(sites) == _SQL_SITES + 1
+
+    fstring = 0
+    dynamic = 0
+    for node in sites:
+        arg0 = node.args[0] if node.args else None
+        if isinstance(arg0, ast.JoinedStr):
+            fstring += 1
+        elif isinstance(arg0, ast.Call):
+            dynamic += 1
+            # The dynamic site must be ``<constant>.format(...)``.
+            assert isinstance(arg0.func, ast.Attribute)
+            assert arg0.func.attr == "format"
+            assert isinstance(arg0.func.value, ast.Constant)
+            assert isinstance(arg0.func.value.value, str)
+
+    assert fstring == _SQL_FSTRING_SITES
+    assert dynamic == _SQL_DYNAMIC_SITES
+    owners = [node for node in sites if isinstance(node.args[0], ast.Constant)
+              and node.args[0].value == "SELECT user_id, role, rowid FROM users"]
+    assert len(owners) == 1, "the owners' read is the one site added"
+
+
+def test_a35_an_empty_jwt_secret_signs_and_verifies_nothing():
+    """a35: a secret that was wiped or never set -- the empty text -- signs no
+    token and verifies none: a token signed under the empty key, which anyone
+    can make, decodes to None, and a manager whose secret is gone refuses it."""
+    import hashlib
+    import hmac
+    import json
+
+    auth, restore, _c, tmp = _load()
+    try:
+        with pytest.raises(ValueError):
+            auth.jwt_encode({"sub": "u", "exp": int(time.time()) + 60}, "")
+        head = auth._b64url_encode(json.dumps({"alg": "HS512", "typ": "JWT"}, separators=(",", ":")).encode())
+        body = auth._b64url_encode(json.dumps(
+            {"sub": "u", "type": "access", "exp": int(time.time()) + 60}, separators=(",", ":")).encode())
+        signature = auth._b64url_encode(hmac.new(b"", f"{head}.{body}".encode(), hashlib.sha512).digest())
+        anyones = f"{head}.{body}.{signature}"
+        assert auth.jwt_decode(anyones, "") is None
+        manager = _fresh_manager(auth, tmp)
+        manager._get_jwt_secret = lambda: ""
+        assert manager.validate_token(anyones) is None
+    finally:
+        restore()

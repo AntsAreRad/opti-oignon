@@ -4,8 +4,9 @@ Plugin Allowlist for Opti-Oignon Bulbe mode.
 
 In Bulbe mode, only explicitly approved plugins may be loaded.  Each plugin
 is identified by a SHA-512 hash of everything its folder holds.  Approval uses a
-batch ceremony (same security as mode degradation) and produces HMAC-SHA512
-signed allowlist entries.
+batch ceremony -- the owner's password, through the owner's own session
+(``ceremony_factors``); the visual code and the second factor it carries are
+not read yet -- and produces HMAC-SHA512 signed allowlist entries.
 
 The allowlist is stored in ``data/plugin_allowlist.json``.  Every plugin
 load in Bulbe mode verifies:
@@ -597,8 +598,10 @@ class PluginAllowlistManager:
     ) -> dict[str, Any]:
         """Approve a pending batch after ceremony verification.
 
-        The ceremony (visual code + password + 2FA) is verified by
-        the API route before calling this method.
+        The ceremony's password -- the owner's, through the owner's own
+        session -- is checked by the API route before this method is called;
+        the visual code and the second factor the request carries are not
+        read yet.
 
         Returns {success, entries_added, batch_id}.
         """
@@ -668,13 +671,20 @@ class PluginAllowlistManager:
             entry.signature = _sign_entry(entry, key)
             new_entries.append(entry)
 
-        # Replace existing entries for these plugins
+        # Replace existing entries for these plugins: the file first, the memory after, so that a write that
+        # fails approves nothing, in this process either.
         existing_ids = {e.plugin_id for e in new_entries}
-        self._entries = [
-            e for e in self._entries if e.plugin_id not in existing_ids
-        ]
-        self._entries.extend(new_entries)
-        _save_allowlist(self._entries)
+        entries = [e for e in self._entries if e.plugin_id not in existing_ids] + new_entries
+        try:
+            _save_allowlist(entries)
+        except OSError as exc:
+            logger.error("Plugin allowlist not written: %s", exc)
+            return {
+                "success": False,
+                "error": "not_recorded",
+                "message": f"The allowlist could not be written ({type(exc).__name__}): nothing was approved.",
+            }
+        self._entries = entries
         self._pending_batch = None
 
         # Audit

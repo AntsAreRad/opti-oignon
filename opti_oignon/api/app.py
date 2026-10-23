@@ -227,29 +227,26 @@ except Exception as _csp_exc:
 #
 # Enforces Daily/Bulbe mode restrictions: blocks search when kill switch
 # is engaged, rejects Bearer tokens in Bulbe, enforces plugin allowlist,
-# sets SameSite=Strict cookies.  Degrades gracefully if security_mode
-# module is unavailable.
+# sets SameSite=Strict cookies; a mode it cannot read is Bulbe. A middleware
+# that cannot be registered stops the app here: it never starts without it.
 # ---------------------------------------------------------------------------
-try:
-    from .security_mode_middleware import SecurityModeMiddleware
-    app.add_middleware(SecurityModeMiddleware)
-    logger.info("Security mode middleware registered")
-except Exception as _mode_exc:
-    logger.warning("Failed to register security mode middleware: %s", _mode_exc)
+from .security_mode_middleware import SecurityModeMiddleware  # noqa: E402
+
+app.add_middleware(SecurityModeMiddleware)
+logger.info("Security mode middleware registered")
 
 # ---------------------------------------------------------------------------
 # CSRF middleware (audit fix)
 #
 # Validates double-submit cookie on all POST/PUT/DELETE/PATCH requests.
 # Previously _validate_csrf() was defined but never called -- this
-# middleware enforces it globally.
+# middleware enforces it globally. One that cannot be registered stops the
+# app here.
 # ---------------------------------------------------------------------------
-try:
-    from .csrf_middleware import CSRFMiddleware
-    app.add_middleware(CSRFMiddleware)
-    logger.info("CSRF middleware registered")
-except Exception as _csrf_exc:
-    logger.warning("Failed to register CSRF middleware: %s", _csrf_exc)
+from .csrf_middleware import CSRFMiddleware  # noqa: E402
+
+app.add_middleware(CSRFMiddleware)
+logger.info("CSRF middleware registered")
 
 # ---------------------------------------------------------------------------
 # Global auth middleware (audit fix)
@@ -257,14 +254,13 @@ except Exception as _csrf_exc:
 # Deny-by-default: all endpoints require authentication except an
 # explicit allowlist (login, register, health, OpenAPI).  This replaces
 # the fragile per-router Depends() approach that left 37+ routers
-# unprotected.
+# unprotected. One that cannot be registered stops the app here: it never
+# serves a route without it.
 # ---------------------------------------------------------------------------
-try:
-    from .auth_middleware import AuthMiddleware
-    app.add_middleware(AuthMiddleware)
-    logger.info("Global auth middleware registered (deny-by-default)")
-except Exception as _auth_mw_exc:
-    logger.warning("Failed to register auth middleware: %s", _auth_mw_exc)
+from .auth_middleware import AuthMiddleware  # noqa: E402
+
+app.add_middleware(AuthMiddleware)
+logger.info("Global auth middleware registered (deny-by-default)")
 
 # ---------------------------------------------------------------------------
 # CORS configuration (hardened)

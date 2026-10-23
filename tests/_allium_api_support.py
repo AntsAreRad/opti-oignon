@@ -142,7 +142,8 @@ def open_api(monkeypatch, tmp_path, *, auth="single", stopped=None, bulbe=False,
     login is required) or ``None`` (no auth module). ``stopped`` is what the
     emergency stop answers (``False`` when not given). ``bulbe=True`` seeds a
     security mode whose ``is_bulbe`` is true; ``security_mode`` seeds a module
-    of the caller's own instead. ``kw`` goes to ``open_allium``.
+    of the caller's own instead; without either, the mode seeded is Daily -- a platform always has a mode, and one
+    it cannot read is Bulbe --, unless the caller blocks the mode by name. ``kw`` goes to ``open_allium``.
     """
     monkeypatch.setenv("XDG_CONFIG_HOME", str(Path(tmp_path) / "xdg"))
     manager = None if auth is None else AuthStandIn(auth == "single", tokens)
@@ -151,9 +152,8 @@ def open_api(monkeypatch, tmp_path, *, auth="single", stopped=None, bulbe=False,
     deps = deps_module(manager)
     stop = StopStandIn(False if stopped is None else stopped)
     given = {"opti_oignon.api.deps": deps, "opti_oignon.emergency_stop": stop_module(stop)}
-    mode = security_mode if security_mode is not None else (bulbe_module(True) if bulbe else None)
-    if mode is not None:
-        given["opti_oignon.security_mode"] = mode
+    if security_mode is not None or "opti_oignon.security_mode" not in (blocked or ()):
+        given["opti_oignon.security_mode"] = security_mode if security_mode is not None else bulbe_module(bulbe)
     given.update(seeded or {})
     names = support.BLOCKED if blocked is None else tuple(blocked)
     names = tuple(name for name in names if name not in given)

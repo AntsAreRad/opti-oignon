@@ -82,12 +82,12 @@ def _get_auth_manager():
 
 
 def _is_bulbe() -> bool:
-    """Check whether Bulbe mode is active."""
+    """Check whether Bulbe mode is active; a mode that cannot be read is taken for Bulbe."""
     try:
         from opti_oignon.security_mode import is_bulbe
         return is_bulbe()
-    except Exception:
-        return False
+    except Exception:  # noqa: BLE001 - an unknown mode never bypasses authentication
+        return True
 
 
 class AuthMiddleware(BaseHTTPMiddleware):
@@ -113,18 +113,23 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if _is_public_path(path):
             return await call_next(request)
 
-        # WebSocket upgrades are handled by per-endpoint auth
-        if request.headers.get("upgrade", "").lower() == "websocket":
-            return await call_next(request)
+        # A WebSocket never reaches this middleware (it handles HTTP alone): each socket endpoint checks its own
+        # handshake. A request that merely says "Upgrade: websocket" is an HTTP request, checked as one.
+
+        # Without the account store nothing is served: authentication cannot be checked.
+        mgr = _get_auth_manager()
+        if mgr is None:
+            logger.warning("Auth module unavailable: request to %s refused", path)
+            return JSONResponse(
+                status_code=503,
+                content={
+                    "detail": "Authentication cannot be checked here: nothing is served.",
+                    "path": path,
+                },
+            )
 
         # Check single-user mode (bypass auth unless Bulbe)
-        mgr = _get_auth_manager()
-        if mgr is not None and mgr.single_user_mode and not _is_bulbe():
-            return await call_next(request)
-
-        # If auth module is not available, fail open with warning
-        if mgr is None:
-            logger.debug("Auth module unavailable, allowing request to %s", path)
+        if mgr.single_user_mode and not _is_bulbe():
             return await call_next(request)
 
         # Extract token from cookie or Bearer header

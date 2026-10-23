@@ -9,7 +9,8 @@
  * (backend down, timeout) from API errors (400/404/500).
  */
 
-const API_BASE = import.meta.env.VITE_API_URL ?? '';
+// Optional so that the module also loads outside Vite, under the contracts' Node runner.
+const API_BASE = import.meta.env?.VITE_API_URL ?? '';
 
 /**
  * Module-level access token for Authorization header injection.
@@ -390,6 +391,8 @@ export function wsUrl(path: string): string {
  */
 export const WS_BACKOFF_MIN_MS = 1000;
 export const WS_BACKOFF_MAX_MS = 30000;
+/** The close code a server socket gives a handshake it refused: reconnecting would be refused again, without end. */
+export const WS_AUTH_REFUSED = 4001;
 
 export class ReconnectingWebSocket {
 	private url: string;
@@ -403,7 +406,7 @@ export class ReconnectingWebSocket {
 	onopen: ((ev: Event) => void) | null = null;
 	onmessage: ((ev: MessageEvent) => void) | null = null;
 	onerror: ((ev: Event) => void) | null = null;
-	/** Fired only on the final, client-initiated close. */
+	/** Fired only on the final close: the client's own, or a handshake the server refused (4001). */
 	onclose: ((ev: CloseEvent) => void) | null = null;
 	/** Fired before each scheduled reconnect attempt, with the delay (ms). */
 	onreconnect: ((delayMs: number) => void) | null = null;
@@ -444,7 +447,9 @@ export class ReconnectingWebSocket {
 			if (this.onerror) this.onerror(ev);
 		};
 		this.socket.onclose = (ev) => {
-			if (this.closedByClient) {
+			if (this.closedByClient || ev.code === WS_AUTH_REFUSED) {
+				// A refused handshake ends the socket as a close of the client's would.
+				this.closedByClient = true;
 				if (this.onclose) this.onclose(ev);
 				return;
 			}

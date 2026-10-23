@@ -58,12 +58,12 @@ def _get_auth_manager() -> Any:
 
 
 def _is_bulbe() -> bool:
-    """Check whether Bulbe mode is active."""
+    """Check whether Bulbe mode is active; a mode that cannot be read is taken for Bulbe."""
     try:
         from opti_oignon.security_mode import is_bulbe
         return is_bulbe()
-    except Exception:
-        return False
+    except Exception:  # noqa: BLE001 - an unknown mode never hands out the single-user admin
+        return True
 
 
 def _is_cookie_mode() -> bool:

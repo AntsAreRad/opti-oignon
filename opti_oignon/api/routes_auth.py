@@ -235,8 +235,7 @@ def _get_settings_store():
 def _get_2fa_manager():
     """Get the 2FA manager singleton.
 
-    Returns None if the auth_2fa module is not available,
-    allowing graceful degradation (login works without 2FA).
+    Returns None if the auth_2fa module is not available: login then refuses, as its second step does.
     """
     try:
         from opti_oignon.auth_2fa import two_factor_manager
@@ -349,13 +348,14 @@ def _is_remote_client(request: Request) -> bool:
     """Check if the request comes from a non-localhost client.
 
     Used to apply hardened cookie settings for remote sessions.
+    A guard that cannot be read takes the client for a remote one: its cookies are the hardened ones.
     """
     try:
         from opti_oignon.remote_session_guard import is_remote_request
         client_host = request.client.host if request.client else None
         return is_remote_request(client_host)
-    except ImportError:
-        return False
+    except Exception:  # noqa: BLE001 - an unknown client gets the hardened cookies
+        return True
 
 
 def _set_auth_cookies(
@@ -485,13 +485,12 @@ def _get_current_user(
     """
     mgr = _get_auth_manager()
 
-    # Audit fix: check Bulbe mode -- never bypass auth in Bulbe
-    _bulbe_active = False
+    # Audit fix: check Bulbe mode -- never bypass auth in Bulbe; a mode that cannot be read is taken for Bulbe.
     try:
         from opti_oignon.security_mode import is_bulbe
         _bulbe_active = is_bulbe()
-    except ImportError:
-        pass
+    except Exception:  # noqa: BLE001 - an unknown mode never bypasses authentication
+        _bulbe_active = True
 
     # Single-user mode: bypass authentication (except in Bulbe)
     if mgr.single_user_mode and not _bulbe_active:
@@ -529,6 +528,23 @@ def _get_current_user(
     return payload
 
 
+def _require_owner(current_user: dict = Depends(_get_current_user)):
+    """Require the session to be the platform owner's: the synthetic session of single-user mode, or an account the
+    store names an owner now (``AuthManager.owners``: an admin's or, while none is, the first registered) -- never the
+    role a token was signed with, which an account deleted or demoted keeps until it expires. 403 for any other
+    session and when the owner cannot be told; 503, as everywhere, when the account store is not there."""
+    if current_user.get("sub") == "local" and current_user.get("role") == "admin":
+        return current_user
+    mgr = _get_auth_manager()
+    try:
+        owner = mgr is not None and mgr.is_owner(current_user.get("sub") or "")
+    except Exception:  # noqa: BLE001 - an owner who cannot be told is no owner
+        owner = False
+    if not owner:
+        raise HTTPException(status_code=403, detail="Only the platform's owner may do this.")
+    return current_user
+
+
 def _require_admin(current_user: dict = Depends(_get_current_user)):
     """Require the current user to be an admin."""
     if current_user.get("role") != "admin":
@@ -554,14 +570,14 @@ async def authenticate_websocket(websocket) -> dict | None:
     Returns the validated payload dict, or None if auth fails.
     In single-user mode (non-Bulbe), returns a synthetic local user.
     """
-    # Audit fix: validate Origin header (CSWSH prevention)
-    origin = websocket.headers.get("origin", "")
-    if origin:
+    # Audit fix: validate Origin header (CSWSH prevention). No Origin at all is a client that is no browser; an
+    # opaque one -- "null", from a sandboxed frame or a file -- or one without a host is a page of anywhere, refused.
+    origin = websocket.headers.get("origin")
+    if origin is not None:
         from urllib.parse import urlparse
         parsed = urlparse(origin)
         origin_host = parsed.hostname or ""
-        # Allow localhost variants only (or no origin = non-browser client)
-        _ALLOWED_WS_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]", ""}
+        _ALLOWED_WS_HOSTS = {"localhost", "127.0.0.1", "::1", "[::1]"}
         if origin_host not in _ALLOWED_WS_HOSTS:
             logger.warning(
                 "WebSocket CSWSH blocked: origin=%s (host=%s)",
@@ -571,13 +587,12 @@ async def authenticate_websocket(websocket) -> dict | None:
 
     mgr = _get_auth_manager()
 
-    # Check Bulbe mode
-    _bulbe_active = False
+    # Check Bulbe mode; a mode that cannot be read is taken for Bulbe.
     try:
         from opti_oignon.security_mode import is_bulbe
         _bulbe_active = is_bulbe()
-    except ImportError:
-        pass
+    except Exception:  # noqa: BLE001 - an unknown mode never bypasses authentication
+        _bulbe_active = True
 
     # Single-user mode bypass (except in Bulbe)
     if mgr.single_user_mode and not _bulbe_active:
@@ -634,11 +649,12 @@ class AuthModeRequest(BaseModel):
 
 
 @router.put("/mode")
-def set_auth_mode(req: AuthModeRequest) -> dict:
+def set_auth_mode(req: AuthModeRequest, current_user: dict = Depends(_require_owner)) -> dict:
     """Toggle single-user mode (enable/disable authentication).
 
-    Allows users to switch auth on/off from the Settings UI.
-    Updates both the in-memory config and the YAML file on disk.
+    Allows the platform's owner to switch auth on/off from the Settings UI (403 for anyone else).
+    Updates both the in-memory config and the YAML file on disk, and answers the mode in force, not the one asked:
+    with more than one account the store keeps authentication on whatever the flag says.
     """
     from pathlib import Path
 
@@ -667,10 +683,11 @@ def set_auth_mode(req: AuthModeRequest) -> dict:
         logger.error("Failed to persist auth mode change: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to save config: {e}")
 
-    return {
-        "single_user_mode": req.single_user_mode,
-        "message": "Authentication " + ("disabled" if req.single_user_mode else "enabled"),
-    }
+    in_force = bool(mgr.single_user_mode)
+    message = "Authentication " + ("disabled" if in_force else "enabled")
+    if req.single_user_mode and not in_force:
+        message += ": it stays on while more than one account exists"
+    return {"single_user_mode": in_force, "message": message}
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -764,40 +781,51 @@ def login(req: LoginRequest, request: Request, response: Response) -> dict:
     if rate_limiter:
         rate_limiter.record_success(client_ip, req.username)
 
-    # Check if 2FA is active for this user
+    # Check if 2FA is active for this user. A second factor whose state cannot be read -- the two-factor module
+    # unreachable, its store unreadable -- refuses the login: it never lets one through without the factor it may
+    # require.
     tfa_mgr = _get_2fa_manager()
-    if tfa_mgr is not None:
-        try:
-            status = tfa_mgr.get_status(user.user_id)
-            if status.any_method_active:
-                # Build list of available methods
-                methods: list[str] = []
-                if status.webauthn_enabled:
-                    methods.append("webauthn")
-                if status.totp_enabled and status.totp_verified:
-                    methods.append("totp")
-                if status.recovery_codes_remaining > 0:
-                    methods.append("recovery")
-                if not methods:
-                    methods.append("totp")  # Fallback
+    if tfa_mgr is None:
+        logger.warning("2FA module unreachable: login refused for user=%s", user.user_id)
+        raise HTTPException(
+            status_code=503,
+            detail="The second factor cannot be checked here: login refused.",
+        )
+    try:
+        status = tfa_mgr.get_status(user.user_id)
+    except Exception as exc:  # noqa: BLE001 - an unreadable second factor refuses
+        logger.warning("2FA status unreadable (%s): login refused for user=%s", type(exc).__name__, user.user_id)
+        raise HTTPException(
+            status_code=503,
+            detail="The second factor's state cannot be read: login refused.",
+        ) from exc
+    if status.any_method_active:
+        # Build list of available methods
+        methods: list[str] = []
+        if status.webauthn_enabled:
+            methods.append("webauthn")
+        if status.totp_enabled and status.totp_verified:
+            methods.append("totp")
+        if status.recovery_codes_remaining > 0:
+            methods.append("recovery")
+        if not methods:
+            methods.append("totp")  # Fallback
 
-                challenge_id = _challenge_store.create(
-                    user_id=user.user_id, methods=methods,
-                )
-                logger.info(
-                    "2FA challenge issued: user=%s, methods=%s",
-                    user.user_id, methods,
-                )
-                return JSONResponse(
-                    status_code=200,
-                    content={
-                        "requires_2fa": True,
-                        "challenge_id": challenge_id,
-                        "methods": methods,
-                    },
-                )
-        except Exception as exc:
-            logger.warning("2FA status check failed, proceeding without 2FA: %s", exc)
+        challenge_id = _challenge_store.create(
+            user_id=user.user_id, methods=methods,
+        )
+        logger.info(
+            "2FA challenge issued: user=%s, methods=%s",
+            user.user_id, methods,
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "requires_2fa": True,
+                "challenge_id": challenge_id,
+                "methods": methods,
+            },
+        )
 
     # No 2FA required: issue tokens immediately
     mgr._log_audit(user.user_id, "login", "user", user.user_id)

@@ -8,7 +8,39 @@ cookie before allowing access. Only explicitly marked public endpoints
 (health check, login, static assets) bypass authentication.
 
 In Daily mode on localhost, authentication can be relaxed for
-convenience. In Bulbe mode, authentication is always enforced.
+convenience. In Bulbe mode, authentication is always enforced, and a
+security mode that cannot be read is taken for Bulbe mode.
+
+These checks fail closed. The middleware that requires a session checks
+every HTTP request, serves nothing but the public paths when the account
+store cannot be loaded, and the app does not start without it; every
+WebSocket checks its own handshake, the session and the page's origin: a
+page of another host, or of an opaque origin (`null`), is refused, and
+only a client that sends no origin, which is no browser, is taken
+without one. A login whose second factor cannot be checked -- the
+two-factor module unreachable, its store unreadable -- is refused (503),
+never let through without the factor. A ceremony that asks for a
+password -- approving plugins, leaving Bulbe mode, re-enabling search --
+takes the owner's, through the owner's own session: the owner is an
+admin's account or, while no account is an admin's, the first
+registered, so that an account registered later approves nothing with
+its own password, and the session of single-user mode stands for the
+owner when there is exactly one; the password is checked through the
+login limiter, one check at a time per account and off the event loop,
+so that a wrong one counts as a failed login. A wrong password refuses
+with a 403, a session that is not the owner's too, an account the
+limiter holds back, or one whose password is being checked already, with
+a 429, and a password that cannot be checked with a 503 -- with bcrypt
+5, one of more than 72 bytes among them; bcrypt 4 checks its first 72
+bytes instead --, and nothing is approved, confirmed or re-enabled. A
+remote-session guard that cannot be read gives the hardened cookies. Not
+yet: the login limiter, when it cannot be loaded, limits nothing, and
+the login itself checks tries sent together before it counts the first;
+a second factor enabled from the settings is enrolled under `admin`, an
+identity the login does not read; registration is open by default, so
+that on an install with no account the first to register is the owner;
+and a configuration that gives every new account the admin role
+(`users.default_role: admin`) makes each one an owner.
 
 
 ## User accounts
@@ -21,6 +53,12 @@ account has a role that determines access:
 | admin | Full access, user management, security settings |
 | user | Chat, RAG, plugins, own conversation history |
 | viewer | Read-only access to shared resources |
+
+The security ceremonies -- approving plugins, leaving Bulbe mode,
+re-enabling search -- and switching authentication on or off take the
+platform's owner rather than a role: an admin's account or, while no
+account is an admin's, the first registered. With no account at all, no
+ceremony passes until one is registered.
 
 
 ## Two-factor authentication (2FA)

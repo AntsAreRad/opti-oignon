@@ -21,6 +21,7 @@
 	} from '$lib/api/securityMode';
 	import type { SecurityModeStatus, PendingDowngrade, ModePolicy } from '$lib/api/securityMode';
 	import { securityModeStatus } from '$lib/stores/securityMode';
+	import { httpRefusal } from '$lib/switches/serverSwitch';
 
 	let status: SecurityModeStatus = { mode: 'daily', available: false };
 	let loading = true;
@@ -173,7 +174,7 @@
 				confirmError = result.message || 'Confirmation failed';
 			}
 		} catch (e: any) {
-			confirmError = e.message || 'Confirmation failed';
+			confirmError = httpRefusal(e)?.detail || e.message || 'Confirmation failed';
 		} finally {
 			actionLoading = false;
 		}

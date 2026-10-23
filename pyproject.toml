@@ -1098,6 +1098,29 @@ fail_under = 0
 # KY11, which asserts the rest of what it pins with every file of the
 # folder in the hash. C1, C2 and C3 stay in the tree word for word.
 #
+# c3 of tests/test_auth_2fa_routes_seam_contracts.py held that the password
+# step of the login degrades gracefully to direct tokens when the two-factor
+# module is unreachable: a second factor that could not be read let the
+# login through without it. The login now refuses then, with a 503, as it
+# does when the second factor's state cannot be read. c3 gives way to c6 of
+# the same file, which asserts the rest of what it pins and the refusal on
+# both steps. c3 stays in the tree word for word.
+#
+# a34 of tests/test_auth_core_contracts.py froze the account store's SQL
+# census at thirty sites. The store now reads the accounts that hold the
+# platform -- its owners, whose password the ceremonies ask for -- with one
+# constant statement more. a34 gives way to a36 of the same file, which
+# repeats its walk word for word and counts that site. a34 stays in the tree
+# word for word.
+#
+# ks3 of the web-gates suite held, in its c9, that the search re-enable
+# route checks a password of its own: the one of the account named `admin`,
+# for any session, through no limiter -- an oracle on that password. The
+# route now takes the owner's password through the owner's own session, by
+# the ceremonies' one check. ks3 gives way to ks9 of the same file, which
+# holds its other parts word for word and the route's new check in c9. ks3
+# stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1489,4 +1512,7 @@ addopts = """
     --deselect=tests/test_plugin_allowlist_contracts.py::test_c1_hash_discipline
     --deselect=tests/test_plugin_allowlist_contracts.py::test_c2_verifier_four_points
     --deselect=tests/test_plugin_allowlist_contracts.py::test_c3_batch_ceremony
+    --deselect=tests/test_auth_2fa_routes_seam_contracts.py::test_c3_missing_code_and_absent_second_factor_fail_correctly
+    --deselect=tests/test_search_gates_contracts.py::test_ks3_the_engaged_switch_survives_a_restart_and_fails_closed
+    --deselect=tests/test_auth_core_contracts.py::test_a34_sql_is_parameterised_never_f_string
 """

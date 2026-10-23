@@ -20,6 +20,7 @@
   } from '$lib/api/pluginAllowlist';
   import type { AllowlistStatus, AllowlistEntry, BatchManifest } from '$lib/api/pluginAllowlist';
   import { isBulbe } from '$lib/stores/securityMode';
+  import { httpRefusal } from '$lib/switches/serverSwitch';
 
   let status: AllowlistStatus = {
     available: false,
@@ -83,7 +84,7 @@
         approveError = result.message || 'Batch approval failed';
       }
     } catch (e: any) {
-      approveError = e.message || 'Batch approval failed';
+      approveError = httpRefusal(e)?.detail || e.message || 'Batch approval failed';
     } finally {
       actionLoading = false;
     }

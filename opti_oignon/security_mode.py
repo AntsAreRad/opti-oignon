@@ -413,6 +413,12 @@ def _read_lockfile() -> dict[str, str]:
         return {}
 
 
+def _same_text(given: str, held: str) -> bool:
+    """Whether two texts are the same, compared in constant time on their UTF-8 bytes -- a text beyond ASCII
+    included, on which ``hmac.compare_digest`` raises for ``str``: one that differs is a mismatch, never an error."""
+    return _hmac.compare_digest(given.encode("utf-8", "surrogatepass"), held.encode("utf-8", "surrogatepass"))
+
+
 def _verify_lockfile(fields: dict[str, str], key) -> bool:
     """Verify the HMAC in the lockfile fields.
 
@@ -429,7 +435,7 @@ def _verify_lockfile(fields: dict[str, str], key) -> bool:
     except ValueError:
         return False
     expected = _compute_lockfile_hmac(mode, ts, user_id, key)
-    return _hmac.compare_digest(expected, stored_hmac)
+    return _same_text(stored_hmac, expected)
 
 
 # ---------------------------------------------------------------------------
@@ -1087,13 +1093,14 @@ class SecurityModeManager:
         a. Valid session (checked by caller / route auth)
         b. Matching request_id
         c. Correct visual code (human typed from screen)
-        d. Current password (verified by caller)
-        e. 2FA code if 2FA is active (verified by caller)
-        f. Cooldown elapsed (>= 5 minutes since request)
+        d. The owner's password, through the owner's own session (checked
+           by the caller, ``ceremony_factors``)
+        e. Cooldown elapsed (>= 5 minutes since request)
 
-        The password and 2FA verification are done by the caller
-        (API route) before calling this method.  This method only
-        checks the ceremony-specific factors.
+        The password is checked by the caller (API route) before this
+        method is called; a second factor is not asked yet, and the
+        ``password`` and ``two_fa_code`` given here are not read.  This
+        method checks the ceremony-specific factors only.
         """
         req = self._pending_downgrade
         if not req:
@@ -1134,7 +1141,7 @@ class SecurityModeManager:
             }
 
         # Check request_id
-        if not _hmac.compare_digest(request_id, req.request_id):
+        if not _same_text(request_id, req.request_id):
             _audit_log(
                 "downgrade_invalid_request_id",
                 severity="WARNING",
@@ -1166,7 +1173,7 @@ class SecurityModeManager:
             }
 
         # Check visual code
-        if not _hmac.compare_digest(visual_code, req.visual_code):
+        if not _same_text(visual_code, req.visual_code):
             _audit_log(
                 "downgrade_invalid_code",
                 severity="WARNING",

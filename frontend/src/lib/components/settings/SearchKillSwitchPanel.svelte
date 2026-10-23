@@ -23,6 +23,7 @@
   } from '$lib/api/searchKillSwitch';
   import type { KillSwitchStatus } from '$lib/api/searchKillSwitch';
   import { isBulbe } from '$lib/stores/securityMode';
+  import { httpRefusal } from '$lib/switches/serverSwitch';
 
   let status: KillSwitchStatus = { available: false, search_enabled: true };
   let loading = true;
@@ -152,7 +153,7 @@
         confirmError = result.message || 'Confirmation failed';
       }
     } catch (e: any) {
-      confirmError = e.message || 'Confirmation failed';
+      confirmError = httpRefusal(e)?.detail || e.message || 'Confirmation failed';
     } finally {
       actionLoading = false;
     }

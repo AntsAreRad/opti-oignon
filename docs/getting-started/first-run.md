@@ -59,7 +59,9 @@ To enable full security (recommended for any networked use):
 
 1. Go to **Workshop > Security > Authentication mode** and turn on
    multi-user mode
-2. Create an admin account with a strong password
+2. Create your account first, with a strong password: the first account
+   registered is the platform's owner -- the one whose password the
+   security ceremonies ask for -- as long as no account is an admin's
 3. Optionally enable 2FA (TOTP or WebAuthn/FIDO2), in
    **Preferences > Account**
 4. Consider enabling **Bulbe mode** for maximum security

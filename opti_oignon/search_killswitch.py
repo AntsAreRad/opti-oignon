@@ -24,8 +24,9 @@ own that records the engaged state; until then it holds even after another
 process records a re-enable.
 
 Re-enabling needs the visual code and the cooldown, checked here, and the
-administrator's password, checked by the API route, which refuses when it
-cannot read the auth manager. The visual code is served over the API, so it
+owner's password, through the owner's own session and the login limiter,
+checked by the API route (``ceremony_factors``), which refuses a password it
+cannot check. A kill ends a re-enable asked before it. The visual code is served over the API, so it
 proves an API session, not physical presence. The 2FA code the route accepts
 is not verified. In Bulbe mode re-enabling is refused.
 
@@ -432,8 +433,16 @@ class SearchKillSwitch:
         kill retries the write.
         """
         with self._lock:
+            # A kill, even of a switch already engaged, ends a re-enable asked before it: confirming that request
+            # would undo the kill that came after it.
+            cancelled = self._state.reenable_pending
+            self._state.reenable_pending = False
+            self._state.reenable_request_id = ""
+            self._state.reenable_visual_code = ""
             engaged, record = self._read_record()
             if engaged and record is not None and not self._latched:
+                if cancelled:
+                    self._audit_cancelled(user_id, reason)
                 return {
                     "success": True,
                     "already_killed": True,
@@ -462,6 +471,8 @@ class SearchKillSwitch:
                 # The record holds the state now.
                 self._latched = False
 
+        if cancelled:
+            self._audit_cancelled(user_id, reason)
         try:
             from opti_oignon.security_mode import _audit_log
             _audit_log(
@@ -487,6 +498,14 @@ class SearchKillSwitch:
                 "and will not survive a restart."
             )
         return {"success": True, "persisted": persisted, "message": message}
+
+    @staticmethod
+    def _audit_cancelled(user_id: str, reason: str) -> None:
+        try:
+            from opti_oignon.security_mode import _audit_log
+            _audit_log("search_reenable_cancelled_by_kill", severity="WARNING", user_id=user_id, reason=reason)
+        except Exception:
+            pass
 
     def request_reenable(self, user_id: str) -> dict[str, Any]:
         """Start the re-enable ceremony.
@@ -550,11 +569,17 @@ class SearchKillSwitch:
     ) -> dict[str, Any]:
         """Confirm the re-enable ceremony and record it.
 
-        Password and 2FA are the caller's (API route). This is the only
-        writer that records "not engaged"; when that cannot be recorded,
-        search stays disabled.
+        The password is the caller's: the API route takes the owner's,
+        through the ceremonies' one check; no second factor is read yet.
+        This is the only writer that records "not engaged"; when that cannot
+        be recorded, search stays disabled.
         """
         import hmac as _hmac
+
+        def same(given: str, held: str) -> bool:
+            # On bytes: a text beyond ASCII is a mismatch, never an error.
+            return _hmac.compare_digest(str(given).encode("utf-8", "surrogatepass"),
+                                        str(held).encode("utf-8", "surrogatepass"))
 
         if not self._state.reenable_pending:
             return {
@@ -577,7 +602,7 @@ class SearchKillSwitch:
             pass
 
         # Verify request_id
-        if not _hmac.compare_digest(request_id, self._state.reenable_request_id):
+        if not same(request_id, self._state.reenable_request_id):
             return {
                 "success": False,
                 "error": "invalid_request",
@@ -595,7 +620,7 @@ class SearchKillSwitch:
             }
 
         # Verify visual code
-        if not _hmac.compare_digest(visual_code, self._state.reenable_visual_code):
+        if not same(visual_code, self._state.reenable_visual_code):
             return {
                 "success": False,
                 "error": "invalid_code",
@@ -603,6 +628,14 @@ class SearchKillSwitch:
             }
 
         with self._lock:
+            # Asked again under the lock: a kill that came while the factors were checked ended this request.
+            if not self._state.reenable_pending or not same(request_id, self._state.reenable_request_id):
+                return {
+                    "success": False,
+                    "error": "no_pending_request",
+                    "message": "No pending re-enable request: a kill ended it.",
+                }
+
             def build(on_disk: bool, current: dict | None) -> dict[str, Any]:
                 return self._make_record(
                     engaged=False,
