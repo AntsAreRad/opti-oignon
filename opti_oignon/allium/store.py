@@ -640,7 +640,7 @@ def _default_anchor_secret():
     except Exception:  # noqa: BLE001 - a key module that cannot load cannot say there is no key
         return ("unreadable", None, NOKEY)
     try:
-        configured = bool(os.environ.get(encryption._ENV_KEY_NAME)) or encryption._DEFAULT_KEYFILE.exists()
+        configured = bool(encryption._secret(encryption._ENV_KEY_NAME)) or encryption._DEFAULT_KEYFILE.exists()
     except Exception:  # noqa: BLE001 - a missing attribute reads as configured
         configured = True
     try:

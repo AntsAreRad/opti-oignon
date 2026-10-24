@@ -94,7 +94,9 @@ def main(argv: list[str] | None = None) -> int:
         print(_USAGE, file=sys.stderr)
         return CANNOT
     # The gate answers for the passphrase on its input alone, never for one in its environment.
-    os.environ.pop(_PASSPHRASE_VAR, None)
+    from opti_oignon.process_secrets import withdraw
+
+    withdraw(_PASSPHRASE_VAR)
     try:
         if args == ["wrapped"]:
             return YES if wrapped() else NO

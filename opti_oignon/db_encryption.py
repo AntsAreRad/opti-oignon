@@ -188,6 +188,9 @@ def _get_db_encryption_key() -> bytes | None:
             raw_key = master_key.as_bytes() if hasattr(master_key, "as_bytes") else master_key
             return _db_key(raw_key)
     except Exception as exc:
+        # A held secret wiped at exit is no key: a store opened without one would be opened in plaintext.
+        if type(exc).__name__ == "SecretWiped" and type(exc).__module__ == "opti_oignon.process_secrets":
+            raise
         logger.debug("Failed to derive DB encryption key: %s", exc)
     return None
 
@@ -973,7 +976,7 @@ def _environment_key_refused() -> Any:
     than the one the variable seems to set, and the command would say the key is the variable's."""
     from opti_oignon import encryption
 
-    value = os.environ.get(encryption._ENV_KEY_NAME)
+    value = encryption._secret(encryption._ENV_KEY_NAME)
     if not value:
         return None
     try:
@@ -1005,7 +1008,7 @@ def _write_master(master: bytes, key: bytes, lock_before: Any = None) -> None:
     ``lock_before``, when it does not. A key file or a lockfile that cannot be written refuses, by name."""
     from opti_oignon import encryption
 
-    passphrase = os.environ.get("OPTI_KEYFILE_PASSPHRASE")
+    passphrase = encryption._secret(encryption._ENV_KEYFILE_PASS)
     try:
         encryption.save_keyfile(master, kdf_name="random", passphrase=passphrase, allow_unprotected=passphrase is None)
     except encryption.KeyfileExists:
@@ -1481,15 +1484,18 @@ def _encrypt(places: Any, proc: Any, noted: list) -> dict[str, Any]:
             _fsync_dir(place)
         except OSError:
             unsynced.append(str(place))
+    from opti_oignon import encryption
+
+    environment_key = encryption._secret(encryption._ENV_KEY_NAME)
+    passphrase = encryption._secret(encryption._ENV_KEYFILE_PASS)
     return {
         "encrypted": [store.name for store, _copy in copies],
         "already": [path.name for path in stores if path not in plain],
         "plaintext_copies": [str(folder) for folder in folders.values()],
         "earlier_copies": [str(folder) for folder in earlier],
         "key": "made" if master is not None else "existing",
-        "key_file": ("environment" if os.environ.get("OPTI_ENCRYPTION_KEY") else
-                     "wrapped" if os.environ.get("OPTI_KEYFILE_PASSPHRASE") else "file"),
-        "key_path": "" if os.environ.get("OPTI_ENCRYPTION_KEY") else str(_key_file()),
+        "key_file": ("environment" if environment_key else "wrapped" if passphrase else "file"),
+        "key_path": "" if environment_key else str(_key_file()),
         "places": [str(place) for place in (_places() if places is None else places)],
         "left": alone,
         "plaintext_others": [str(path) for path in others],

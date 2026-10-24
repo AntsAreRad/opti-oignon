@@ -19,6 +19,9 @@ endpoint both rely on:
     tips; a crashing detector degrades to a warning, never an exception.
   * Contract 5 -- serialization: the aggregated report serializes to
     JSON with coherent pass/fail counters.
+  * Contract 9 -- Contract 5 over every check the runner calls, read from
+    its source, the ninth -- the platform's secrets out of the backend's
+    environment -- included. It supersedes Contract 5, deselected by name.
 
 Local-only (the public distribution ships no tests). Runs under pytest
 or the __main__ runner. The checklist module is loaded on the shared
@@ -26,6 +29,7 @@ isolation window; the guard modules it imports lazily are seeded as
 stand-ins so every clause is deterministic.
 """
 
+import ast
 import json
 import sys
 import traceback
@@ -267,6 +271,46 @@ def test_c5_report_serializes_with_coherent_counters():
             )
         finally:
             undo()
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# Contract 9 -- Contract 5 over every check the runner calls (supersedes it)
+# ---------------------------------------------------------------------------
+def _runner_roster():
+    """The checks run_startup_checks calls, read from its source: a roster that cannot go stale."""
+    tree = ast.parse(source("startup_checks.py").read_text(encoding="utf-8"))
+    runner = next(node for node in ast.walk(tree)
+                  if isinstance(node, ast.FunctionDef) and node.name == "run_startup_checks")
+    return tuple(sorted({call.func.id for call in ast.walk(runner)
+                         if isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                         and call.func.id.startswith("_check_")}))
+
+
+def test_c9_report_serializes_with_coherent_counters_over_every_check_the_runner_calls():
+    roster = _runner_roster()
+    assert set(_CHECK_NAMES) < set(roster) and "_check_process_secrets" in roster, roster
+    mod, restore = _load_checklist_module()
+    try:
+        saved = {name: getattr(mod, name) for name in roster}
+        for name in roster:
+            failing = name == "_check_luks"
+            setattr(mod, name, lambda _n=name, _failing=failing: mod.CheckItem(
+                name=_n, passed=not _failing, severity="critical" if _failing else "info",
+                detail="stub critical failure" if _failing else "stub pass", score_impact=-15 if _failing else 0))
+        mod.clear_cache()
+        try:
+            payload = mod.run_startup_checks(force=True).to_dict()
+            json.dumps(payload)
+            assert payload["check_count"] == len(roster)
+            assert payload["failed_count"] == 1
+            assert payload["passed_count"] == len(roster) - 1
+            assert payload["passed_count"] + payload["failed_count"] == payload["check_count"]
+        finally:
+            for name, check in saved.items():
+                setattr(mod, name, check)
+            mod.clear_cache()
     finally:
         restore()
 

@@ -182,12 +182,15 @@ def _check_lsblk() -> dict[str, Any] | None:
 
     Returns dict with 'encrypted' bool and 'devices' list, or None on failure.
     """
+    from opti_oignon.process_secrets import child_env
+
     try:
         result = subprocess.run(
             ["lsblk", "--json", "-o", "NAME,TYPE,FSTYPE,MOUNTPOINT"],
             capture_output=True,
             text=True,
             timeout=10,
+            env=child_env(),
         )
         if result.returncode != 0:
             return None
@@ -360,12 +363,15 @@ def _check_dmsetup() -> dict[str, Any] | None:
 
     Requires root. Returns dict or None.
     """
+    from opti_oignon.process_secrets import child_env
+
     try:
         result = subprocess.run(
             ["dmsetup", "table", "--target", "crypt"],
             capture_output=True,
             text=True,
             timeout=10,
+            env=child_env(),
         )
         if result.returncode != 0:
             return None

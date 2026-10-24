@@ -82,6 +82,9 @@ object (the production one when none is given).
     the data paths reached and the mirror's listing are the frozen ones. In
     a process that configures no logging, no platform log record reaches
     either stream while a garden command runs.
+  * AF15 -- AF14, the platform's holder of its secrets among the modules:
+    the being's store asks it whether a master key is set. It supersedes
+    AF14.
 
 Local-only (the public distribution ships no tests). The platform and the
 terminal load through the shared isolation window with the platform's
@@ -121,6 +124,7 @@ BUDGET_S = {
     "test_af12_the_lab_shows_the_laws_and_keep_laws_writes_only_what_the_diff_confirmed": 2.0,
     "test_af13_the_production_wiring_passes_the_single_user_reader_and_nothing_else": 2.0,
     "test_af14_the_production_look_touches_only_the_frozen_modules_and_data_paths": 2.0,
+    "test_af15_the_production_look_touches_only_the_frozen_modules_the_holder_of_the_secrets_included": 2.0,
 }
 PACKAGE = garden.REPO / "opti_oignon"
 TESTS = garden.REPO / "tests"
@@ -1924,6 +1928,67 @@ def test_af14_the_production_look_touches_only_the_frozen_modules_and_data_paths
     assert "opti_oignon.auth" not in project
     assert project == PRODUCTION_LOOK_MODULES, sorted(project ^ PRODUCTION_LOOK_MODULES)
     assert report["planted"] == 1 and "data/planted-" + garden.canary(p, "af14") in report["paths"]
+    paths = tuple(path for path in report["paths"] if not path.startswith("data/planted-"))
+    assert paths == PRODUCTION_LOOK_PATHS, paths
+    assert tuple(report["listing"]) == PRODUCTION_LOOK_MIRROR, report["listing"]
+    assert list(cwd.iterdir()) == [], "nothing written where it ran"
+    assert garden.shows(out, p, "doctrine"), out
+
+    # The children import the tree under test, never a copy an install points at.
+    probe = garden.child(tmp_path, 'import json, sys, opti_oignon\n'
+                                   'sys.stderr.write(json.dumps({"package": opti_oignon.__file__}) + "\\n")\n',
+                         cwd=tmp_path.joinpath("cwd-package"))
+    code, _out, err, where = garden.finish(probe)
+    assert code == 0 and where is not None, err[-1200:]
+    assert Path(where["package"]).resolve().is_relative_to(Path(garden.REPO).resolve()), where
+
+    # No log record reaches the terminal while a garden command runs; outside one, the same channel is open.
+    code, _out, err, logs = garden.finish(logging_child)
+    assert code == 0 and logs is not None, err[-1200:]
+    assert logs["handlers"] == 0, "the child configures no logging, as oo does not"
+    for moment in ("before", "after"):
+        assert "a record no handler takes" in logs[moment][2], ("witness: the last resort prints a record", moment)
+    assert "PLAINTEXT" in logs["plaintext"][2], "witness: the connector's warning reaches stderr outside a command"
+    assert logs["mirror"] is True, "the auth store the commands read is the mirror's"
+    assert logs["unreadable"] == [0, garden.printed(p, say("status.disabled.unreadable"), say("path.line", path=str(quiet)),
+                                                   say("status.disabled.kept"), say("doctrine")), ""], logs["unreadable"]
+    assert logs["show"] == [2, garden.printed(p, say("status.awaiting_soil"), say("doctrine")), ""], logs["show"]
+    code, stdout, stderr = logs["care"]
+    assert (code, stdout) == (1, "") and stderr.startswith("Error: "), logs["care"]
+    assert garden.flat(stderr) == " ".join(say("status.awaiting_soil").text.split()), logs["care"]
+
+
+
+# ---------------------------------------------------------------------------
+# AF15 -- AF14, the platform's holder of its secrets among the modules
+# ---------------------------------------------------------------------------
+# The being's store asks whether a master key is set through encryption._secret, which reads the platform's
+# holder of its secrets: one module more in the production look. The rest is AF14's, word for word.
+PRODUCTION_LOOK_MODULES_HELD = PRODUCTION_LOOK_MODULES | {"opti_oignon.process_secrets"}
+
+
+def test_af15_the_production_look_touches_only_the_frozen_modules_the_holder_of_the_secrets_included(
+        p, tmp_path):
+    say = p.wording.say
+    config = tmp_path.joinpath("on", "allium.yaml")
+    config.parent.mkdir()
+    cwd = tmp_path.joinpath("cwd-production")
+    process = garden.child(tmp_path, _code(CHILD_PRODUCTION, tests=str(TESTS), repo=str(garden.REPO),
+                                           canary=garden.canary(p, "af15"), config=str(config)), cwd=cwd)
+    quiet = tmp_path.joinpath("logs", "allium.yaml")
+    quiet.parent.mkdir()
+    logging_child = garden.child(tmp_path, _code(CHILD_LOGS, tests=str(TESTS), repo=str(garden.REPO),
+                                                 canary=garden.canary(p, "af15"), config=str(quiet)),
+                                 cwd=tmp_path.joinpath("cwd-logs"))
+    code, out, err, report = garden.finish(process)
+    assert code == 0 and report is not None, err[-1200:]
+    assert report["codes"] == [2, 2, 1], report["codes"]
+    assert garden.shows(out, p, "status.awaiting_soil"), out
+    assert garden.says(err, p, "status.awaiting_soil"), err[-1200:]
+    project = set(report["project"])
+    assert "opti_oignon.auth" not in project
+    assert project == PRODUCTION_LOOK_MODULES_HELD, sorted(project ^ PRODUCTION_LOOK_MODULES_HELD)
+    assert report["planted"] == 1 and "data/planted-" + garden.canary(p, "af15") in report["paths"]
     paths = tuple(path for path in report["paths"] if not path.startswith("data/planted-"))
     assert paths == PRODUCTION_LOOK_PATHS, paths
     assert tuple(report["listing"]) == PRODUCTION_LOOK_MIRROR, report["listing"]

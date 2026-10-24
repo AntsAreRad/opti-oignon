@@ -440,6 +440,20 @@ def derive_key_from_passphrase(
 # Keyfile Management
 # ============================================================================
 
+def _secret(name: str) -> str | None:
+    """The platform's secret ``name`` as this process holds it: the environment's, else the value taken out of
+    it at start (``opti_oignon.process_secrets``); raises ``SecretWiped`` once a held value is wiped."""
+    from opti_oignon.process_secrets import secret
+
+    return secret(name)
+
+
+def _wiped(exc: BaseException) -> bool:
+    """Whether ``exc`` says a held secret was wiped: a third state, never read as "no key". Asked by its class's
+    name, so that a caller never imports the holder to ask."""
+    return type(exc).__name__ == "SecretWiped" and type(exc).__module__ == "opti_oignon.process_secrets"
+
+
 def _chmod_600(fpath: Path) -> None:
     """Set 0600 on the keyfile (owner read/write only); warn on failure."""
     try:
@@ -660,7 +674,7 @@ def save_keyfile(
 
     fpath = path or _DEFAULT_KEYFILE
 
-    effective_pass = passphrase or os.environ.get(_ENV_KEYFILE_PASS)
+    effective_pass = passphrase or _secret(_ENV_KEYFILE_PASS)
 
     if effective_pass:
         kek, kek_salt, kek_kdf = derive_key_from_passphrase(effective_pass)
@@ -739,7 +753,7 @@ def load_keyfile(
     payload = _envelope(text)
 
     if payload is not None:
-        effective_pass = passphrase or os.environ.get(_ENV_KEYFILE_PASS)
+        effective_pass = passphrase or _secret(_ENV_KEYFILE_PASS)
         if not effective_pass:
             raise ValueError(
                 "Keyfile is passphrase-protected (envelope) but no passphrase "
@@ -795,7 +809,7 @@ def get_encryption_key() -> SecureBytes | None:
       2. Keyfile at data/.keyfile
       3. None (encryption disabled)
     """
-    env_key = os.environ.get(_ENV_KEY_NAME)
+    env_key = _secret(_ENV_KEY_NAME)
     if env_key:
         try:
             raw = base64.urlsafe_b64decode(env_key)
@@ -813,6 +827,8 @@ def get_encryption_key() -> SecureBytes | None:
     except FileNotFoundError:
         pass
     except Exception as e:
+        if _wiped(e):
+            raise
         logger.warning("Failed to load keyfile: %s", e)
 
     return None
@@ -1044,7 +1060,7 @@ class EncryptionManager:
         """
         try:
             key = generate_key()
-            env_pass = os.environ.get(_ENV_KEYFILE_PASS)
+            env_pass = _secret(_ENV_KEYFILE_PASS)
             save_keyfile(
                 key,
                 kdf_name="random",
@@ -1068,7 +1084,7 @@ class EncryptionManager:
         """Get detailed encryption status."""
         cfg = _load_encryption_config()
         keyfile_exists = _DEFAULT_KEYFILE.exists()
-        env_key_set = bool(os.environ.get(_ENV_KEY_NAME))
+        env_key_set = bool(_secret(_ENV_KEY_NAME))
 
         return {
             "enabled": self.enabled,

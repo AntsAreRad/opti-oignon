@@ -122,7 +122,8 @@ def _world(tmp_path, monkeypatch, *, mode_imports=True):
     pytest.importorskip("cryptography")
     for name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME"):
         monkeypatch.delenv(name, raising=False)
-    names = ("encryption", "security_mode", "plugin_allowlist") if mode_imports else ("encryption", "plugin_allowlist")
+    names = (("process_secrets", "encryption", "security_mode", "plugin_allowlist") if mode_imports
+             else ("process_secrets", "encryption", "plugin_allowlist"))
     blocked = ("opti_oignon.secure_bytes",) + (() if mode_imports else ("opti_oignon.security_mode",))
     loaded, restore = isolate(targets={f"opti_oignon.{name}": source(f"{name}.py") for name in names},
                               blocked=blocked)
@@ -512,7 +513,8 @@ def _provenance(tmp_path, monkeypatch):
         raise RuntimeError("no post-quantum keypair in these contracts")
 
     pqc.load_pqc_keypair = no_keypair
-    loaded, restore = isolate(targets={"opti_oignon.encryption": source("encryption.py"), PROV: source("model_provenance.py")},
+    loaded, restore = isolate(targets={"opti_oignon.process_secrets": source("process_secrets.py"), "opti_oignon.encryption": source("encryption.py"),
+                                       PROV: source("model_provenance.py")},
                               blocked=("opti_oignon.secure_bytes", "opti_oignon.security_mode"),
                               seeded={"opti_oignon.pqc_signatures": pqc})
     try:

@@ -128,6 +128,16 @@ jobs:
       - name: Run egress census guard (every network sink gated, owed or exempt)
         run: python .github/scripts/egress_census_guard.py
 
+      # The backend takes its secrets out of its environment first thing, and
+      # refuses at run time the starts Python audits that would hand a child
+      # one, or a shell variable, and either put back in its environment; this
+      # census, twin of the one above, checks over the spellings it lists that
+      # every program the package starts directly is handed an environment
+      # built for it, that every start no environment can reach is listed with
+      # what proves it, and that a secret's name appears only where it may.
+      - name: Run child environment census guard (no child handed the platform's secrets)
+        run: python .github/scripts/child_env_census_guard.py
+
   # -------------------------------------------------------------------
   # Isolation -- the test windows, under BOTH install layouts
   #

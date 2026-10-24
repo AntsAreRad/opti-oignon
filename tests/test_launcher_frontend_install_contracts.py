@@ -144,7 +144,8 @@ def _launch(root, run):
     """Drives the real ``launch`` over the project at ``root`` until it frees
     the ports. Returns ``"ports"`` when it got there, or the exit code it
     stopped with."""
-    loaded, restore = isolate(targets={"opti_oignon.ui": _UI})
+    loaded, restore = isolate(targets={"opti_oignon.process_secrets": _UI.with_name("process_secrets.py"),
+                                       "opti_oignon.ui": _UI})
     try:
         ui = loaded["opti_oignon.ui"]
         ui._find_project_root = lambda: root

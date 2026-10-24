@@ -350,7 +350,7 @@ def _governor(rg, tmp, *, profile, body="enabled: true\ntotal_vram_gb: null\n", 
 
 
 def test_hw1_the_nvidia_smi_reader_returns_every_card_and_the_overlay_keeps_the_first():
-    lm = _open((_LM, source("live_metrics.py")))[_LM]
+    lm = _open(("opti_oignon.process_secrets", source("process_secrets.py")), (_LM, source("live_metrics.py")))[_LM]
     calls = []
 
     def run(argv, **kwargs):

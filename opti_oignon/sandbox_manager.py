@@ -455,12 +455,15 @@ def _detect_bwrap() -> tuple[bool, str]:
         (available, message) -- message is version string on success,
         or failure reason on failure.
     """
+    from opti_oignon.process_secrets import child_env
+
     try:
         # Step 1: check binary exists and get version
         ver_result = subprocess.run(
             ["bwrap", "--version"],
             capture_output=True,
             timeout=5,
+            env=child_env(),
         )
         if ver_result.returncode != 0:
             return False, "bwrap binary returned non-zero on --version"
@@ -470,8 +473,9 @@ def _detect_bwrap() -> tuple[bool, str]:
         # Step 2: functional test -- actually create a namespace
         # This catches environments where bwrap exists but namespaces
         # are blocked (e.g., unprivileged Docker containers).
-        # We bind only the minimum needed to run /bin/echo (or /usr/bin/echo).
-        test_cmd = ["bwrap"]
+        # We bind only the minimum needed to run /bin/echo (or /usr/bin/echo),
+        # in an environment cleared as every sandbox run's is.
+        test_cmd = ["bwrap", "--clearenv"]
         for path in ["/usr", "/bin", "/lib", "/lib64"]:
             if os.path.exists(path):
                 test_cmd.extend(["--ro-bind", path, path])
@@ -491,6 +495,7 @@ def _detect_bwrap() -> tuple[bool, str]:
             test_cmd,
             capture_output=True,
             timeout=10,
+            env=child_env(),
         )
 
         if test_result.returncode != 0:
@@ -1392,6 +1397,19 @@ def validate_sandbox_path(
 # ---------------------------------------------------------------------------
 # Bwrap command builder
 # ---------------------------------------------------------------------------
+
+def _tempdir_env(workspace: str) -> dict[str, str]:
+    """The environment of a command run without bubblewrap: a minimal PATH and
+    the workspace, nothing of this process's -- no secret, no variable a shell
+    runs code from (S-01 / C-01)."""
+    return {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "HOME": workspace,
+        "TMPDIR": workspace,
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+    }
+
 
 def _build_bwrap_command(
     command: str,
@@ -3440,6 +3458,26 @@ class SandboxManager:
             )
             return result
 
+        # Without bubblewrap the command shares this process's view of /proc:
+        # a secret still in the environment the backend was started with is
+        # readable there, whatever environment the command is given.
+        if backend != IsolationBackend.BWRAP:
+            from opti_oignon.process_secrets import unwiped_refusal
+
+            refusal = unwiped_refusal()
+            if refusal:
+                result = CommandResult(
+                    blocked=True,
+                    block_reason=f"Code execution without bubblewrap is BLOCKED: {refusal}",
+                    isolation_backend="blocked",
+                )
+                self._audit.log_command(session_id, command, result)
+                logger.warning(
+                    "Execution blocked in session %s: a secret is still in this process's initial environment",
+                    session_id,
+                )
+                return result
+
         # Validate command (defense-in-depth on ALL backends)
         is_safe, reason = self._validator.validate(command)
         if not is_safe:
@@ -3639,6 +3677,8 @@ class SandboxManager:
         single, gated provision seam. Seccomp and the resource caps apply to
         the network-on run unchanged.
         """
+        from opti_oignon.process_secrets import child_env
+
         config = self.effective_config
         seccomp_file = None
         seccomp_fd: int | None = None
@@ -3701,6 +3741,9 @@ class SandboxManager:
                 session_id=session_id,
                 preexec_fn=preexec,
                 pass_fds=pass_fds,
+                # bwrap and systemd-run themselves: the command inside starts
+                # from the cleared environment _build_bwrap_command sets.
+                env=child_env(),
             )
             return self._process_output(proc, timeout)
 
@@ -3737,14 +3780,7 @@ class SandboxManager:
         Spawns through ``_spawn_tracked`` so the stop path works on
         this backend too (same registry, same group kill).
         """
-        # Build restricted environment: minimal PATH, no dangerous vars
-        env = {
-            "PATH": "/usr/local/bin:/usr/bin:/bin",
-            "HOME": workspace,
-            "TMPDIR": workspace,
-            "LANG": "C.UTF-8",
-            "LC_ALL": "C.UTF-8",
-        }
+        env = _tempdir_env(workspace)
 
         # Try to use unshare for network isolation (works without root)
         cmd_parts = self._build_tempdir_command(command)
@@ -3793,6 +3829,8 @@ class SandboxManager:
     @staticmethod
     def _detect_unshare() -> bool:
         """Detect if unshare --user --net works on this system."""
+        from opti_oignon.process_secrets import child_env
+
         try:
             result = subprocess.run(
                 ["unshare", "--user", "--net", "--",
@@ -3800,6 +3838,7 @@ class SandboxManager:
                 capture_output=True,
                 text=True,
                 timeout=5,
+                env=child_env(),
             )
             if result.returncode == 0 and "unshare-ok" in result.stdout:
                 logger.info(

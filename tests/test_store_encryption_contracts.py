@@ -278,7 +278,8 @@ def _window(tmp_path, monkeypatch, *, routes=False):
     pytest.importorskip("sqlcipher3")
     for name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME"):
         monkeypatch.delenv(name, raising=False)
-    targets = {"opti_oignon.encryption": source("encryption.py"),
+    targets = {"opti_oignon.process_secrets": source("process_secrets.py"),
+               "opti_oignon.encryption": source("encryption.py"),
                "opti_oignon.db_encryption": source("db_encryption.py")}
     if routes:
         targets["opti_oignon.api.routes_security"] = source("api", "routes_security.py")
@@ -1181,7 +1182,8 @@ def _sandbox_window(tmp_path):
     copy.write_bytes(source("sandbox_manager.py").read_bytes())
     db_utils = types.ModuleType("opti_oignon.db_utils")
     db_utils.safe_connect = lambda path, *args, **kwargs: sqlite3.connect(path)
-    loaded, restore = isolate(targets={"opti_oignon.sandbox_manager": copy}, seeded={"opti_oignon.db_utils": db_utils})
+    loaded, restore = isolate(targets={"opti_oignon.process_secrets": source("process_secrets.py"), "opti_oignon.sandbox_manager": copy},
+                              seeded={"opti_oignon.db_utils": db_utils})
     sm = loaded["opti_oignon.sandbox_manager"]
     if sm.sandbox_manager is not None:
         restore()

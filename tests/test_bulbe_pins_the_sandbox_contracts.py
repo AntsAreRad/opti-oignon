@@ -100,7 +100,7 @@ def _window(tmp_path, mode=None, seccomp_builds=True):
     }
     if mode is not None:
         seeded["opti_oignon.security_mode"] = mode.module()
-    loaded, restore = isolate(targets={"opti_oignon.sandbox_manager": copy}, seeded=seeded)
+    loaded, restore = isolate(targets={"opti_oignon.process_secrets": source("process_secrets.py"), "opti_oignon.sandbox_manager": copy}, seeded=seeded)
     sm = loaded["opti_oignon.sandbox_manager"]
     if sm.sandbox_manager is not None:
         restore()

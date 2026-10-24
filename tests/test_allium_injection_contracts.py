@@ -27,6 +27,9 @@ open it. What it may reach of the platform is a closed list.
   * IJ13 -- a plugin's worker cannot import the being or its entry modules,
     even with the host package on its path: the worker's own guard refuses
     each. It supersedes IJ3, whose in-process sandbox no longer exists.
+  * IJ14 -- IJ11, the encryption module's ``_secret`` in the list: the
+    being's store asks the platform's holder of its secrets whether a master
+    key is set. It supersedes IJ11.
 
 Local-only (the public distribution ships no tests). The censuses read the
 syntax trees (``tests/_allium_census.py``); remote inference and the plugin
@@ -57,6 +60,7 @@ BUDGET_S = {
     "test_ij11_the_being_reaches_only_its_closed_list_of_platform_modules": 2.0,
     "test_ij12_no_model_tool_entry_and_no_plugin_loader_reaches_the_being_and_no_load_is_in_process": 2.0,
     "test_ij13_a_plugin_worker_cannot_import_the_being_or_its_entry_modules": 5.0,
+    "test_ij14_the_being_reaches_only_its_closed_list_of_platform_modules_the_holder_of_the_secrets_included": 2.0,
 }
 PACKAGE = REPO / "opti_oignon"
 ENTRIES = ("opti_oignon.cli.garden", "opti_oignon.api.routes_allium")
@@ -203,6 +207,35 @@ def test_ij11_the_being_reaches_only_its_closed_list_of_platform_modules():
     assert len(found) == 7, sorted(found)
     assert found == REACH, {name: sorted(found.get(name, ())) for name in set(found) | set(REACH)
                             if found.get(name) != REACH.get(name)}
+    service = (PACKAGE / "allium" / "service.py").read_text(encoding="utf-8")
+    mode = (PACKAGE / "allium" / "mode.py").read_text(encoding="utf-8")
+    planted = reach({"opti_oignon.allium.service": service + "\n\ndef _planted():\n"
+                                                             "    from opti_oignon.notes import notes_store\n"
+                                                             "    return notes_store\n"})
+    assert "opti_oignon.notes" in planted or "opti_oignon.notes.notes_store" in planted, "witness: a new module"
+    planted = reach({"opti_oignon.allium.service": service + "\n\ndef _planted():\n    import opti_oignon\n"
+                                                             "    return opti_oignon.analyze\n"})
+    assert "analyze" in planted.get("opti_oignon", set()), "witness: the facade is reached"
+    marker = "from opti_oignon import security_mode as sm"
+    assert mode.count(marker) == 1
+    planted = reach({"opti_oignon.allium.mode": mode.replace(marker, marker + "\n        getattr(sm, '_PRIVATE')")})
+    assert "_PRIVATE" in planted["opti_oignon.security_mode"], "witness: a name read by getattr"
+
+
+# ---------------------------------------------------------------------------
+# IJ14 -- IJ11, the master key asked of the platform's holder of its secrets
+# ---------------------------------------------------------------------------
+# The being's store asks whether a master key is set through encryption._secret: the backend's environment gives
+# the key up at start, to the holder that one name reads. That name joins the closed list; the walk and its
+# witnesses are IJ11's, word for word.
+REACH_HELD = {**REACH, "opti_oignon.encryption": REACH["opti_oignon.encryption"] | {"_secret"}}
+
+
+def test_ij14_the_being_reaches_only_its_closed_list_of_platform_modules_the_holder_of_the_secrets_included():
+    found = reach()
+    assert len(found) == 7, sorted(found)
+    assert found == REACH_HELD, {name: sorted(found.get(name, ())) for name in set(found) | set(REACH_HELD)
+                                 if found.get(name) != REACH_HELD.get(name)}
     service = (PACKAGE / "allium" / "service.py").read_text(encoding="utf-8")
     mode = (PACKAGE / "allium" / "mode.py").read_text(encoding="utf-8")
     planted = reach({"opti_oignon.allium.service": service + "\n\ndef _planted():\n"

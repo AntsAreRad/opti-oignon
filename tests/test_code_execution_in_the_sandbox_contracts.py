@@ -84,6 +84,7 @@ def _window(tmp_path, prefs=None, broken=False):
     db_utils.safe_connect = lambda path, *a, **k: sqlite3.connect(path)
     loaded, restore = isolate(
         targets={
+            "opti_oignon.process_secrets": source("process_secrets.py"),
             "opti_oignon.sandbox_manager": copy,
             "opti_oignon.file_tools": source("file_tools.py"),
             "opti_oignon.code_executor": source("code_executor.py"),

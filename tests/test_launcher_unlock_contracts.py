@@ -156,7 +156,8 @@ def _gate_world(tmp_path, monkeypatch):
     pytest.importorskip("cryptography")
     for name in (KEY_VAR, VAR):
         monkeypatch.delenv(name, raising=False)
-    loaded, restore = isolate(targets={ENC: _source("encryption.py"), GATE: _source("keyfile_gate.py")},
+    loaded, restore = isolate(targets={"opti_oignon.process_secrets": _source("process_secrets.py"),
+                                       ENC: _source("encryption.py"), GATE: _source("keyfile_gate.py")},
                               blocked=("opti_oignon.secure_bytes", "opti_oignon.security_mode"))
     try:
         enc = loaded[ENC]
@@ -1456,7 +1457,8 @@ def _ui(tmp_path, monkeypatch, *, given=None, key=None, tty=True, typed=(), wrap
     monkeypatch.setattr(urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(os, "killpg", killpg)
     monkeypatch.setattr(sys, "stdin", SimpleNamespace(isatty=lambda: tty))
-    loaded, restore = isolate(targets={UI: _source("ui.py")}, seeded={} if wrapped == "import" else {GATE: module})
+    loaded, restore = isolate(targets={"opti_oignon.process_secrets": _source("process_secrets.py"), UI: _source("ui.py")},
+                              seeded={} if wrapped == "import" else {GATE: module})
     try:
         ui = loaded[UI]
         ui._find_project_root = lambda: root

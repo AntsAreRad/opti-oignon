@@ -103,7 +103,8 @@ def _world(tmp_path, monkeypatch):
     for name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME"):
         monkeypatch.delenv(name, raising=False)
     row = sqlite3.Row
-    loaded, restore = isolate(targets={f"opti_oignon.{name}": source(f"{name}.py") for name in _MODULES},
+    loaded, restore = isolate(targets={f"opti_oignon.{name}": source(f"{name}.py")
+                                       for name in ("process_secrets",) + _MODULES},
                               blocked=("opti_oignon.secure_bytes",))
 
     def closed():

@@ -558,12 +558,15 @@ class ContextManager:
         if model in self._ollama_cache:
             return self._ollama_cache[model]
 
+        from opti_oignon.process_secrets import child_env
+
         try:
             result = subprocess.run(
                 ["ollama", "show", model],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
+                env=child_env(),
             )
 
             if result.returncode != 0:
@@ -1026,12 +1029,15 @@ class ContextManager:
 
     def list_available_models(self) -> list[str]:
         """List available models from Ollama."""
+        from opti_oignon.process_secrets import child_env
+
         try:
             result = subprocess.run(
                 ["ollama", "list"],
                 capture_output=True,
                 text=True,
-                timeout=10
+                timeout=10,
+                env=child_env(),
             )
 
             if result.returncode != 0:

@@ -50,7 +50,7 @@ class _ScriptedRun:
 
 def _load(*, returncode=1, stdout=""):
     """Load the real module and replace its subprocess seam."""
-    loaded, win_restore = isolate(targets={_TARGET: source("context_manager.py")})
+    loaded, win_restore = isolate(targets={"opti_oignon.process_secrets": source("process_secrets.py"), _TARGET: source("context_manager.py")})
     module = loaded[_TARGET]
     seam = _ScriptedRun(returncode=returncode, stdout=stdout)
     module.subprocess = types.SimpleNamespace(

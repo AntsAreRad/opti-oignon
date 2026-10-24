@@ -479,7 +479,7 @@ def _allow_world(tmp_path, monkeypatch):
     pytest.importorskip("cryptography")
     for name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME"):
         monkeypatch.delenv(name, raising=False)
-    names = ("encryption", "security_mode", "plugin_allowlist")
+    names = ("process_secrets", "encryption", "security_mode", "plugin_allowlist")
     loaded, restore = isolate(targets={f"opti_oignon.{name}": source(f"{name}.py") for name in names},
                               blocked=("opti_oignon.secure_bytes",))
     try:

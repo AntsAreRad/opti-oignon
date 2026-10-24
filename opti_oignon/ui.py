@@ -514,9 +514,13 @@ def launch(port: int = 8000, share: bool = False, debug: bool = False) -> None:
         debug: Ignored (legacy Gradio parameter).
     """
     # The secrets handed to this launcher leave its environment at once: the
-    # frontend, the browser and every command run from here start without them.
-    given = os.environ.pop(_PASSPHRASE_VAR, None) or None
-    key_given = os.environ.pop(_KEY_VAR, None) or None
+    # frontend, the browser and every command run from here start without them,
+    # and they are zeroed in the environment this process was started with,
+    # which a process of the same user reads in /proc for as long as it runs.
+    from opti_oignon.process_secrets import withdraw
+
+    given = withdraw(_PASSPHRASE_VAR) or None
+    key_given = withdraw(_KEY_VAR) or None
 
     # Override default port 8000 to 8001
     backend_port = port if port != 8000 else DEFAULT_BACKEND_PORT

@@ -138,6 +138,7 @@ class DependencyMonitor:
             Parsed and severity-filtered audit result.
         """
         timestamp = self._clock().isoformat()
+        from opti_oignon.process_secrets import child_env
 
         try:
             proc = subprocess.run(
@@ -145,6 +146,7 @@ class DependencyMonitor:
                 capture_output=True,
                 text=True,
                 timeout=self._timeout,
+                env=child_env(),
             )
             return self._parse_output(proc.stdout, timestamp)
 

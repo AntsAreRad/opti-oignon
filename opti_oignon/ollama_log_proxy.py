@@ -71,10 +71,12 @@ def _detect_ollama_env() -> dict[str, str]:
 
     # Try to read from the Ollama process via /proc (Linux only)
     if os.path.isdir("/proc"):
+        from opti_oignon.process_secrets import child_env
+
         try:
             result = subprocess.run(
                 ["pgrep", "-f", "ollama serve"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, env=child_env(),
             )
             pids = result.stdout.strip().split()
             for pid in pids[:1]:  # Only check the first match

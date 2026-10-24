@@ -249,6 +249,7 @@ def _open(tmp_path, monkeypatch, *, config_enabled):
         monkeypatch.delenv(name, raising=False)
     loaded, restore = isolate(
         targets={
+            "opti_oignon.process_secrets": source("process_secrets.py"),
             "opti_oignon.encryption": source("encryption.py"),
             "opti_oignon.api.routes_security": source("api", "routes_security.py"),
         },

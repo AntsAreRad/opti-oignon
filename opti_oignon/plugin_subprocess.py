@@ -546,6 +546,26 @@ class PluginSubprocessManager:
             raise plugin_isolation.PluginIsolationError(
                 f"Plugin '{plugin_name}' not started: {posture.reason}"
             )
+        if env_extra:
+            # The worker's environment is an allowlist: no caller adds a secret or what a
+            # shell runs code from to it.
+            from opti_oignon.process_secrets import withheld
+
+            refused = sorted(name for name in env_extra if withheld(name))
+            if refused:
+                raise plugin_isolation.PluginIsolationError(
+                    f"Plugin '{plugin_name}' not started: its environment never carries {', '.join(refused)}"
+                )
+        if posture.mode != plugin_isolation.MODE_BWRAP:
+            # Outside bubblewrap the worker shares this process's view of /proc,
+            # where a secret still in the backend's initial environment is read.
+            from opti_oignon.process_secrets import unwiped_refusal
+
+            refusal = unwiped_refusal()
+            if refusal:
+                raise plugin_isolation.PluginIsolationError(
+                    f"Plugin '{plugin_name}' not started without bubblewrap: {refusal}"
+                )
 
         granted = set(permissions)
         if self._limit_ceilings is None:

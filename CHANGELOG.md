@@ -3382,6 +3382,92 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] The backend's children start without the platform's
+  secrets. The launchers hand the backend the key file's passphrase
+  (`OPTI_KEYFILE_PASSPHRASE`) and the master key
+  (`OPTI_ENCRYPTION_KEY`) in its environment, where they stayed: every
+  program the backend ran was handed both -- the sandbox's bubblewrap
+  probes, and the compiler and the linker `ctypes.util.find_library`
+  runs, as the application is imported; the background pool's workers;
+  the tools of the security pages, `lsblk`, `ss`, `pip-audit`,
+  `nvidia-smi` and `ollama` among them; the `uname -p` of the hardware
+  fingerprint --, a bash among them read the caller's `BASH_ENV` and
+  exported functions, and a process of the same user read both in
+  `/proc/<pid>/environ`, which shows the environment a process was
+  started with whatever it removes later: a sandbox command run
+  without bubblewrap, or a plugin started without it, could. The
+  application's entry now takes both out first, before any import that
+  runs a program (`opti_oignon/process_secrets.py`): it zeroes the
+  value of every entry of each name where the process was started with
+  it, reads that block back where `/proc` shows it, takes the name out
+  of the environment, and holds the value in memory of its own, locked
+  where the system allows, an empty value being no secret; a value it
+  cannot zero, or that still shows, is said, never taken for wiped. It
+  takes what a shell runs code from (`BASH_ENV`, `ENV`, `SHELLOPTS`,
+  `BASHOPTS`, `PS4`, exported functions) out of the environment with
+  them, so that no child of the backend, whether it is handed an
+  environment or inherits one, is handed them. The key file's loader,
+  the master key, setup, the status and the refusals read the held
+  value. A held value is wiped when the process exits, never by a
+  signal's handler, which runs while the rest of the process may still
+  read the key; a process a signal kills is not wiped, its memory goes
+  with it and it dumps no core. Once wiped, a value is refused rather
+  than read as no key: setup writes no key file unwrapped then, and
+  the master key and the databases' key load none, so that no store is
+  opened in plaintext. Once a secret is held, a check runs for as long
+  as the backend does: a process start Python audits -- `subprocess`,
+  `os.system`, `os.exec*`, `os.posix_spawn` -- whose environment names
+  a secret or a shell variable, or holds a secret's value, or whose
+  arguments hold it, is refused, whatever code makes it, a third-party
+  library's included; and no Python code of the backend's interpreter
+  can put a secret's value -- as a variable's value or its name --, a
+  secret's name or a shell variable into its environment, which every
+  start handed none inherits -- a fork, and the starts Python does not
+  audit, multiprocessing's workers among them. A refusal is logged
+  without the value and without where it sat. A value shorter than 8
+  bytes, or one a variable of the environment holds already (a
+  passphrase that is the login name), is not looked for, since it
+  would refuse starts by chance, and the startup checklist says so --
+  the second as a warning. Every program the backend starts directly
+  is handed an environment built for it: its own without the two
+  secrets and without those shell variables, or the untrusted tiers'
+  allowlists as before -- a plugin's extra environment that names one
+  of them is refused --; the bubblewrap that runs a sandbox command is
+  handed the former, the command inside it the cleared environment it
+  had, and so is the bubblewrap probe's echo now. While a secret could
+  not be zeroed, a sandbox command without bubblewrap and a plugin
+  started without it are refused by name, and the startup checklist
+  says so: it says what became of both secrets -- held, and whether
+  their memory could be locked; not wiped and why; back in the
+  environment -- and never that one was wiped when it was not. While a
+  secret is held, the backend and its children have no core size to
+  dump: a core handler that honours the limit, systemd-coredump among
+  them, stores none. The Python launcher and the key file's gate zero
+  what they take out of their own environment too, and
+  `scripts/dev_backend.sh`, run as it is, runs under `bash -p` as
+  `scripts/launch.sh` does. A census guard
+  (`.github/scripts/child_env_census_guard.py`) checks on every
+  commit, over the spellings and the bindings its docstring lists,
+  that every start in the package is handed a built environment and
+  uses it only as the census reads -- its callers in other modules
+  read too --, that each start no environment can reach is listed with
+  what proves it, that a secret's name appears only as the argument of
+  the holder's readers or in the one constant that names it, and that
+  no secret's value is put into the process's environment; it says
+  what it does not see, and is twin of the egress census one way:
+  every process sink that census charges is a start it counts. What
+  stays open: `scripts/launch.sh`, started with the secrets in its own
+  environment, keeps them there for as long as it runs -- bash cannot
+  zero it; the passphrase it asks for on the terminal is never there
+  --, and so does uvicorn's reloader under `scripts/dev_backend.sh
+  --reload`, which never imports the application; the copies the heap
+  still holds are not wiped; a zeroed value's length stays readable,
+  one zero per byte; a C function, through ctypes or a library's own
+  C, starts and writes the environment unchecked, and so does code a
+  subinterpreter runs, the check being the interpreter's own -- the
+  census counts a subinterpreter as a start, and the package makes
+  none; the backend's tools are still found through its PATH.
+
 - [SECURITY] A second factor belongs to the account. Every factor
   enrolled from the settings -- a TOTP, a security key, recovery codes,
   app passwords -- was stored under the literal identity `admin`: the

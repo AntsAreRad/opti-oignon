@@ -100,6 +100,7 @@ def _load_guard_module(mode="daily", audit_events=None, run=None):
 
     loaded, restore = isolate(
         targets={
+            "opti_oignon.process_secrets": source("process_secrets.py"),
             "opti_oignon.network_bind_guard": source("network_bind_guard.py"),
         },
         seeded=seeded,

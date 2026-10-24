@@ -151,21 +151,35 @@ passphrase given for a key file that is not wrapped, or not
 there yet, goes to the backend as it was given: random-key setup wraps the
 key it makes under it, while setup with a passphrase of its own wraps under
 that one, and the platform must then be started again with it. A passphrase of
-several lines is not taken. The backend keeps the passphrase in its
-environment while it runs, where a process of the same user can read it,
-and so does a launcher started with it set, in the environment it was
-started with; the commands the backend itself runs outside its sandbox
-still inherit both, and a bash among them reads the caller's `BASH_ENV`.
-Field-level encryption and the sealing of the run journal follow
-when encryption is set up in the security settings once the command has
-run: setup then takes the existing key and makes no new one. The
-settings say so: with a key here -- a key file, or
-`OPTI_ENCRYPTION_KEY` -- they offer only to enable it and ask for no
-passphrase, the server saying why when it cannot open it; a success
-says whether the key was the one already here or made, where, whether
-its key file is wrapped (the answer's `key`, `existing` or `made`, and
-`wrapped`), and how many databases are still kept in plaintext
-(`plaintext_stores`); a refusal shows the server's reason.
+several lines is not taken. The backend takes the passphrase and
+`OPTI_ENCRYPTION_KEY` out of its environment as it starts, before it
+imports anything that runs a program (`opti_oignon/process_secrets.py`):
+each value is zeroed where the backend was started with it -- what
+`/proc/<pid>/environ` shows a process of the same user --, read back
+there, and held in memory locked where the system allows, wiped at exit;
+the caller's `BASH_ENV`, exported functions and shell options leave the
+environment with them, and no program the backend runs is handed any of
+them: a process start Python audits whose environment or arguments hold
+a secret, or whose environment names one of those variables, is refused
+as it is made, and Python code of the backend's interpreter can put
+neither back into its environment. A value it could not zero is said by
+the startup checklist, and every sandbox command and plugin that would
+run without bubblewrap is refused until the platform is started again.
+The Python launcher zeroes both in its own environment too. `launch.sh`,
+started with them in its environment, keeps them there for as long as it
+runs -- bash cannot zero it; the passphrase it asks for on its terminal
+is never there --, and so does uvicorn's reloader under `dev_backend.sh
+--reload` run with them set, which never imports the application.
+Field-level encryption and the sealing of the run journal follow when
+encryption is set up in the security settings once the command has run:
+setup then takes the existing key and makes no new one. The settings say
+so: with a key here -- a key file, or `OPTI_ENCRYPTION_KEY` -- they
+offer only to enable it and ask for no passphrase, the server saying why
+when it cannot open it; a success says whether the key was the one
+already here or made, where, whether its key file is wrapped (the
+answer's `key`, `existing` or `made`, and `wrapped`), and how many
+databases are still kept in plaintext (`plaintext_stores`); a refusal
+shows the server's reason.
 
 The server never does this itself: it holds its databases open, and a
 database moved under an open connection loses what that connection

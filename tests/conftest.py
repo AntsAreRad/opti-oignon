@@ -15,7 +15,11 @@ Each of these now fails the contract that leaves it, at its teardown:
   * ``urllib.request.urlopen`` left as anything but what the contract found,
     which five suites did;
   * a neutralised project entry (``None``) the contract did not find. None
-    was found, but one would make every later import of that name fail.
+    was found, but one would make every later import of that name fail;
+  * a secret held by the platform's holder (``opti_oignon.process_secrets``)
+    that the contract did not find held: ``take()`` run in this process
+    takes what the contract set in the environment, and a value left held
+    would be answered to every later contract that reads a key.
 
 The state is read before any fixture of the contract is set up and checked
 after every one of them is torn down, so a suite that closes its own window
@@ -53,12 +57,16 @@ from the environment, and ``RAG_HOME``, which moves the knowledge base to a
 directory the database encryption then reads: a key, a passphrase or a
 data directory the maintainer's shell carries to start the platform never
 reaches a contract, and a contract that wants one sets its own (SE13 holds
-it).
+it). The holder of the platform's secrets (``opti_oignon.process_secrets``)
+is imported once, when the session is configured, behind the firewall: a
+module that a suite loads under a stand-in package of its own finds it in
+the module cache, whichever suites ran before.
 
 Local-only (the public distribution ships no tests).
 """
 
 import gc
+import importlib
 import os
 import sys
 import urllib.request
@@ -85,6 +93,10 @@ def pytest_configure(config):
     if uncovered:
         pytest.exit(f"data firewall: the child processes of this session cannot be covered ({uncovered}); "
                     "the session refuses to run uncovered", returncode=REFUSED)
+    # The holder of the platform's secrets is this process's, one for the whole session, imported from this tree
+    # behind the firewall: a module a suite loads under a stand-in package of its own finds it in the module
+    # cache, as it would in the backend, whichever suites ran before.
+    importlib.import_module(_PACKAGE + ".process_secrets")
 
 
 def pytest_collection_finish(session):
@@ -122,6 +134,12 @@ def _project_entries():
     }
 
 
+def held_secrets():
+    """What the process's holder of the platform's secrets holds, read from the module cache: name -> holder."""
+    held = getattr(sys.modules.get(_PACKAGE + ".process_secrets"), "_held", None)
+    return dict(held) if isinstance(held, dict) else {}
+
+
 def left_behind(found, now):
     """Names now held by a stand-in or ``None`` that the contract did not find there."""
     return sorted(
@@ -135,7 +153,7 @@ def left_behind(found, now):
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_setup(item):
     _FIREWALL.current = item.nodeid
-    item.stash[_FOUND] = (_project_entries(), urllib.request.urlopen)
+    item.stash[_FOUND] = (_project_entries(), urllib.request.urlopen, held_secrets())
     return (yield)
 
 
@@ -144,13 +162,16 @@ def pytest_runtest_teardown(item):
     result = yield
     found = item.stash.get(_FOUND, None)
     if found is not None:
-        entries, transport = found
+        entries, transport, secrets = found
         problems = []
         left = left_behind(entries, _project_entries())
         if left:
             problems.append(f"project modules left as stand-ins or neutralised: {left[:6]}")
         if urllib.request.urlopen is not transport:
             problems.append("urllib.request.urlopen is left replaced")
+        held = sorted(name for name, holder in held_secrets().items() if secrets.get(name) is not holder)
+        if held:
+            problems.append(f"the platform's secrets left held by opti_oignon.process_secrets: {held}")
         if problems:
             raise AssertionError("; ".join(problems))
     _FIREWALL.current = None

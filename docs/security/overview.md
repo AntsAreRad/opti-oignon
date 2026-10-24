@@ -24,7 +24,8 @@ assumptions.
 
 3. **Sandbox isolation** -- bubblewrap kernel namespaces for LLM tools
    and plugins (unshare-net, unshare-pid, read-only binds), command
-   validator with blocklists, tempdir fallback when bwrap is unavailable.
+   validator with blocklists, tempdir fallback when bwrap is unavailable;
+   the backend's own children start without its secrets.
 
 4. **Network hardening** -- Bulbe mode enforces localhost-only socket
    binding, network bind guard monitors Ollama configuration, CSP

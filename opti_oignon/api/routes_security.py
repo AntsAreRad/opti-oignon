@@ -613,8 +613,10 @@ def _environment_key_loads() -> bool:
     """Whether OPTI_ENCRYPTION_KEY decodes to a key: base64url, 32 bytes."""
     import base64
 
+    from opti_oignon.process_secrets import secret
+
     try:
-        return len(base64.urlsafe_b64decode(os.environ.get("OPTI_ENCRYPTION_KEY", ""))) == 32
+        return len(base64.urlsafe_b64decode(secret("OPTI_ENCRYPTION_KEY") or "")) == 32
     except (ValueError, TypeError):
         return False
 
@@ -673,8 +675,10 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
     # A key that loads here is the one the databases are keyed by, and a key
     # file that does not open here may be: a new key would leave them
     # unreadable.
+    from opti_oignon.process_secrets import secret
+
     wrapped = None
-    if os.environ.get("OPTI_ENCRYPTION_KEY") and not _environment_key_loads():
+    if secret("OPTI_ENCRYPTION_KEY") and not _environment_key_loads():
         raise HTTPException(status_code=409, detail=_ENVIRONMENT_KEY_REFUSAL)
     if mgr.enable_with_existing_key():
         detail = "Encryption enabled with the existing key"
@@ -701,7 +705,7 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
         detail = "Encryption configured successfully"
         key = "made"
         # Setup wraps the key file it makes under the passphrase given, or under OPTI_KEYFILE_PASSPHRASE.
-        wrapped = req.mode == "passphrase" or bool(os.environ.get("OPTI_KEYFILE_PASSPHRASE"))
+        wrapped = req.mode == "passphrase" or bool(secret("OPTI_KEYFILE_PASSPHRASE"))
 
     # Counted before security.yaml is saved, so a count that fails leaves the configuration as it was.
     still_plain = len(_plaintext_stores())

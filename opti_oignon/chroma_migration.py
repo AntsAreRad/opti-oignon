@@ -307,7 +307,7 @@ def _key() -> Any:
 
     if dbe.SQLCIPHER_AVAILABLE:
         return dbe._loaded_key()
-    if encryption.keyfile_present() or dbe._environment_key_refused() is not None or os.environ.get(
+    if encryption.keyfile_present() or dbe._environment_key_refused() is not None or encryption._secret(
             encryption._ENV_KEY_NAME):
         raise dbe.EncryptionRefused("SQLCipher is not installed and a key is set: the knowledge base's store would be "
                                     "written in plaintext beside encrypted stores: nothing was written")

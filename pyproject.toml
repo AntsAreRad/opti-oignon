@@ -1130,6 +1130,28 @@ fail_under = 0
 # holds its other parts word for word and the route's new check in c9. ks3
 # stays in the tree word for word.
 #
+# ij11 of tests/test_allium_injection_contracts.py held the closed list of
+# what the being reads of the platform: five names of the encryption module.
+# The being's store now asks whether a master key is set through
+# encryption._secret, the backend's environment having given the key up at
+# start to the platform's holder of its secrets. ij11 gives way to ij14 of
+# the same file, which repeats its walk and its witnesses word for word with
+# that name in the list. ij11 stays in the tree word for word.
+#
+# c5 of tests/test_startup_checklist_contracts.py held that a checklist run,
+# every check stubbed and one failing, counts eight checks. The checklist
+# now says, ninth, what became of the platform's secrets in the backend's
+# environment. c5 gives way to c9 of the same file, which repeats it over
+# the checks the runner calls, read from its source. c5 stays in the tree
+# word for word.
+#
+# af14 of tests/test_allium_surface_contracts.py froze the project modules
+# the garden's production look loads. The being's store now asks whether a
+# master key is set through the platform's holder of its secrets, one
+# module more. af14 gives way to af15 of the same file, which repeats it
+# word for word with that module in the set. af14 stays in the tree word
+# for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1525,4 +1547,7 @@ addopts = """
     --deselect=tests/test_search_gates_contracts.py::test_ks3_the_engaged_switch_survives_a_restart_and_fails_closed
     --deselect=tests/test_auth_core_contracts.py::test_a34_sql_is_parameterised_never_f_string
     --deselect=tests/test_auth_2fa_routes_seam_contracts.py::test_c5_statement_census_is_frozen
+    --deselect=tests/test_allium_injection_contracts.py::test_ij11_the_being_reaches_only_its_closed_list_of_platform_modules
+    --deselect=tests/test_startup_checklist_contracts.py::test_c5_report_serializes_with_coherent_counters
+    --deselect=tests/test_allium_surface_contracts.py::test_af14_the_production_look_touches_only_the_frozen_modules_and_data_paths
 """

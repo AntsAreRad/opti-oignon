@@ -147,6 +147,8 @@ def nvidia_smi_rows(query: str, timeout: float = 5.0) -> list[list[str]] | None:
     """
     if not _nvidia_smi_available():
         return None
+    from opti_oignon.process_secrets import child_env
+
     try:
         proc = subprocess.run(
             [
@@ -157,6 +159,7 @@ def nvidia_smi_rows(query: str, timeout: float = 5.0) -> list[list[str]] | None:
             capture_output=True,
             text=True,
             timeout=timeout,
+            env=child_env(),
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError) as exc:
         logger.debug("nvidia-smi query failed: %s", exc)

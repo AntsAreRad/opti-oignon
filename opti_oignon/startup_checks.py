@@ -9,6 +9,7 @@ and caches results. Combines:
   - LUKS full-disk encryption detection
   - Existing security score checks
   - Resource governor Ollama limits advisory
+  - The platform's secrets out of the backend's environment
 
 Results are cached for the lifetime of the process and exposed via
 ``GET /api/security/startup-checks``.
@@ -20,6 +21,7 @@ verification. Individual guards remain independently testable.
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -152,6 +154,9 @@ def run_startup_checks(*, force: bool = False) -> StartupCheckResult:
 
     # --- Check 8: active-backend provenance coverage (advisory) ---
     result.checks.append(_check_backend_provenance_coverage())
+
+    # --- Check 9: the platform's secrets out of this process's environment ---
+    result.checks.append(_check_process_secrets())
 
     # --- Aggregate ---
     result.all_passed = all(c.passed for c in result.checks)
@@ -802,6 +807,93 @@ def _check_backend_provenance_coverage() -> CheckItem:
             detail=f"Backend provenance coverage check unavailable: {exc}",
             score_impact=0,
         )
+
+
+def _check_process_secrets() -> CheckItem:
+    """Whether the platform's secrets left this process's environment, and the one it was started with.
+
+    Reads what ``process_secrets.take()`` did here -- the application's entry runs it first -- and imports
+    nothing: in a process where that module was never loaded, nothing was taken, and nothing is said of what
+    its environment holds. A secret that could not be zeroed in the environment the process was started with is
+    a warning, never said wiped: the sandbox's commands without bubblewrap and the plugins started without it are
+    refused while it is there. Never critical, so never blocking; never raises.
+    """
+    name = "process_secrets"
+    module = sys.modules.get("opti_oignon.process_secrets")
+    if module is None:
+        return CheckItem(
+            name=name,
+            passed=True,
+            severity="info",
+            detail="Not checked: this process did not start through the application's entry, which takes the "
+                   "platform's secrets out of its environment",
+        )
+    try:
+        state = module.status()
+    except Exception as exc:  # noqa: BLE001 - a state that cannot be read is said, never taken for a clean one
+        return CheckItem(
+            name=name,
+            passed=False,
+            severity="warning",
+            detail=f"What happened to the platform's secrets in this process cannot be read: {exc}",
+            score_impact=-3,
+        )
+    if state["unwiped"]:
+        why = "; ".join(f"{secret}: {reason}" for secret, reason in sorted(state["unwiped"].items()))
+        return CheckItem(
+            name=name,
+            passed=False,
+            severity="warning",
+            detail=f"Not wiped from the environment this process was started with ({why}): a process of the "
+                   "same user can read it in /proc. Sandbox commands and plugins that would run without "
+                   "bubblewrap are refused until the platform is started again.",
+            score_impact=-5,
+            tips=[
+                "Install bubblewrap: sandbox commands and plugins under it never see this process's /proc.",
+                "The wipe reads where the environment lies in /proc/self/stat and writes over it in place: "
+                "the reason above says which step failed.",
+            ],
+        )
+    if state["in_environment"]:
+        return CheckItem(
+            name=name,
+            passed=False,
+            severity="warning",
+            detail=f"In this process's environment: {', '.join(state['in_environment'])}. A child started "
+                   "with the environment as it is would be handed them.",
+            score_impact=-5,
+        )
+    if state["held"]:
+        unlocked = state.get("unlocked") or []
+        locked = (f"; the memory holding {', '.join(unlocked)} could not be locked, and may be swapped "
+                  "out" if unlocked else "")
+        short = state.get("short") or []
+        if short:
+            locked += (f"; {', '.join(short)} is shorter than {state.get('looked_for_from')} bytes, too short to be "
+                       "told from any other word: no process start is checked for it")
+        held = (f"Held out of the environment ({', '.join(state['held'])}), and zeroed in the one this process was "
+                f"started with; while they are held this process has no core size to dump, a process start "
+                f"Python audits that would hand a child one is refused, and Python code of this interpreter cannot "
+                f"put one back in the environment{locked}")
+        common = state.get("common") or []
+        if common:
+            return CheckItem(
+                name=name,
+                passed=False,
+                severity="warning",
+                detail=f"{held}; the value of {', '.join(common)} is held by this environment already, under "
+                       "another name: every child that inherits or is handed this environment holds it, and no start "
+                       "is checked for it",
+                tips=["Choose a passphrase that no variable of the environment holds -- not the login name, not a "
+                      "folder of the home -- and start the platform again with it"],
+            )
+        return CheckItem(name=name, passed=True, severity="info", detail=held)
+    return CheckItem(
+        name=name,
+        passed=True,
+        severity="info",
+        detail="This process was handed neither the key file's passphrase nor the master key",
+    )
 
 
 # ---------------------------------------------------------------------------

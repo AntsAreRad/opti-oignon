@@ -506,12 +506,15 @@ def _check_ollama_ss(port: int) -> str | None:
 
     Returns the bind address string, or None if unavailable.
     """
+    from opti_oignon.process_secrets import child_env
+
     try:
         result = subprocess.run(
             ["ss", "-tlnp"],
             capture_output=True,
             text=True,
             timeout=5,
+            env=child_env(),
         )
         if result.returncode != 0:
             return None

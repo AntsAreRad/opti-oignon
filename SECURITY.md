@@ -109,6 +109,29 @@ core dumps), a tmpfs size cap, a cleared environment, and read-only system
 binds. If bwrap is unavailable, strict mode refuses execution rather than
 falling back to the host.
 
+The backend's own children start without the platform's secrets. The
+application's entry takes the key file's passphrase and the master key
+out of its environment before anything else runs, zeroes each where the
+process was started with it -- what `/proc/<pid>/environ` shows a
+process of the same user --, reads that back, and holds them in memory
+locked where the system allows, wiped at exit; what a shell runs code
+from (`BASH_ENV`, exported functions, an inherited `SHELLOPTS` or `PS4`)
+leaves with them. Every program the backend starts directly -- the
+sandbox's bubblewrap, the system tools of the security pages, a plugin's
+worker -- is handed an environment built for it, and the ones that
+inherit it -- the pool's workers, the multiprocessing tracker, the
+compiler `find_library` runs -- start after the secrets and those
+variables are gone. A secret that could not be zeroed refuses every
+sandbox command and plugin that would run without bubblewrap, and the
+startup checklist says so; while a secret is held the backend has no
+core size to dump, every process start Python audits is checked as it is
+made -- one whose environment or arguments hold a secret, or whose
+environment names one of those shell variables, is refused --, and
+Python code of its interpreter can put no secret back into its
+environment, which the starts Python does not audit inherit. A census
+guard checks every process start of the package against the same rule on
+every commit, over the spellings it lists.
+
 The hard-sandbox contract holds across the workspace cycle, clause
 by clause: the sandbox stays a fully isolated, disposable environment (a
 workspace is destroyed on demand, on TTL, or on conversation close); host

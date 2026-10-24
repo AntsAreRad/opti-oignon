@@ -116,7 +116,9 @@ accessible at `http://localhost:11434`. You can verify with
 
 **Missing bwrap:** On Ubuntu/Debian, install with `sudo apt install bubblewrap`.
 Without bwrap, the sandbox falls back to tempdir isolation (less secure but
-functional).
+functional), except while the startup checklist says a secret the backend
+was started with could not be wiped from its environment: then no sandbox
+command and no plugin runs outside bwrap.
 
 **SQLCipher not found:** Install `sqlcipher` and `pysqlcipher3` for encrypted
 database support. Without it, databases are stored unencrypted.

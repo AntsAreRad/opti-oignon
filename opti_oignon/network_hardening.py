@@ -87,13 +87,16 @@ def check_dns_encryption() -> DnsCheckResult:
     DnsCheckResult
         Detection result with protocol and resolver info.
     """
+    from opti_oignon.process_secrets import child_env
+
     result = DnsCheckResult()
+    env = child_env()
 
     # Strategy 1: systemd-resolved
     try:
         proc = subprocess.run(
             ["resolvectl", "status"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=env,
         )
         output = proc.stdout.lower()
         if "dns over tls" in output and "yes" in output:
@@ -140,7 +143,7 @@ def check_dns_encryption() -> DnsCheckResult:
     try:
         proc = subprocess.run(
             ["systemctl", "is-active", "dnscrypt-proxy"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=env,
         )
         if proc.stdout.strip() == "active":
             result.encrypted = True
@@ -155,7 +158,7 @@ def check_dns_encryption() -> DnsCheckResult:
     try:
         proc = subprocess.run(
             ["systemctl", "is-active", "stubby"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=env,
         )
         if proc.stdout.strip() == "active":
             result.encrypted = True
@@ -262,12 +265,15 @@ def check_listening_ports() -> list[PortInfo]:
     list[PortInfo]
         List of detected listening ports.
     """
+    from opti_oignon.process_secrets import child_env
+
     ports: list[PortInfo] = []
+    env = child_env()
 
     try:
         proc = subprocess.run(
             ["ss", "-tlnp"],
-            capture_output=True, text=True, timeout=5,
+            capture_output=True, text=True, timeout=5, env=env,
         )
         lines = proc.stdout.strip().split("\n")
     except (FileNotFoundError, subprocess.TimeoutExpired):
@@ -275,7 +281,7 @@ def check_listening_ports() -> list[PortInfo]:
         try:
             proc = subprocess.run(
                 ["netstat", "-tlnp"],
-                capture_output=True, text=True, timeout=5,
+                capture_output=True, text=True, timeout=5, env=env,
             )
             lines = proc.stdout.strip().split("\n")
         except (FileNotFoundError, subprocess.TimeoutExpired):

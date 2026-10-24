@@ -345,6 +345,7 @@ def _world(tmp_path, *, journal="enabled: true\n", sealed=False, policy="network
               "opti_oignon.emergency_stop": estop, "opti_oignon.capability_manifest": capability,
               "opti_oignon.config": config}
     targets = {name: source(*parts) for name, parts in _AGENT_TARGETS}
+    targets["opti_oignon.process_secrets"] = source("process_secrets.py")
     targets[_RJ] = source("run_journal.py")
     targets[_ROUTES] = source("api", "routes_agent.py")
     blocked = ()
@@ -1079,7 +1080,8 @@ def _store_window(tmp_path):
     engine = types.ModuleType("opti_oignon.veilid.sync_engine")
     engine.get_sync_engine = lambda *args, **kwargs: _Engine()
     loaded, restore = isolate(
-        targets={_ALLOW: source("agent", "allowlists.py"), _ENC: source("encryption.py"),
+        targets={"opti_oignon.process_secrets": source("process_secrets.py"),
+                 _ALLOW: source("agent", "allowlists.py"), _ENC: source("encryption.py"),
                  "opti_oignon.veilid.records": source("veilid", "records.py"),
                  "opti_oignon.veilid.producers": source("veilid", "producers.py"),
                  _RJ: source("run_journal.py"), _CONV: source("conversation.py"),

@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/env -S bash -p
 # Launch the Opti-Oignon backend in development mode.
 #
 # Usage:
@@ -26,9 +26,10 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# The project root, found without running a program: launched by scripts/launch.sh -- under bash -p,
-# which reads no BASH_ENV and takes no function from the environment --, this script holds the
-# platform's secrets in its environment, and they reach no command but the server.
+# The project root, found without running a program: launched by scripts/launch.sh, this script holds
+# the platform's secrets in its environment, and they reach no command but the server. Under
+# launch.sh, and run as it is (its first line), it runs under bash -p, which reads no BASH_ENV and
+# takes no function from the environment.
 case "$0" in
     */*) cd "${0%/*}/.." ;;
     *) cd .. ;;

@@ -92,8 +92,14 @@ LLM-driven tools and plugins operate in restricted environments.
 - **Command validator** blocks dangerous patterns (base64-pipe-to-shell,
   write-then-execute, forbidden directories)
 - **Tempdir fallback** provides basic isolation when bwrap is
-  unavailable
+  unavailable, and is refused while a secret the backend was started
+  with could not be zeroed in its environment
 - **Plugin subprocesses** communicate via HMAC-authenticated IPC
+- **The backend's children** start without the key file's passphrase
+  and the master key: the entry takes both out of its environment
+  first, with what a shell runs code from, and every program the
+  backend starts directly is handed an environment built for it
+  (`opti_oignon/process_secrets.py`)
 
 Threat model: LLM prompt injection leading to code execution,
 malicious plugins, sandbox escape.

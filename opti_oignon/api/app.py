@@ -9,7 +9,16 @@ Heavy module imports are deferred via lazy_loader in deps.py.
 Route modules are thin wrappers and load eagerly so all endpoints are
 available immediately. The actual heavy dependencies (chromadb, etc.)
 only import on first access to the relevant API endpoint.
+
+The platform's secrets leave the environment before anything else runs:
+importing the routes below starts processes (the sandbox's bubblewrap
+probes, the compiler find_library runs), and each would be handed them
+(opti_oignon/process_secrets.py).
 """
+
+from opti_oignon.process_secrets import take as take_secrets
+
+take_secrets()
 
 import logging
 from contextlib import asynccontextmanager
