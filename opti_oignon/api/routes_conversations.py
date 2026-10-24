@@ -50,6 +50,7 @@ def _conv_to_summary(conv) -> dict:
     return ConversationSummary(
         id=conv.id,
         title=conv.title,
+        title_source=getattr(conv, "title_source", "default"),
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         message_count=msg_count,
@@ -109,12 +110,19 @@ def withdraw_source(request: SourceWithdrawRequest) -> dict:
 
 @router.post("", response_model=ConversationSummary, status_code=201)
 def create_conversation(body: ConversationCreate) -> dict:
-    """Create a new conversation."""
+    """Create a new conversation: the user's title when the body names one, else the store titles it."""
     _check_available()
 
+    title = None
+    if body.title is not None and body.title.strip():
+        # A title the body names is the user's: one line within the bound,
+        # or refused, and nothing is written.
+        title = conversation_manager.fold_manual_title(body.title)
+        if title is None:
+            raise HTTPException(status_code=422, detail="A title is one line of text, not empty, within the bound")
     try:
         conv = conversation_manager.create_conversation(
-            title=body.title,
+            title=title,
             model=body.model,
             preset=body.preset,
         )
@@ -136,6 +144,7 @@ def get_conversation(conv_id: str) -> dict:
     return ConversationDetail(
         id=conv.id,
         title=conv.title,
+        title_source=getattr(conv, "title_source", "default"),
         messages=[m.to_dict() for m in conv.messages],
         created_at=conv.created_at,
         updated_at=conv.updated_at,
@@ -161,10 +170,15 @@ def delete_conversation(conv_id: str) -> Response:
 
 @router.patch("/{conv_id}", response_model=ConversationSummary)
 def rename_conversation(conv_id: str, body: ConversationRename) -> dict:
-    """Renomme une conversation."""
+    """Rename a conversation: the user's title, kept as typed on one line, never replaced by the store's rule."""
     _check_available()
 
-    renamed = conversation_manager.rename_conversation(conv_id, body.title)
+    # One line, white space collapsed; empty or past titles.yaml's bound is
+    # refused, and nothing is written.
+    title = conversation_manager.fold_manual_title(body.title)
+    if title is None:
+        raise HTTPException(status_code=422, detail="A title is one line of text, not empty, within the bound")
+    renamed = conversation_manager.rename_conversation(conv_id, title)
     if not renamed:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -173,6 +187,19 @@ def rename_conversation(conv_id: str, body: ConversationRename) -> dict:
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found after rename")
 
+    return _conv_to_summary(conv)
+
+
+@router.post("/{conv_id}/title/auto", response_model=ConversationSummary)
+def use_automatic_title(conv_id: str) -> dict:
+    """Give the conversation's title back to the store's rule: derived from the typed words of its first turns."""
+    _check_available()
+
+    if not conversation_manager.use_automatic_title(conv_id):
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    conv = conversation_manager.get_conversation(conv_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
     return _conv_to_summary(conv)
 
 

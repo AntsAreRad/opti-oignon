@@ -248,6 +248,12 @@ Some secrets are encrypted individually with AES-256-GCM: a fresh
 random 96-bit nonce for every encryption and a 128-bit tag that detects
 tampering. This covers:
 
+- Conversation messages and their titles, when field encryption is on: a
+  title is content, made from the words its user typed or given by the
+  user, so it is encrypted like them -- one written before is encrypted
+  when the backend next starts, except one that begins as a ciphertext
+  does, which stays as it is -- and a title still encrypted (the key
+  absent, or another key's) is shown empty
 - Two-factor authentication secrets
 - Note attachments (one subkey per attachment, streamed in
   authenticated frames)

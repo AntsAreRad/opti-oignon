@@ -1,0 +1,63 @@
+# Automatic conversation titles (opti_oignon/conversation_titles.py).
+#
+# A conversation is titled from the words the user typed in its first turns -- never a pasted part, an attached
+# document, a turn the model reworded, a withdrawn turn or an answer -- once that turn is saved. A title the user
+# gave (a rename) is never replaced by an automatic one. A file that cannot be read, or holds an unknown key, misses
+# one or gives one the wrong type, turns automatic titles off, said once by name: conversations then keep "New
+# conversation".
+#
+# A title holds words of letters only: no character of Unicode's number categories -- no number, version, code or
+# card, and not the common password made of a word and digits. A turn that names a password (the names below,
+# anywhere in its content) gives no title, nor does any later turn. What no rule here can tell is a secret made of
+# letters alone, typed in a turn that names none of them, or alone in a turn before the one that does. A title is
+# encrypted at rest like the turns it comes from.
+enabled: true
+derive:
+  max_chars: 60                # code points, the ellipsis included
+  min_letters: 3               # fewer letters in the kept words: no title
+  max_user_turns: 3            # the first user turns read for typed words
+  max_token_chars: 24          # a longer word of letters is dropped (scripts written without spaces aside)
+  max_case_switches: 2         # more lowercase-to-uppercase switches: a random string, dropped
+  max_read_chars: 4000         # the typed words' first characters a title is drawn from (a password's name is
+                               # looked for in all of them)
+  ellipsis: "..."              # what a cut title ends with
+  # The names of a password. Combining marks and format characters are taken off the text (a soft hyphen or a
+  # zero-width space inside a name hides nothing); it is cut into segments wherever a character neither a letter, a
+  # digit, an underscore, a hyphen nor an apostrophe stands (a space, a path's slash, an address's dot), each the
+  # letters it holds, and each segment into its runs of letters, an identifier in camelCase cut into its words; case
+  # and accents aside. Each word of a name is a pattern: x a whole run (or x and a trailing s), x* a run's start, *x a
+  # run's end (or x and a trailing s), ~x~ anywhere in a run, *x* anywhere in a segment, +x anywhere in a segment
+  # longer than x (nor x and a trailing s), on the text as typed only. A name of several words matches as many
+  # consecutive segments or runs, and, its words joined, anywhere in one segment (six letters or more: motdepasse,
+  # seedphrase). A passphrase and a wallet's recovery phrase are words of letters alone: only their names keep them
+  # out. A name is listed when its commonest use names a secret, and its other uses are false positives accepted, said
+  # here: pass phrase and seed word (code passes phrases, topic models take seed words), mdp (a Markov decision
+  # process), bibeon (off duty, in Korean), +pwd (a command such as pwdx, a variable such as OLDPWD), the Chinese for
+  # cryptography. Names that mostly mean other things are left out -- pass, pw, key, code, a wifi pass, a secret or a
+  # mnemonic phrase --, and a secret after them is what no rule here can tell. English, French, German, Spanish,
+  # Portuguese, Dutch, Swedish, Norwegian, Danish, Finnish, Czech, Hungarian, Turkish, Polish, Indonesian, Vietnamese,
+  # Russian, Greek, Hebrew, Arabic, Chinese, Japanese, Korean, Thai, Hindi.
+  password_names: ["*password*", "*passwd*", "*pswd*", "*psswd*", "*passphrase*", "*passcode*", "+pwd",
+                   "pass phrase", "seed phrase", "seed word", "recovery phrase", "recovery word", "mot de passe",
+                   "*motsdepasse*", "mdp", "phrase de passe", "phrase de recuperation", "*passwort*", "*kennwort*",
+                   "*contrasena*", "senha", "*wachtwoord*", "*losenord*", "~passord~", "*adgangskode*", "*kodeord*",
+                   "*salasana*", "salasano*", "heslo", "hesla", "hesel", "heslem", "heslu", "hesly", "heslum",
+                   "heslech", "hesle", "jelsz*", "sifre*", "haslo", "hasla", "hasle", "hasel", "haslem", "haslu",
+                   "haslom", "haslami", "haslach", "has\u0142*", "hase\u0142", "kata sandi*", "mat khau",
+                   "\u043F\u0430\u0440\u043E\u043B*",
+                   "\u03BA\u03C9\u03B4\u03B9\u03BA* \u03C0\u03C1\u03CC\u03C3\u03B2\u03B1\u03C3*",
+                   "*\u05E1\u05D9\u05E1\u05DE*", "*\u0643\u0644\u0645\u0629 *\u0645\u0631\u0648\u0631*",
+                   "*\u0643\u0644\u0645\u0629 \u0633\u0631", "*\u0643\u0644\u0645\u0629 \u0627\u0644\u0633\u0631",
+                   "*\u0643\u0644\u0645\u0627\u062A *\u0645\u0631\u0648\u0631*",
+                   "*\u0643\u0644\u0645\u0627\u062A \u0633\u0631",
+                   "*\u0643\u0644\u0645\u0627\u062A \u0627\u0644\u0633\u0631", "*\u5BC6\u7801*", "*\u5BC6\u78BC*",
+                   "*\u30D1\u30B9\u30EF\u30FC\u30C9*", "*\uBE44\uBC00\uBC88\uD638*", "*\uD328\uC2A4\uC6CC\uB4DC*",
+                   "\uBE44\uBC88*", "*\u0E23\u0E2B\u0E31\u0E2A\u0E1C\u0E48\u0E32\u0E19*",
+                   "*\u092A\u093E\u0938\u0935\u0930\u094D\u0921*"]
+  # A digit or a symbol written for a letter: the text is read a second time with each of them as that letter
+  # (p4ssw0rd, pa$$word).
+  password_lookalikes: {"0": "o", "1": "i", "3": "e", "4": "a", "5": "s", "7": "t", "@": "a", "$": "s"}
+manual:
+  max_chars: 120               # a title the user types; longer, or empty once folded, is refused
+search:
+  scan_limit: 2000             # the newest conversations whose titles a search reads, decrypted

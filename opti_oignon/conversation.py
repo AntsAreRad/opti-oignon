@@ -57,6 +57,205 @@ except ImportError:
     def _encrypt(v: str) -> str: return v  # type: ignore[misc]
     def _decrypt(v: str) -> str: return v  # type: ignore[misc]
 
+try:
+    from .encryption import _ENCRYPTED_PREFIX_V1, _ENCRYPTED_PREFIX_V2
+    _ENCRYPTED_PREFIXES = (_ENCRYPTED_PREFIX_V2, _ENCRYPTED_PREFIX_V1)
+except ImportError:
+    # Loaded alone, or beside a stand-in encryption module: the prefixes the field
+    # encryption writes (a contract holds them equal to encryption.py's).
+    _ENCRYPTED_PREFIXES = ("ENC2:", "ENC:")
+
+# ============================================================================
+# Automatic titles
+# ============================================================================
+
+try:
+    from . import conversation_titles as _titles
+except ImportError:
+    # Loaded alone where a suite does not seed it: no automatic title, the store
+    # as it was before titles.
+    _titles = None
+
+# The placeholder a conversation is born with (a contract holds it equal to
+# conversation_titles.PLACEHOLDER), and the configuration of the titles.
+_PLACEHOLDER = "New conversation"
+_TITLES_PATH = Path(__file__).resolve().parent / "config" / "titles.yaml"
+_titles_read: dict[str, Any] = {"done": False, "config": None}
+_titles_lock = threading.Lock()
+
+# The three columns that carry where a title came from, the digest of the
+# typed words that made it and the id of their turn, as an older file gains
+# them. The default is the closed position: a writer that forgets the source
+# writes a title nothing replaces.
+_CONVERSATION_TITLE_COLUMNS = (
+    ("title_source", "TEXT NOT NULL DEFAULT 'legacy'"),
+    ("title_basis", "TEXT NOT NULL DEFAULT ''"),
+    ("title_turn", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
+def _titles_config():
+    """The titles configuration, read once from config/titles.yaml.
+
+    None -- no automatic title -- when the titles module is absent, or the file
+    cannot be read or holds what the loader refuses; said once, by name, never
+    with the file's content.
+    """
+    if _titles is None:
+        return None
+    # Read once, under a lock: a second first caller waits for the reading
+    # rather than taking titles off while it runs.
+    with _titles_lock:
+        if not _titles_read["done"]:
+            try:
+                import yaml
+
+                with open(_TITLES_PATH, encoding="utf-8") as handle:
+                    _titles_read["config"] = _titles.read_config(yaml.safe_load(handle))
+            except _titles.TitlesConfigError as exc:
+                logger.warning("Automatic titles off: %s refused (%s)", _TITLES_PATH.name, exc)
+            except Exception as exc:
+                logger.warning("Automatic titles off: %s cannot be read (%s)", _TITLES_PATH.name,
+                               type(exc).__name__)
+            _titles_read["done"] = True
+    return _titles_read["config"]
+
+
+def _title_read(stored: str | None) -> str:
+    """A stored title as it is served: decrypted; one still encrypted -- no key, another key, a value that does not
+    decrypt -- is served empty, never as ciphertext, and never fails the read it is part of."""
+    try:
+        title = _decrypt(stored) if isinstance(stored, str) else ""
+    except Exception:
+        return ""
+    return "" if not isinstance(title, str) or title.startswith(_ENCRYPTED_PREFIXES) else title
+
+
+def _key_loaded() -> bool:
+    """Whether the field key is loaded; True when it cannot be told (every title is then tried)."""
+    try:
+        from .encryption import get_encryption_manager
+
+        return bool(get_encryption_manager().has_key)
+    except Exception:
+        return True
+
+
+def _title_reader():
+    """``_title_read`` for one listing: when a title does not decrypt and the field key is not loaded, the other
+    encrypted titles of the listing are served empty without being tried -- a keyless listing logs one failure, not
+    one per title. With the key loaded, a title that does not decrypt is that title's alone: every other is read."""
+    keyless = [False]
+
+    def read(stored):
+        sealed = isinstance(stored, str) and stored.startswith(_ENCRYPTED_PREFIXES)
+        if sealed and keyless[0]:
+            return ""
+        title = _title_read(stored)
+        if sealed and not title and not _key_loaded():
+            keyless[0] = True
+        return title
+
+    return read
+
+
+def _turn_read(stored: Any) -> Any:
+    """A stored user turn's content as the title rule reads it: decrypted, or ``SEALED`` when it could not be -- its
+    decryption failed, or left it as stored with its encryption prefix. A turn typed beginning as a ciphertext does
+    is stored as typed by the field encryption and cannot be told from one: it is sealed too."""
+    if not isinstance(stored, str):
+        return stored
+    try:
+        plain = _decrypt(stored)
+    except Exception:
+        return _titles.SEALED
+    if not isinstance(plain, str) or (stored.startswith(_ENCRYPTED_PREFIXES) and plain == stored):
+        return _titles.SEALED
+    return plain
+
+
+def _holds_basis(sealed: Any, messages: Any) -> bool | None:
+    """Whether one of a sync payload's user turns holds the typed words a local title came from -- the digest the
+    title keeps, decrypted, against each turn's typed words and its whole content, a withdrawn turn aside: True,
+    False, or None when it cannot be told (the digest does not decrypt here, or a turn arrived still sealed: its
+    sender could not read it)."""
+    if _titles is None:
+        return None
+    basis = _title_read(sealed)
+    if not basis:
+        return None
+    # The apply stores no turn from a payload whose messages are not a list.
+    unknown = False
+    for message in messages if isinstance(messages, list) else []:
+        if not isinstance(message, dict) or message.get("role") != "user" \
+                or not isinstance(message.get("content"), str):
+            continue
+        context = message.get("context")
+        if isinstance(context, list) and "withdrawn" in context:
+            continue
+        content = message["content"]
+        if content.startswith(_ENCRYPTED_PREFIXES):
+            unknown = True
+            continue
+        segments = message.get("segments") if isinstance(message.get("segments"), list) else []
+        origin = message.get("origin") if isinstance(message.get("origin"), str) else "typed"
+        typed = _titles.typed_text(content, origin, segments)
+        if basis in {_titles.basis_of(typed), _titles.basis_of(content.strip())}:
+            return True
+    return None if unknown else False
+
+
+_RULE_PRINT: list[str] = []
+
+
+def _rule_print() -> str:
+    """The digest of the titles module's code as this process loaded it; "" when it cannot be read."""
+    if not _RULE_PRINT:
+        try:
+            with open(_titles.__file__, "rb") as handle:
+                _RULE_PRINT.append(hashlib.sha256(handle.read()).hexdigest())
+        except Exception:
+            _RULE_PRINT.append("")
+    return _RULE_PRINT[0]
+
+
+def _titles_print(cfg: Any) -> str:
+    """What a title is drawn under: the settings and the rule's code, digested -- either changed, and every title
+    the rule drew, every placeholder it settled, is read again."""
+    return hashlib.sha256((_titles.settings_digest(cfg.derive) + _rule_print()).encode("ascii")).hexdigest()[:16]
+
+
+def _settled_mark(cfg: Any) -> str:
+    """What a placeholder's title_turn says once every turn the rule reads was read and none titles."""
+    return "-" + _titles_print(cfg)
+
+
+def _turn_mark(turn: Any, cfg: Any) -> str:
+    """What an automatic title's title_turn says: the id of the turn it came from, and what it was drawn under."""
+    return f"{turn}:{_titles_print(cfg)}"
+
+
+def _received_title(title: Any) -> str | None:
+    """A title another device sent, as this one keeps it: one line, cut at the manual bound; None when there is none
+    to keep -- absent, empty (its sender could not read it), nothing of it draws, or it begins as a ciphertext."""
+    if not isinstance(title, str):
+        return None
+    if _titles is None:
+        return " ".join(title.split()) or None
+    cfg = _titles_config()
+    return _titles.fold_manual(title, cfg.manual_max_chars if cfg is not None else None, _ENCRYPTED_PREFIXES,
+                               cut=True)
+
+
+def _manual_title(title: Any) -> str | None:
+    """A title the user or a caller gives, as the store keeps it: one line, white space collapsed; None when nothing
+    of it draws (the route bounds and refuses; the store folds what it is handed)."""
+    if not isinstance(title, str):
+        return None
+    if _titles is None:
+        return " ".join(title.split()) or None
+    return _titles.fold_manual(title, None)
+
 # ============================================================================
 # Estimation de tokens - import avec fallback
 # ============================================================================
@@ -88,7 +287,7 @@ def _estimate_tokens(text: str, model: str | None = None) -> int:
 
 # Allowed column names for dynamic UPDATE queries
 _CONV_UPDATE_COLS = frozenset({
-    "title", "model", "task_type", "preset", "metadata", "updated_at",
+    "title", "model", "task_type", "preset", "metadata", "updated_at", "title_source", "title_basis",
 })
 
 
@@ -309,6 +508,15 @@ def _migrate_contexts(conn, table):
     conn.executemany(f"UPDATE {table} SET context = ? WHERE id = ?", updates)
 
 
+def _migrate_title_sources(conn):
+    """Write the source of each title an older file holds: the placeholder is the default, any other was written
+    before the store's rule, and is never replaced (legacy). It labels titles; it writes none."""
+    conn.execute(
+        "UPDATE conversations SET title_source = CASE WHEN title = ? THEN 'default' ELSE 'legacy' END",
+        (_PLACEHOLDER,),
+    )
+
+
 def _withdrawn_in(conn, lineage):
     """Whether ``lineage`` holds a source the user withdrew, or was cut while any source is withdrawn."""
     if not lineage:
@@ -385,6 +593,9 @@ class Conversation:
     preset: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     messages: list[Message] = field(default_factory=list)
+    # Where the title came from: default (the placeholder), auto (the store's
+    # rule), refined, manual (the user's), legacy (older than the rule).
+    title_source: str = "default"
 
     @property
     def message_count(self) -> int:
@@ -401,6 +612,7 @@ class Conversation:
         return {
             "id": self.id,
             "title": self.title,
+            "title_source": self.title_source,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
             "model": self.model,
@@ -632,7 +844,10 @@ class ConversationManager:
                         model TEXT,
                         task_type TEXT,
                         preset TEXT,
-                        metadata TEXT DEFAULT '{}'
+                        metadata TEXT DEFAULT '{}',
+                        title_source TEXT NOT NULL DEFAULT 'legacy',
+                        title_basis TEXT NOT NULL DEFAULT '',
+                        title_turn TEXT NOT NULL DEFAULT ''
                     );
 
                     CREATE TABLE IF NOT EXISTS messages (
@@ -683,6 +898,25 @@ class ConversationManager:
                     except Exception:
                         conn.rollback()
                         raise
+                # Titles' sources arrived after the table too: an older file
+                # gains the columns in one transaction. A placeholder title is
+                # the default, which the store's rule titles when the backend
+                # starts (tend_titles); any other was written before the
+                # rule, and is never replaced.
+                titled = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
+                adding = [(column, definition) for column, definition in _CONVERSATION_TITLE_COLUMNS
+                          if column not in titled]
+                if adding:
+                    conn.execute("BEGIN IMMEDIATE")
+                    try:
+                        for column, definition in adding:
+                            conn.execute(f"ALTER TABLE conversations ADD COLUMN {column} {definition}")
+                        if "title_source" not in titled:
+                            _migrate_title_sources(conn)
+                        conn.commit()
+                    except Exception:
+                        conn.rollback()
+                        raise
         except Exception as e:
             logger.error(f"Error initializing DB: {e}")
             raise
@@ -697,7 +931,7 @@ class ConversationManager:
             finally:
                 conn.close()
 
-    def _row_to_conversation(self, row: sqlite3.Row) -> Conversation:
+    def _row_to_conversation(self, row: sqlite3.Row, read_title: Callable[[Any], str] = _title_read) -> Conversation:
         """Convert a SQLite row to a Conversation object (without messages)."""
         metadata = {}
         try:
@@ -705,9 +939,10 @@ class ConversationManager:
         except (json.JSONDecodeError, TypeError):
             pass
 
+        keys = row.keys()
         return Conversation(
             id=row["id"],
-            title=row["title"],
+            title=read_title(row["title"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             model=row["model"],
@@ -715,7 +950,119 @@ class ConversationManager:
             preset=row["preset"],
             metadata=metadata,
             messages=[],
+            title_source=row["title_source"] if "title_source" in keys else "legacy",
         )
+
+    def _retitle(self, conn: sqlite3.Connection, conv_id: str, *, removed: Any = None, added: bool = False) -> bool:
+        """Write the title rule (a) gives, inside the caller's transaction; whether it wrote.
+
+        From the typed words of the first user turns (conversation_titles), unless
+        the title is the user's (manual) or older than the rule (legacy): those
+        are never touched, by the SQL condition itself. When no turn gives a
+        title any more -- the turn deleted, its document withdrawn -- the
+        conversation returns to the placeholder. Unchanged words leave the row
+        as it is. Never writes updated_at, and never publishes: the caller's
+        mutation publishes once, after its commit. A turn ``added`` comes after
+        every turn before it: it touches no title already drawn, nor one whose
+        reading it lies past. A mutation that ``removed`` turns or lowered them
+        -- their ids -- touches the title only when the title's own turn is
+        among them. A title that cannot be derived -- a turn
+        before the one that would title does not decrypt -- leaves the title as
+        it was, unless its own turn went: then the placeholder comes back, to be
+        titled again as the backend starts with the key (tend_titles). The
+        mutation it rides is never refused for it.
+        """
+        cfg = _titles_config()
+        if cfg is None or not cfg.enabled:
+            return False
+        try:
+            return self._retitle_with(conn, conv_id, cfg, removed, added)
+        except sqlite3.Error:
+            raise
+        except Exception as exc:
+            logger.warning("Title of conversation %s not derived (%s)", conv_id, type(exc).__name__)
+            return False
+
+    def _retitle_with(self, conn: sqlite3.Connection, conv_id: str, cfg: Any, removed: Any, added: bool) -> bool:
+        # A manual or legacy title is kept by the SQL condition of each write
+        # alone: one place says it, and a rename in another process between
+        # the read and the write cannot slip past it.
+        row = conn.execute(
+            "SELECT title_source, title_basis, title_turn FROM conversations WHERE id = ?", (conv_id,)
+        ).fetchone()
+        if row is None or row["title_source"] not in _titles.AUTOMATIC:
+            return False
+        if added and row["title_source"] != "default" and row["title_turn"].endswith(":" + _titles_print(cfg)):
+            # A turn added comes after the one the title came from, drawn under these settings and this rule.
+            return False
+        if added and conn.execute(
+            "SELECT COUNT(*) FROM messages WHERE conversation_id = ? AND role = 'user'", (conv_id,)
+        ).fetchone()[0] > cfg.derive.max_user_turns:
+            # The turn added lies past the turns the rule reads: nothing it reads changed.
+            return False
+        if removed is not None and row["title_source"] in ("auto", "refined") and row["title_turn"] \
+                and row["title_turn"].split(":")[0] not in {str(turn) for turn in removed}:
+            # The turn the title came from is still there, as it was: the
+            # title stands, whatever else went.
+            return False
+        users = conn.execute(
+            """SELECT id, content, origin, segments, context, lineage FROM messages
+               WHERE conversation_id = ? AND role = 'user'
+               ORDER BY id ASC LIMIT ?""",
+            (conv_id, cfg.derive.max_user_turns),
+        ).fetchall()
+        turns = []
+        for user in users:
+            try:
+                segments = json.loads(user["segments"])
+            except (TypeError, ValueError):
+                segments = None
+            context, _lineage = _stored_context("user", user["origin"], user["context"], user["lineage"])
+            turns.append((_turn_read(user["content"]), user["origin"], segments, context))
+        found = _titles.first_typed_source(turns, cfg, defect=_origin_defect)
+        unreadable = found is _titles.UNREADABLE
+        # A placeholder no turn can title, every turn read under these settings, is settled: the backend's start
+        # leaves it be until the settings change (tend_titles).
+        settled = _settled_mark(cfg)
+        if unreadable:
+            # A turn that may title, before any that does, is still encrypted
+            # (no key, or another key): which title is right cannot be told.
+            # The title stays as it is -- a placeholder no longer settled --
+            # unless its own turn went away: then the placeholder.
+            if removed is None:
+                if row["title_source"] == "default" and row["title_turn"]:
+                    conn.execute(
+                        "UPDATE conversations SET title_turn = '' WHERE id = ? AND title_source = 'default'",
+                        (conv_id,),
+                    )
+                return False
+            found = None
+        automatic = ", ".join(f"'{source}'" for source in _titles.AUTOMATIC)
+        if found is None:
+            mark = "" if unreadable else settled
+            if row["title_source"] == "default":
+                if row["title_turn"] != mark:
+                    conn.execute(
+                        "UPDATE conversations SET title_turn = ? WHERE id = ? AND title_source = 'default'",
+                        (mark, conv_id),
+                    )
+                return False
+            cursor = conn.execute(
+                f"UPDATE conversations SET title = ?, title_source = 'default', title_basis = '', title_turn = ? "
+                f"WHERE id = ? AND title_source IN ({automatic})",
+                (_PLACEHOLDER, mark, conv_id),
+            )
+            return cursor.rowcount > 0
+        title, basis, index = found
+        turn = _turn_mark(users[index]["id"], cfg)
+        if row["title_basis"] and _decrypt(row["title_basis"]) == basis and row["title_turn"] == turn:
+            return False
+        cursor = conn.execute(
+            f"UPDATE conversations SET title = ?, title_source = 'auto', title_basis = ?, title_turn = ? "
+            f"WHERE id = ? AND title_source IN ({automatic})",
+            (_encrypt(title), _encrypt(basis), turn, conv_id),
+        )
+        return cursor.rowcount > 0
 
     def _row_to_message(self, row: sqlite3.Row) -> Message:
         """Convert a SQLite row to a Message object."""
@@ -797,6 +1144,7 @@ class ConversationManager:
             "conversation": {
                 "id": conv.id,
                 "title": conv.title,
+                "title_source": conv.title_source,
                 "created_at": conv.created_at,
                 "updated_at": conv.updated_at,
                 "model": conv.model,
@@ -833,7 +1181,13 @@ class ConversationManager:
         """
         conv_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
-        title = title or "New conversation"
+        # A title the caller names is the user's (manual), one line, encrypted
+        # like the turns; none, or the placeholder's own words, is the
+        # placeholder, which the store's rule replaces.
+        title = _manual_title(title) if title else None
+        source = "manual" if title and title != _PLACEHOLDER else "default"
+        title = title if source == "manual" else _PLACEHOLDER
+        stored_title = _encrypt(title) if source == "manual" else title
         meta_json = json.dumps(metadata or {})
 
         with self._lock:
@@ -841,9 +1195,10 @@ class ConversationManager:
             try:
                 conn.execute(
                     """INSERT INTO conversations
-                       (id, title, created_at, updated_at, model, task_type, preset, metadata)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (conv_id, title, now, now, model, task_type, preset, meta_json),
+                       (id, title, created_at, updated_at, model, task_type, preset, metadata,
+                        title_source, title_basis)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')""",
+                    (conv_id, stored_title, now, now, model, task_type, preset, meta_json, source),
                 )
                 conn.commit()
                 # Domain commit first, then the sync publish
@@ -860,7 +1215,7 @@ class ConversationManager:
             finally:
                 conn.close()
 
-        logger.debug(f"Conversation creee: {conv_id} - {title}")
+        logger.debug("Conversation created: %s (title %s)", conv_id, source)
 
         return Conversation(
             id=conv_id,
@@ -872,6 +1227,7 @@ class ConversationManager:
             preset=preset,
             metadata=metadata or {},
             messages=[],
+            title_source=source,
         )
 
     def get_conversation(self, conv_id: str) -> Conversation | None:
@@ -937,8 +1293,9 @@ class ConversationManager:
                 ).fetchall()
 
                 conversations = []
+                read = _title_reader()
                 for row in rows:
-                    conv = self._row_to_conversation(row)
+                    conv = self._row_to_conversation(row, read)
                     # Compte les messages sans les charger
                     count_row = conn.execute(
                         "SELECT COUNT(*) as cnt FROM messages WHERE conversation_id = ?",
@@ -1004,17 +1361,24 @@ class ConversationManager:
             True if rename succeeded
         """
         now = datetime.now().isoformat()
+        new_title = _manual_title(new_title)
+        if new_title is None:
+            # Nothing of it draws: no rename, and nothing is written.
+            return False
         with self._lock:
             conn = self._get_connection()
             try:
+                # The user's title: encrypted like the turns, and never replaced
+                # by the store's rule (manual).
                 cursor = conn.execute(
-                    "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ?",
-                    (new_title, now, conv_id),
+                    "UPDATE conversations SET title = ?, title_source = 'manual', title_basis = '', title_turn = '', "
+                    "updated_at = ? WHERE id = ?",
+                    (_encrypt(new_title), now, conv_id),
                 )
                 conn.commit()
                 renamed = cursor.rowcount > 0
                 if renamed:
-                    logger.debug(f"Conversation renommee: {conv_id} -> {new_title}")
+                    logger.debug("Conversation renamed: %s", conv_id)
                     # A rename is synced state; publish the new state.
                     self._publish(
                         conv_id,
@@ -1024,6 +1388,101 @@ class ConversationManager:
                 return renamed
             except Exception as e:
                 logger.error(f"Error renaming conversation {conv_id}: {e}")
+                return False
+            finally:
+                conn.close()
+
+    def tend_titles(self) -> int:
+        """Tend the stored titles as the backend starts, the field key loaded; how many titles it wrote.
+
+        Each conversation still on the placeholder that holds a user turn --
+        older than the store's rule, or saved while titles were off or the key
+        was absent -- is titled from its typed words, and each automatic title
+        drawn under other settings or another rule is drawn again (a name the
+        list has since learned takes the title it let through); and each title or basis
+        still in plaintext -- written before titles were encrypted, or by a
+        process without the key -- is encrypted, when field encryption is on
+        (with it off, encrypting changes nothing and nothing is written).
+        Run again, it writes nothing; it publishes nothing -- the next change
+        of each conversation carries its title. A title that begins as a
+        ciphertext does but does not decrypt is left as it is, served empty.
+        """
+        written = 0
+        cfg = _titles_config()
+        settled = _settled_mark(cfg) if cfg is not None else ""
+        drawn = "%:" + _titles_print(cfg) if cfg is not None else "%"
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                # A placeholder settled, a title drawn, under these settings and this rule is left be.
+                pending = conn.execute(
+                    "SELECT id FROM conversations WHERE ((title_source = 'default' AND title_turn != ?) "
+                    "OR (title_source = 'auto' AND title_turn NOT LIKE ?)) AND EXISTS "
+                    "(SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id "
+                    "AND messages.role = 'user')",
+                    (settled, drawn),
+                ).fetchall()
+                for row in pending:
+                    written += self._retitle(conn, row["id"])
+                for row in conn.execute("SELECT id, title, title_basis FROM conversations").fetchall():
+                    for column in ("title", "title_basis"):
+                        plain = row[column]
+                        if not plain or plain == _PLACEHOLDER or plain.startswith(_ENCRYPTED_PREFIXES):
+                            continue
+                        sealed = _encrypt(plain)
+                        if sealed != plain:
+                            # Only the value it read: a write in between keeps its own.
+                            written += conn.execute(
+                                f"UPDATE conversations SET {column} = ? WHERE id = ? AND {column} = ?",
+                                (sealed, row["id"], plain),
+                            ).rowcount
+                conn.commit()
+            except Exception as e:
+                logger.error("Error tending the conversations' titles: %s", type(e).__name__)
+                conn.rollback()
+                return 0
+            finally:
+                conn.close()
+        return written
+
+    def fold_manual_title(self, title: Any) -> str | None:
+        """A title the user typed as it is kept: NFC, one line, white space collapsed; None when it is empty or
+        longer than titles.yaml's manual bound (without the titles' configuration, unbounded)."""
+        if _titles is None:
+            folded = " ".join(str(title).split()) if isinstance(title, str) else ""
+            return folded or None
+        cfg = _titles_config()
+        return _titles.fold_manual(title, cfg.manual_max_chars if cfg is not None else None, _ENCRYPTED_PREFIXES)
+
+    def use_automatic_title(self, conv_id: str) -> bool:
+        """Give a conversation's title back to the store's rule; whether the conversation exists.
+
+        The user's own title (manual) is let go: the title is derived again from
+        the typed words of the first turns, or is the placeholder. One
+        transaction, one publish.
+        """
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.execute(
+                    "UPDATE conversations SET title = ?, title_source = 'default', title_basis = '', title_turn = '', "
+                    "updated_at = ? WHERE id = ?",
+                    (_PLACEHOLDER, now, conv_id),
+                )
+                if cursor.rowcount:
+                    self._retitle(conn, conv_id)
+                conn.commit()
+                found = cursor.rowcount > 0
+                if found:
+                    self._publish(
+                        conv_id,
+                        lambda: self._sync_snapshot(conn, conv_id),
+                        updated_at=now,
+                    )
+                return found
+            except Exception as e:
+                logger.error("Error giving conversation %s its automatic title: %s", conv_id, e)
                 return False
             finally:
                 conn.close()
@@ -1169,20 +1628,48 @@ class ConversationManager:
                         return True
 
                     meta_json = json.dumps(conv.get("metadata") or {})
+                    # The received title, one line within the manual bound,
+                    # encrypted at rest like the turns. A peer's automatic or
+                    # unknown source is frozen here (legacy): its turns arrive
+                    # legacy and hold no typed words, so the rule could only
+                    # swap its title for a later local turn's words. A manual
+                    # title stays the user's. A title the peer could not send
+                    # -- empty, its key absent -- is no title: this device's
+                    # stays, frozen too when it was automatic -- while a
+                    # received turn still holds the words it came from; past
+                    # that, the placeholder.
+                    title = _received_title(conv.get("title"))
+                    received = conv.get("title_source")
+                    local = conn.execute(
+                        "SELECT title, title_source, title_basis FROM conversations WHERE id = ?", (conv_id,)
+                    ).fetchone()
+                    if title is None and local is not None:
+                        stored_title, source = local["title"], local["title_source"]
+                        if source in ("auto", "refined"):
+                            if _holds_basis(local["title_basis"], conv.get("messages")) is False:
+                                stored_title, source = _PLACEHOLDER, "default"
+                            else:
+                                source = "legacy"
+                    elif title is None or title == _PLACEHOLDER:
+                        stored_title, source = _PLACEHOLDER, "default"
+                    else:
+                        source = "manual" if received == "manual" else "legacy"
+                        stored_title = _encrypt(title)
                     conn.execute(
                         """INSERT OR REPLACE INTO conversations
                            (id, title, created_at, updated_at, model,
-                            task_type, preset, metadata)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                            task_type, preset, metadata, title_source, title_basis)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')""",
                         (
                             conv_id,
-                            conv.get("title") or "New conversation",
+                            stored_title,
                             conv.get("created_at") or "",
                             conv.get("updated_at") or updated_at or "",
                             conv.get("model"),
                             conv.get("task_type"),
                             conv.get("preset"),
                             meta_json,
+                            source,
                         ),
                     )
                     # Full-state: clear and re-insert the messages from the
@@ -1349,6 +1836,10 @@ class ConversationManager:
                     ", ".join(update_fields)
                 )
                 conn.execute(_q, update_params)
+                if role == "user":
+                    # The title is a function of the stored turns: written in
+                    # this transaction, published with it.
+                    self._retitle(conn, conv_id, added=True)
 
                 conn.commit()
 
@@ -1545,10 +2036,11 @@ class ConversationManager:
                 conn.execute("BEGIN IMMEDIATE")
                 try:
                     rows = conn.execute(
-                        "SELECT id, role, origin, context, lineage FROM messages "
+                        "SELECT id, conversation_id, role, origin, context, lineage FROM messages "
                         "WHERE lineage LIKE ? OR lineage LIKE ?",
                         (f'%"{source}"%', '%"lineage:truncated"%'),
                     ).fetchall()
+                    retitle: dict[str, set] = {}
                     for row in rows:
                         context, lineage = _stored_context(row["role"], row["origin"], row["context"], row["lineage"])
                         if (source not in lineage and "lineage:truncated" not in lineage) or "withdrawn" in context:
@@ -1558,6 +2050,12 @@ class ConversationManager:
                             (json.dumps(sorted({*context, "withdrawn"})), row["id"]),
                         )
                         lowered += 1
+                        if row["role"] == "user":
+                            retitle.setdefault(row["conversation_id"], set()).add(row["id"])
+                    # A withdrawn turn gives no title: each conversation whose
+                    # user turn was lowered is titled again, in this transaction.
+                    for conv_id in sorted(retitle):
+                        self._retitle(conn, conv_id, removed=retitle[conv_id])
                     conn.execute(
                         "INSERT OR IGNORE INTO withdrawn_sources (source, withdrawn_at) VALUES (?, ?)",
                         (source, datetime.now().isoformat()),
@@ -1658,22 +2156,40 @@ class ConversationManager:
 
         # Prepare le terme de search pour LIKE
         search_term = f"%{query.strip()}%"
+        cfg = _titles_config()
 
         with self._lock:
             conn = self._get_connection()
             try:
-                # Search dans les titres et le contenu des messages
-                rows = conn.execute(
-                    """SELECT DISTINCT c.* FROM conversations c
-                       LEFT JOIN messages m ON c.id = m.conversation_id
-                       WHERE c.title LIKE ? OR m.content LIKE ?
-                       ORDER BY c.updated_at DESC
-                       LIMIT ?""",
-                    (search_term, search_term, limit),
-                ).fetchall()
-                return [self._row_to_conversation(r) for r in rows]
+                # The contents, by SQL: an encrypted content never matches,
+                # as before titles. The titles are encrypted like the turns:
+                # the newest scan_limit of them are matched here, decrypted
+                # and folded -- every one, without the titles' configuration.
+                found = {
+                    row["id"]: row for row in conn.execute(
+                        """SELECT DISTINCT c.* FROM conversations c
+                           JOIN messages m ON c.id = m.conversation_id
+                           WHERE m.content LIKE ?
+                           ORDER BY c.updated_at DESC
+                           LIMIT ?""",
+                        (search_term, limit),
+                    ).fetchall()
+                }
+                fold = _titles.fold_search if _titles is not None else (
+                    lambda text: " ".join(str(text).split()).casefold())
+                wanted = fold(query)
+                read = _title_reader()
+                scan = cfg.search_scan_limit if cfg is not None else -1
+                for row in conn.execute(
+                    "SELECT * FROM conversations ORDER BY updated_at DESC LIMIT ?", (scan,),
+                ).fetchall():
+                    if row["id"] not in found and wanted in fold(read(row["title"])):
+                        found[row["id"]] = row
+                ordered = sorted(found.values(), key=lambda row: row["updated_at"] or "", reverse=True)
+                return [self._row_to_conversation(r, read) for r in ordered[:limit]]
             except Exception as e:
-                logger.error(f"Error searching '{query}': {e}")
+                # The query is the user's words: its length alone is said.
+                logger.error("Error searching (a query of %d characters): %s", len(query), e)
                 return []
             finally:
                 conn.close()
@@ -1755,7 +2271,7 @@ class ConversationManager:
         lines = []
 
         # --- En-tete ---
-        lines.append(f"# {conv.title}")
+        lines.append(f"# {' '.join(conv.title.split()) or _PLACEHOLDER}")
         lines.append("")
 
         # Metadata block
@@ -2070,6 +2586,9 @@ class ConversationManager:
                     return False
 
                 conn.execute("DELETE FROM messages WHERE id = ?", (row["id"],))
+                if row["role"] == "user":
+                    # The deleted turn may be the one the title came from.
+                    self._retitle(conn, conv_id, removed={row["id"]})
                 conn.commit()
                 logger.debug(f"Dernier message supprime: id={row['id']} conv={conv_id[:8]}")
                 # A retry-delete is an edit of the conversation,
@@ -2186,11 +2705,14 @@ class ConversationManager:
             conn = self._get_connection()
             try:
                 # Create the conversation with original timestamps
+                # An imported title is the old history's, never replaced
+                # (legacy); it and the turns are encrypted at rest.
                 conn.execute(
                     """INSERT INTO conversations
-                       (id, title, created_at, updated_at, model, task_type, preset, metadata)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                    (conv_id, title, timestamp, timestamp, model, task_type, preset, meta_json),
+                       (id, title, created_at, updated_at, model, task_type, preset, metadata,
+                        title_source, title_basis)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'legacy', '')""",
+                    (conv_id, _encrypt(title), timestamp, timestamp, model, task_type, preset, meta_json),
                 )
 
                 # Message user. An imported entry is legacy: the old
@@ -2201,7 +2723,7 @@ class ConversationManager:
                        (conversation_id, role, content, timestamp, token_estimate, model, metadata,
                         origin, segments)
                        VALUES (?, ?, ?, ?, ?, ?, '{}', 'legacy', '[]')""",
-                    (conv_id, "user", question, timestamp, user_tokens, None),
+                    (conv_id, "user", _encrypt(question), timestamp, user_tokens, None),
                 )
 
                 # Message assistant
@@ -2212,7 +2734,7 @@ class ConversationManager:
                            (conversation_id, role, content, timestamp, token_estimate, model, metadata,
                             origin, segments)
                            VALUES (?, ?, ?, ?, ?, ?, '{}', 'legacy', '[]')""",
-                        (conv_id, "assistant", response, timestamp, assistant_tokens, model),
+                        (conv_id, "assistant", _encrypt(response), timestamp, assistant_tokens, model),
                     )
 
                 conn.commit()

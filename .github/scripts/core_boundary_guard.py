@@ -38,6 +38,9 @@ CORE = frozenset({
     "opti_oignon.config",
     "opti_oignon.context_manager",
     "opti_oignon.conversation",
+    # The store titles a conversation inside the transaction that saves a user
+    # turn: the rule it applies is stdlib-only and pulls nothing at all.
+    "opti_oignon.conversation_titles",
     "opti_oignon.core_client",
     "opti_oignon.core_daemon",
     "opti_oignon.db_encryption",

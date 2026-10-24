@@ -2434,6 +2434,10 @@ def test_xe15_the_refusals_and_the_statuses_read_the_holder(tmp_path):
         from opti_oignon.api import routes_security as routes
 
         enc._DEFAULT_KEYFILE = Path(sys.argv[0]).with_name("xe15.absent")
+        # A setup this contract expects refused must never reach the tree's
+        # configuration, even when a defect lets it through (block 178's blades
+        # on srv: it wrote opti_oignon/config/security.yaml).
+        routes._SECURITY_YAML_PATH = str(Path(sys.argv[0]).with_name("xe15.security.yaml"))
         enc._encryption_manager = enc.EncryptionManager(enabled=False)
         out = {"refused": dbe._environment_key_refused() is not None,
                "status": enc.EncryptionManager(enabled=False).get_status()["env_key_set"],

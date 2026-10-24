@@ -1152,6 +1152,13 @@ fail_under = 0
 # word for word with that module in the set. af14 stays in the tree word
 # for word.
 #
+# test_apply_materialises_conversation_and_reencrypts of
+# tests/test_conversation_apply.py held that a sync apply stores the
+# received title as it came. A title is now content, encrypted at rest like
+# the turns it is made from. It gives way to tt11b of
+# tests/test_auto_title_contracts.py, which repeats it with the title
+# encrypted. It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1550,4 +1557,5 @@ addopts = """
     --deselect=tests/test_allium_injection_contracts.py::test_ij11_the_being_reaches_only_its_closed_list_of_platform_modules
     --deselect=tests/test_startup_checklist_contracts.py::test_c5_report_serializes_with_coherent_counters
     --deselect=tests/test_allium_surface_contracts.py::test_af14_the_production_look_touches_only_the_frozen_modules_and_data_paths
+    --deselect=tests/test_conversation_apply.py::test_apply_materialises_conversation_and_reencrypts
 """

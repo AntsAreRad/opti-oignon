@@ -285,7 +285,10 @@ class ChatSession:
             analysis = self._analyze(question)
             routing = self._route(analysis, self.priority, self.model)
             if self.conversation_id is None:
-                self.conversation_id = self._new_conversation(question[:60], getattr(routing, "model", None))
+                # No title: the store titles the conversation from the typed
+                # words of the turn it saves -- a piped line is a document and
+                # gives none.
+                self.conversation_id = self._new_conversation(None, getattr(routing, "model", None))
                 yield _info(f"conversation {self.conversation_id}")
             # A line that did not come from a keyboard (a pipe, a file) is
             # pasted: its turn is a document, whose words endorse nothing.

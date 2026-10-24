@@ -25,6 +25,9 @@ class ConversationSummary(BaseModel):
     """Summary of a conversation (without messages)."""
     id: str
     title: str
+    # Where the title came from: default, auto (the store's rule), refined,
+    # manual (the user's) or legacy (older than the rule).
+    title_source: str = "default"
     created_at: str | None = None
     updated_at: str | None = None
     message_count: int = 0
@@ -37,6 +40,7 @@ class ConversationDetail(BaseModel):
     """Full detail of a conversation with messages."""
     id: str
     title: str
+    title_source: str = "default"
     messages: list[dict[str, Any]] = Field(default_factory=list)
     created_at: str | None = None
     updated_at: str | None = None

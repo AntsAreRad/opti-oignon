@@ -11,6 +11,46 @@ package costs.
 
 ### Added
 
+- [SECURITY] Conversations are titled automatically. A conversation's
+  title is made from the words its user typed in its first turns -- never
+  a pasted part, an attached document, a turn the model reworded, a
+  withdrawn turn or an answer --, by the store itself, in the transaction
+  that saves, deletes or lowers a user turn
+  (`opti_oignon/conversation_titles.py`, configured in
+  `opti_oignon/config/titles.yaml`). A title holds words of letters only:
+  no character of Unicode's number categories -- no number, version, code
+  or card number, and not the common password made of a word and digits; a
+  number written in words or in ideographs is letters --, nor code, an
+  address, a path, a key written with other characters or a string
+  switching case often. A turn that names a password -- anywhere in its
+  content, typed or pasted, withdrawn or not: one of the names titles.yaml
+  lists, each matched as its pattern says in words, identifiers, options
+  and code, whatever the case and accents, and read a second time with
+  digits and symbols written for letters -- gives no title, nor does any
+  later turn. What no rule can tell is a secret made of letters alone,
+  typed in a turn that names none of those names -- a name that mostly
+  means something else, like pass or pw, is not one --, or alone in a turn
+  before the one that does. A title is bounded and one line. A title the
+  user gives is never replaced by an automatic one, and the chats index
+  offers to give it back to the automatic one; a title given by a rename
+  or a new conversation is folded to one line and refused when nothing of
+  it draws, when it begins as a ciphertext or past its bound. A turn the
+  store cannot decrypt leaves the title as it is, unless a deletion or a
+  withdrawal took the title's own turn: then the placeholder comes back
+  until the backend next starts with the key. Titles are encrypted at rest
+  like the messages they come from, those written before encrypted when
+  the backend next starts -- but for one that begins as a ciphertext does
+  --, searched decrypted, and kept out of the logs with the search's words
+  -- uvicorn's access and WebSocket handshake lines say a request's path,
+  never its query. A title another device could not read is no title: this
+  device's stays, frozen, unless the received turns show that none of them
+  holds its words -- then the placeholder. The legacy history import
+  stores its turns encrypted, as plaintext until now. The conversations
+  still titled "New conversation" that hold a typed turn are titled when
+  the backend starts, and a title drawn under an older list of names or an
+  older rule is drawn again then, or at its conversation's next turn.
+  Refining a title with the local model comes in a block of its own.
+
 - [SECURITY] The knowledge base is encrypted at rest. The RAG store's
   chunks, the memory's facts, and the projects' and the documents' indexes
   -- their texts, their metadata and their embedding vectors, which give a

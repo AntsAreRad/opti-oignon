@@ -2009,7 +2009,8 @@ async def chat_stream(websocket: WebSocket) -> None:
 
         if not conversation_id and CONVERSATION_AVAILABLE and conversation_manager:
             try:
-                conv = conversation_manager.create_conversation(title="New conversation")
+                # No title: the store titles it from the typed words of its first turn.
+                conv = conversation_manager.create_conversation()
                 conversation_id = conv.id
             except Exception as e:
                 logger.error(f"Erreur creation conversation: {e}")

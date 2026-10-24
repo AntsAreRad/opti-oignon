@@ -465,6 +465,10 @@ STORES = {
         quiet=("delete_last_message", "delete_conversation"), place="db_path",
         aside={
             "rename_conversation": "the title, shown in the lists and the exports; no model reads it back",
+            "use_automatic_title": "the title given back to the store's rule, shown in the lists and the exports; "
+                                   "no model reads it back",
+            "tend_titles": "the titles the store's rule derives from the typed turns, and the plaintext ones it "
+                           "encrypts, shown in the lists and the exports; no model reads them back",
             "withdraw_source": _WITHDRAWAL,
         },
         reason="the transcript and its metadata, the summary of its older messages included, read back as "

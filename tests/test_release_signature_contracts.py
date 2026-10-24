@@ -45,6 +45,16 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def _agent_stopped(tmp_path):
+    """The agent gpg starts for a throwaway keyring stops with its test: none outlives the keyring's home."""
+    yield
+    home = tmp_path / "gnupg"
+    if home.is_dir() and shutil.which("gpgconf"):
+        subprocess.run(["gpgconf", "--homedir", str(home), "--kill", "gpg-agent"],
+                       capture_output=True, text=True, timeout=30)
+
+
 def _gpg(home, *args):
     """Run gpg against a throwaway keyring."""
     env = dict(os.environ, GNUPGHOME=home)

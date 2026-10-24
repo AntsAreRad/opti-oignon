@@ -9,6 +9,8 @@
 export interface ConversationSummary {
 	id: string;
 	title: string;
+	/** Where the title came from: default, auto (the server's rule), refined, manual (the user's) or legacy. */
+	title_source?: string;
 	created_at: string | null;
 	updated_at: string | null;
 	message_count: number;
@@ -21,6 +23,7 @@ export interface ConversationSummary {
 export interface ConversationDetail {
 	id: string;
 	title: string;
+	title_source?: string;
 	messages: MessageItem[];
 	created_at: string | null;
 	updated_at: string | null;

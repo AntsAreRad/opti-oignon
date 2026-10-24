@@ -39,8 +39,14 @@ export async function createConversation(
 	return apiPost<ConversationSummary>('/api/conversations', data ?? {});
 }
 
-export async function renameConversation(id: string, title: string): Promise<void> {
-	await apiPatch<void>(`/api/conversations/${id}`, { title });
+/** Rename: the server folds the title to one line and answers the summary it kept. */
+export async function renameConversation(id: string, title: string): Promise<ConversationSummary> {
+	return apiPatch<ConversationSummary>(`/api/conversations/${id}`, { title });
+}
+
+/** Give the title back to the server's rule: derived from the words typed in the first turns. */
+export async function automaticTitle(id: string): Promise<ConversationSummary> {
+	return apiPost<ConversationSummary>(`/api/conversations/${id}/title/auto`, {});
 }
 
 export async function deleteConversation(id: string): Promise<void> {

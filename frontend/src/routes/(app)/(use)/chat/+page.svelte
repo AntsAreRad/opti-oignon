@@ -11,7 +11,9 @@
   lib/chat/chatsIndex.ts builds each request and sorts what comes back.
 
   Every row keeps its actions in sight: a menu button, always drawn, opens
-  Rename, Export and Delete. Rename and Delete ask in a dialog, which shows
+  Rename, Export and Delete, and, for a title the user gave, Use automatic
+  title, which gives it back to the server's rule. Rename and Delete ask in a
+  dialog, which shows
   why the server refused, if it does; Export opens the shell's export
   dialog. A rename or a delete goes through the conversations store, so the
   sidebar's recent chats follow.
@@ -37,7 +39,7 @@
 		morePages,
 		whenOf
 	} from '$lib/chat/chatsIndex';
-	import { deleteConv, renameConv } from '$lib/stores/conversations';
+	import { automaticTitleConv, deleteConv, renameConv } from '$lib/stores/conversations';
 	import { openExportDialog } from '$lib/stores/exportDialog';
 	import { isPhone } from '$lib/stores/ui';
 	import { toastError } from '$lib/stores/notifications';
@@ -48,6 +50,12 @@
 		{ id: 'export', label: 'Export', icon: 'download' },
 		{ id: 'delete', label: 'Delete', icon: 'trash', danger: true }
 	];
+	const AUTO_TITLE: MenuItem = { id: 'auto-title', label: 'Use automatic title', icon: 'retry' };
+
+	/** A chat's actions: a title the user gave can be given back to the automatic one. */
+	function actionsFor(chat: ConversationSummary): MenuItem[] {
+		return chat.title_source === 'manual' ? [ACTIONS[0], AUTO_TITLE, ...ACTIONS.slice(1)] : ACTIONS;
+	}
 
 	/** The words the listing was asked for: the address's `q`. */
 	let query = '';
@@ -156,6 +164,19 @@
 			deleting = chat;
 		} else if (action === 'export') {
 			openExportDialog(chat.id, titleOf(chat));
+		} else if (action === 'auto-title') {
+			void autoTitle(chat);
+		}
+	}
+
+	async function autoTitle(chat: ConversationSummary) {
+		try {
+			const summary = await automaticTitleConv(chat.id);
+			chats = chats.map((c) =>
+				c.id === chat.id ? { ...c, title: summary.title, title_source: summary.title_source } : c
+			);
+		} catch (err: unknown) {
+			toastError(err instanceof Error ? err.message : 'The automatic title could not be restored');
 		}
 	}
 
@@ -181,8 +202,10 @@
 		busy = true;
 		dialogError = null;
 		try {
-			await renameConv(chat.id, title);
-			chats = chats.map((c) => (c.id === chat.id ? { ...c, title } : c));
+			const summary = await renameConv(chat.id, title);
+			chats = chats.map((c) =>
+				c.id === chat.id ? { ...c, title: summary.title, title_source: summary.title_source } : c
+			);
 			busy = false;
 			closeDialogs();
 		} catch (err: unknown) {
@@ -283,7 +306,7 @@
 									icon="more"
 									label={`Actions for ${titleOf(chat)}`}
 									size={$isPhone ? 'lg' : 'md'}
-									items={ACTIONS}
+									items={actionsFor(chat)}
 									on:select={(event) => act(event.detail, chat)}
 								/>
 							</li>

@@ -101,6 +101,34 @@ from .routes_vision import router as vision_router
 logger = logging.getLogger(__name__)
 
 
+class _PathWithoutQuery(logging.Filter):
+    """uvicorn's access line and its WebSocket handshake line with the request's path alone: the query -- a
+    search's words, a token a client hands -- is said to be there, never written."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        # The access line (uvicorn.access) says client, method, path, version and status; a handshake line
+        # (uvicorn.error) says client, path and outcome.
+        if record.name == "uvicorn.access":
+            index = 2
+        elif isinstance(record.msg, str) and '"WebSocket %s"' in record.msg:
+            index = 1
+        else:
+            return True
+        if isinstance(args, tuple) and len(args) > index and isinstance(args[index], str) and "?" in args[index]:
+            record.args = args[:index] + (args[index].split("?", 1)[0] + "?(query)",) + args[index + 1:]
+        return True
+
+
+def _install_log_filters() -> None:
+    """The query filter on uvicorn's access logger and on the logger its WebSocket handshakes are written to,
+    once each."""
+    for name in ("uvicorn.access", "uvicorn.error"):
+        target = logging.getLogger(name)
+        if not any(isinstance(f, _PathWithoutQuery) for f in target.filters):
+            target.addFilter(_PathWithoutQuery())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifecycle management."""
@@ -164,6 +192,22 @@ async def lifespan(app: FastAPI):
         retention = asyncio.create_task(_journal_retention())
     except Exception:  # noqa: BLE001 - startup must not break on the run journal
         logger.warning("boot: the run journal could not be tended", exc_info=True)
+    # The conversations' titles are tended now, the key loaded: those still on
+    # the placeholder that hold a user turn are titled from their typed words,
+    # and those still in plaintext are encrypted. Idempotent, and it never
+    # raises: the boot never breaks on it.
+    try:
+        from opti_oignon.conversation import conversation_manager as _conversations
+        _tended = _conversations.tend_titles()
+        if _tended:
+            logger.info("boot: %d conversation title(s) tended", _tended)
+    except Exception:  # noqa: BLE001 - startup must not break on the conversations
+        logger.warning("boot: the conversations' titles could not be tended", exc_info=True)
+    # uvicorn's access and WebSocket handshake lines say a request's path,
+    # never its query: a search's words and a token a client hands in it
+    # stay out of them. Other lines uvicorn or a library writes at DEBUG
+    # are not read here.
+    _install_log_filters()
     # Load all enabled plugins and register their hooks, so plugin effects apply
     # during inference AFTER a restart -- not only right after enable_plugin().
     # (The registry persists "enabled" state; the loaded instances do not, so

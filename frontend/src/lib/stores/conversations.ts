@@ -93,15 +93,37 @@ export async function createNewConversation(data?: {
 }
 
 /** Renomme une conversation. */
-export async function renameConv(id: string, title: string): Promise<void> {
+export async function renameConv(id: string, title: string): Promise<ConversationSummary> {
 	error.set(null);
 	try {
-		await api.renameConversation(id, title);
+		// The title the server kept, folded to one line, not the one typed.
+		const summary = await api.renameConversation(id, title);
 		conversations.update((list) =>
-			list.map((c) => (c.id === id ? { ...c, title } : c))
+			list.map((c) =>
+				c.id === id ? { ...c, title: summary.title, title_source: summary.title_source } : c
+			)
 		);
+		return summary;
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : 'Failed to rename conversation';
+		error.set(msg);
+		throw err;
+	}
+}
+
+/** Give a conversation's title back to the server's rule; the summary it answers replaces the entry. */
+export async function automaticTitleConv(id: string): Promise<ConversationSummary> {
+	error.set(null);
+	try {
+		const summary = await api.automaticTitle(id);
+		conversations.update((list) =>
+			list.map((c) =>
+				c.id === id ? { ...c, title: summary.title, title_source: summary.title_source } : c
+			)
+		);
+		return summary;
+	} catch (err: unknown) {
+		const msg = err instanceof Error ? err.message : 'Failed to restore the automatic title';
 		error.set(msg);
 		throw err;
 	}
