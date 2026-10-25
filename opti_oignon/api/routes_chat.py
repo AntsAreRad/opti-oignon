@@ -74,6 +74,25 @@ try:
 except Exception:
     _emergency_stop = None
 
+# The refinement of a conversation's automatic title by the local model
+# (rule b, off as shipped): dispatched before each done, never awaited.
+try:
+    from opti_oignon import title_refiner as _title_refiner
+except Exception:
+    _title_refiner = None
+
+
+def _refine_title(conversation_id: str | None) -> None:
+    """Hand the conversation's automatic title to the local model's refinement before the answer's done: the list the
+    client reads right after done already says it is pending. The store says what may be refined; with the
+    refinement off this reads nothing. Never raises, never waits on a model."""
+    if not conversation_id or _title_refiner is None or not CONVERSATION_AVAILABLE or conversation_manager is None:
+        return
+    try:
+        _title_refiner.maybe_refine(conversation_manager, conversation_id)
+    except Exception:  # noqa: BLE001 - an answer is never refused for its title
+        logger.debug("title refinement not dispatched")
+
 # The step frames of a reply: one recorder per turn, its frames queued here
 try:
     from opti_oignon import pipeline_step as _pipeline_step
@@ -1563,6 +1582,7 @@ async def _stream_turn(
         done_metadata["sandbox_session_id"] = _qs_session.effective_sandbox_id
         done_metadata["sandbox_files"] = sandbox_files
         done_metadata["sandbox_files_created"] = _qs_session.files_created
+    _refine_title(conversation_id)
     await _send_token(websocket, "done", full_response, metadata=done_metadata)
 
     # Nettoyage
@@ -1940,6 +1960,7 @@ async def _stream_chat_coding(
     if final_result.get("plugin_annotations"):
         done_metadata["plugin_annotations"] = final_result["plugin_annotations"]
 
+    _refine_title(conversation_id)
     await _send_token(
         websocket, "done", full_response_text, metadata=done_metadata
     )

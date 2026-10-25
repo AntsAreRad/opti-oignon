@@ -16,6 +16,7 @@ from .schemas import (
     ConversationDetail,
     ConversationRename,
     ConversationSummary,
+    ConversationTitle,
     MessageItem,
     SourceWithdrawRequest,
     SourceWithdrawResponse,
@@ -42,6 +43,31 @@ def _check_available():
         )
 
 
+def _refinement():
+    """The title refinement's module, or None where it cannot be loaded: asked at the call."""
+    try:
+        from opti_oignon import title_refiner
+    except Exception:  # noqa: BLE001 - absence is an answer: nothing pending, nothing to cancel
+        return None
+    return title_refiner
+
+
+def _title_pending(conv_id: str) -> bool:
+    """Whether the local model is refining the conversation's title now; False when that cannot be told."""
+    refiner = _refinement()
+    try:
+        return bool(refiner.pending(conv_id)) if refiner is not None else False
+    except Exception:  # noqa: BLE001 - a summary never fails for it
+        return False
+
+
+def _cancel_refinement(conv_id: str) -> None:
+    """Cancel the refinement of the conversation's title, if one is queued or running; never raises."""
+    refiner = _refinement()
+    if refiner is not None:
+        refiner.cancel(conv_id)
+
+
 def _conv_to_summary(conv) -> dict:
     """Convert a Conversation object to ConversationSummary dict."""
     # Le message_count vient soit de la propriete (si messages charges),
@@ -51,6 +77,7 @@ def _conv_to_summary(conv) -> dict:
         id=conv.id,
         title=conv.title,
         title_source=getattr(conv, "title_source", "default"),
+        title_pending=_title_pending(conv.id),
         created_at=conv.created_at,
         updated_at=conv.updated_at,
         message_count=msg_count,
@@ -145,6 +172,7 @@ def get_conversation(conv_id: str) -> dict:
         id=conv.id,
         title=conv.title,
         title_source=getattr(conv, "title_source", "default"),
+        title_pending=_title_pending(conv.id),
         messages=[m.to_dict() for m in conv.messages],
         created_at=conv.created_at,
         updated_at=conv.updated_at,
@@ -162,6 +190,8 @@ def delete_conversation(conv_id: str) -> Response:
     _check_available()
 
     deleted = conversation_manager.delete_conversation(conv_id)
+    # A refinement of its title writes nothing now.
+    _cancel_refinement(conv_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -178,6 +208,8 @@ def rename_conversation(conv_id: str, body: ConversationRename) -> dict:
     title = conversation_manager.fold_manual_title(body.title)
     if title is None:
         raise HTTPException(status_code=422, detail="A title is one line of text, not empty, within the bound")
+    # The user's title: a refinement of the automatic one writes nothing now.
+    _cancel_refinement(conv_id)
     renamed = conversation_manager.rename_conversation(conv_id, title)
     if not renamed:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -201,6 +233,26 @@ def use_automatic_title(conv_id: str) -> dict:
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return _conv_to_summary(conv)
+
+
+@router.get("/{conv_id}/title", response_model=ConversationTitle)
+def get_conversation_title(conv_id: str) -> dict:
+    """The conversation's title as it stands, and whether the local model is refining it: while it is, when to ask again."""
+    _check_available()
+
+    found = conversation_manager.title_of(conv_id)
+    if found is None:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    title, source = found
+    pending = _title_pending(conv_id)
+    retry_after_ms = None
+    if pending:
+        cfg = conversation_manager.titles_config()
+        retry_after_ms = cfg.refine.poll_after_ms if cfg is not None else None
+        pending = retry_after_ms is not None
+    return ConversationTitle(
+        title=title, title_source=source, title_pending=pending, retry_after_ms=retry_after_ms
+    ).model_dump()
 
 
 @router.get("/{conv_id}/messages", response_model=list[MessageItem])

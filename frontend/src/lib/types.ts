@@ -11,6 +11,8 @@ export interface ConversationSummary {
 	title: string;
 	/** Where the title came from: default, auto (the server's rule), refined, manual (the user's) or legacy. */
 	title_source?: string;
+	/** Whether the local model is refining the title now: GET /api/conversations/{id}/title says when it is done. */
+	title_pending?: boolean;
 	created_at: string | null;
 	updated_at: string | null;
 	message_count: number;
@@ -20,10 +22,19 @@ export interface ConversationSummary {
 	total_tokens?: number;
 }
 
+/** A conversation's title as it stands; while the local model refines it, when to ask again (from the server). */
+export interface ConversationTitle {
+	title: string;
+	title_source?: string;
+	title_pending?: boolean;
+	retry_after_ms?: number | null;
+}
+
 export interface ConversationDetail {
 	id: string;
 	title: string;
 	title_source?: string;
+	title_pending?: boolean;
 	messages: MessageItem[];
 	created_at: string | null;
 	updated_at: string | null;

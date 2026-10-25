@@ -28,6 +28,7 @@ import sqlite3
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
+from dataclasses import replace as _replace
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -111,7 +112,8 @@ def _titles_config():
                 import yaml
 
                 with open(_TITLES_PATH, encoding="utf-8") as handle:
-                    _titles_read["config"] = _titles.read_config(yaml.safe_load(handle))
+                    shipped = _titles.read_config(yaml.safe_load(handle))
+                _titles_read["config"] = _with_local_refine(shipped)
             except _titles.TitlesConfigError as exc:
                 logger.warning("Automatic titles off: %s refused (%s)", _TITLES_PATH.name, exc)
             except Exception as exc:
@@ -119,6 +121,41 @@ def _titles_config():
                                type(exc).__name__)
             _titles_read["done"] = True
     return _titles_read["config"]
+
+
+def _with_local_refine(cfg: Any) -> Any:
+    """``cfg`` with what the machine sets for the refinement in local.yaml beside titles.yaml, never committed: its
+    switch and its model (``titles: {refine: {enabled: <bool>, model: <name>}}``).
+
+    A missing file sets nothing. One that cannot be read or does not parse, a top level that is no mapping, and a
+    value the reader refuses set nothing for what they touch, each said by name, never with the file's content; what
+    titles.yaml says stands. Read with titles.yaml, once.
+    """
+    local = _TITLES_PATH.with_name("local.yaml")
+    stands = "the refinement stands as titles.yaml says"
+    try:
+        text = local.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return cfg
+    except (OSError, UnicodeDecodeError) as exc:
+        logger.warning("%s cannot be read (%s): %s", local.name, type(exc).__name__, stands)
+        return cfg
+    try:
+        import yaml
+
+        data = yaml.safe_load(text)
+    except Exception as exc:
+        logger.warning("%s does not parse (%s): %s", local.name, type(exc).__name__, stands)
+        return cfg
+    if data is None:
+        return cfg
+    if not isinstance(data, dict):
+        logger.warning("%s holds no mapping: %s", local.name, stands)
+        return cfg
+    refine, reasons = _titles.local_refine(data.get("titles"), cfg.refine)
+    for reason in reasons:
+        logger.warning("%s %s: %s", local.name, reason, stands)
+    return _replace(cfg, refine=refine)
 
 
 def _title_read(stored: str | None) -> str:
@@ -1005,20 +1042,7 @@ class ConversationManager:
             # The turn the title came from is still there, as it was: the
             # title stands, whatever else went.
             return False
-        users = conn.execute(
-            """SELECT id, content, origin, segments, context, lineage FROM messages
-               WHERE conversation_id = ? AND role = 'user'
-               ORDER BY id ASC LIMIT ?""",
-            (conv_id, cfg.derive.max_user_turns),
-        ).fetchall()
-        turns = []
-        for user in users:
-            try:
-                segments = json.loads(user["segments"])
-            except (TypeError, ValueError):
-                segments = None
-            context, _lineage = _stored_context("user", user["origin"], user["context"], user["lineage"])
-            turns.append((_turn_read(user["content"]), user["origin"], segments, context))
+        users, turns = self._user_turns(conn, conv_id, cfg)
         found = _titles.first_typed_source(turns, cfg, defect=_origin_defect)
         unreadable = found is _titles.UNREADABLE
         # A placeholder no turn can title, every turn read under these settings, is settled: the backend's start
@@ -1063,6 +1087,25 @@ class ConversationManager:
             (_encrypt(title), _encrypt(basis), turn, conv_id),
         )
         return cursor.rowcount > 0
+
+    def _user_turns(self, conn: sqlite3.Connection, conv_id: str, cfg: Any) -> tuple[list, list]:
+        """The conversation's first user turns as the rule reads them, in the order they were saved: their rows, and
+        each as ``(content, origin, segments, context)``, the content decrypted or ``SEALED``."""
+        users = conn.execute(
+            """SELECT id, content, origin, segments, context, lineage FROM messages
+               WHERE conversation_id = ? AND role = 'user'
+               ORDER BY id ASC LIMIT ?""",
+            (conv_id, cfg.derive.max_user_turns),
+        ).fetchall()
+        turns = []
+        for user in users:
+            try:
+                segments = json.loads(user["segments"])
+            except (TypeError, ValueError):
+                segments = None
+            context, _lineage = _stored_context("user", user["origin"], user["context"], user["lineage"])
+            turns.append((_turn_read(user["content"]), user["origin"], segments, context))
+        return users, turns
 
     def _row_to_message(self, row: sqlite3.Row) -> Message:
         """Convert a SQLite row to a Message object."""
@@ -1417,7 +1460,7 @@ class ConversationManager:
                 # A placeholder settled, a title drawn, under these settings and this rule is left be.
                 pending = conn.execute(
                     "SELECT id FROM conversations WHERE ((title_source = 'default' AND title_turn != ?) "
-                    "OR (title_source = 'auto' AND title_turn NOT LIKE ?)) AND EXISTS "
+                    "OR (title_source IN ('auto', 'refined') AND title_turn NOT LIKE ?)) AND EXISTS "
                     "(SELECT 1 FROM messages WHERE messages.conversation_id = conversations.id "
                     "AND messages.role = 'user')",
                     (settled, drawn),
@@ -1483,6 +1526,101 @@ class ConversationManager:
                 return found
             except Exception as e:
                 logger.error("Error giving conversation %s its automatic title: %s", conv_id, e)
+                return False
+            finally:
+                conn.close()
+
+    def titles_config(self) -> Any:
+        """The configuration this store titles under: config/titles.yaml, with the refinement's switch and model a
+        machine sets in local.yaml; None when automatic titles are off."""
+        return _titles_config()
+
+    def title_of(self, conv_id: str) -> tuple[str, str] | None:
+        """``(title, title_source)`` of a conversation as it is served, its turns unread; None when there is none."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                row = conn.execute("SELECT title, title_source FROM conversations WHERE id = ?", (conv_id,)).fetchone()
+            finally:
+                conn.close()
+        return None if row is None else (_title_read(row["title"]), row["title_source"])
+
+    def title_state(self, conv_id: str) -> tuple[str, str, str, list[str], str] | None:
+        """What rule (b) may refine: ``(title_turn, basis, title, words, model)`` while the conversation's title is
+        the rule's own as the rule reads it now; None otherwise. Reads only.
+
+        The rule's own: automatic, drawn under these settings and this rule, from a turn that still gives it -- no
+        turn before it sealed, its words unchanged. ``words`` are the words rule (a) keeps of that turn
+        (``kept_words``): all the model may be handed. ``basis`` is the digest as stored, for the compare-and-set
+        of ``commit_refined_title``; ``title`` the rule's title, decrypted; ``model`` the conversation's, "" when
+        it has none. A placeholder, a manual, legacy or refined title, a title drawn under other settings or
+        another rule, a turn that does not decrypt, and titles off: None.
+        """
+        cfg = _titles_config()
+        if cfg is None or not cfg.enabled:
+            return None
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                row = conn.execute(
+                    "SELECT title, title_source, title_basis, title_turn, model FROM conversations WHERE id = ?",
+                    (conv_id,),
+                ).fetchone()
+                if row is None or row["title_source"] != "auto":
+                    return None
+                users, turns = self._user_turns(conn, conv_id, cfg)
+            except Exception as e:
+                logger.warning("Title of conversation %s not read for refining (%s)", conv_id, type(e).__name__)
+                return None
+            finally:
+                conn.close()
+        found = _titles.first_typed_source(turns, cfg, defect=_origin_defect)
+        # UNREADABLE is a marker of its own, not a title: a turn before the title's does not decrypt.
+        if found is None or found is _titles.UNREADABLE:
+            return None
+        _title, basis, index = found
+        if _turn_mark(users[index]["id"], cfg) != row["title_turn"] or _title_read(row["title_basis"]) != basis:
+            return None
+        content, origin, segments, _context = turns[index]
+        words = _titles.kept_words(_titles.typed_text(content, origin, segments), cfg.derive)
+        title = _title_read(row["title"])
+        if not words or not title:
+            return None
+        return row["title_turn"], row["title_basis"], title, words, row["model"] or ""
+
+    def commit_refined_title(self, conv_id: str, title_turn: str, basis: str, title: str) -> bool:
+        """Write rule (b)'s title over the rule's own; whether it wrote. One transaction, one publish when it wrote.
+
+        Only while the title is still the one refined, by the SQL condition itself: automatic, from the same turn
+        under the same print, its digest as stored when ``title_state`` read it. A rename, a deletion, a change of
+        the title's turn or of its words, a print changed, an earlier refinement written: nothing is written. And
+        only a title rule (a) would keep whole as it stands -- no digit, no code, no password's name, within the
+        bound, never cut --, whatever handed it.
+        """
+        cfg = _titles_config()
+        if cfg is None or not cfg.enabled or not isinstance(title, str) \
+                or _titles.derive_title(title, cfg.derive) != title or title.endswith(cfg.derive.ellipsis):
+            return False
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                cursor = conn.execute(
+                    "UPDATE conversations SET title = ?, title_source = 'refined', updated_at = ? "
+                    "WHERE id = ? AND title_source = 'auto' AND title_turn = ? AND title_basis = ?",
+                    (_encrypt(title), now, conv_id, title_turn, basis),
+                )
+                conn.commit()
+                written = cursor.rowcount > 0
+                if written:
+                    self._publish(
+                        conv_id,
+                        lambda: self._sync_snapshot(conn, conv_id),
+                        updated_at=now,
+                    )
+                return written
+            except Exception as e:
+                logger.warning("Refined title of conversation %s not written (%s)", conv_id, type(e).__name__)
                 return False
             finally:
                 conn.close()

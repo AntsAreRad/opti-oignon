@@ -28,6 +28,9 @@ class ConversationSummary(BaseModel):
     # Where the title came from: default, auto (the store's rule), refined,
     # manual (the user's) or legacy (older than the rule).
     title_source: str = "default"
+    # Whether the local model is refining the title now (rule b, off as
+    # shipped): GET /api/conversations/{id}/title says when it is done.
+    title_pending: bool = False
     created_at: str | None = None
     updated_at: str | None = None
     message_count: int = 0
@@ -41,6 +44,7 @@ class ConversationDetail(BaseModel):
     id: str
     title: str
     title_source: str = "default"
+    title_pending: bool = False
     messages: list[dict[str, Any]] = Field(default_factory=list)
     created_at: str | None = None
     updated_at: str | None = None
@@ -49,6 +53,16 @@ class ConversationDetail(BaseModel):
     preset: str | None = None
     message_count: int = 0
     total_tokens: int = 0
+
+
+class ConversationTitle(BaseModel):
+    """A conversation's title as it stands, and whether the local model is refining it."""
+    title: str
+    title_source: str = "default"
+    title_pending: bool = False
+    # Present only while the title is pending: when to ask again, from
+    # titles.yaml (refine.poll_after_ms).
+    retry_after_ms: int | None = None
 
 
 class ConversationCreate(BaseModel):

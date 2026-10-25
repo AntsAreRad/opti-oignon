@@ -469,6 +469,8 @@ STORES = {
                                    "no model reads it back",
             "tend_titles": "the titles the store's rule derives from the typed turns, and the plaintext ones it "
                            "encrypts, shown in the lists and the exports; no model reads them back",
+            "commit_refined_title": "the title the local model chose among the rule's own words, shown in the lists "
+                                    "and the exports; no model reads it back",
             "withdraw_source": _WITHDRAWAL,
         },
         reason="the transcript and its metadata, the summary of its older messages included, read back as "

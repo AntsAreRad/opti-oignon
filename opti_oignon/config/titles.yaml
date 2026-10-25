@@ -61,3 +61,39 @@ manual:
   max_chars: 120               # a title the user types; longer, or empty once folded, is refused
 search:
   scan_limit: 2000             # the newest conversations whose titles a search reads, decrypted
+# Rule (b): the rule's title refined by the local model once an answer is sent (opti_oignon/title_refiner.py). Off
+# as shipped: the GPU is shared, and a title is a convenience. A machine turns it on, or names its model, in
+# local.yaml beside this file, never committed: titles: {refine: {enabled: true, model: "<name>"}}, read once with
+# this file. On, the model is handed the words rule (a) keeps of the title's turn and nothing else -- never the
+# answer, a document, a pasted part, nor a word the rule drops --, read again right before the call, and its answer
+# is refused unless the rule keeps every word of it and each is exactly one of those words (composed, lowercased)
+# or one of the function words below: refused, the rule's title stays. The words handed are those of the turn's
+# first max_input_chars characters: a refined title may show a word the rule's shorter title did not. Only a backend
+# whose own requests stay on this machine is called, whatever the security mode -- not one that hands them to
+# another process (the core daemon); a server on this machine that sends a request on is judged by its own address.
+# The call is the background's, admitted by the resource governor (caller titler). In a script written without
+# spaces a run of letters is one word: the model may only give it back whole. A rename, a deletion and a change of
+# the title's turn leave a late answer unwritten.
+refine:
+  enabled: false
+  model: ""                    # empty: the model that answered the conversation
+  timeout_s: 20                # the bound of each wait: the queue, the backend, the governor, the answer
+  keep_alive: "5m"             # how long the model stays loaded after the call, unless the governor says
+  num_ctx: 4096                # the context asked of the governor
+  num_predict: 32              # the tokens the answer may hold
+  temperature: 0.0
+  seed: 1
+  max_input_chars: 600         # the kept words handed to the model, cut back to a space
+  max_in_flight: 1             # refinements running at once
+  max_queued: 8                # refinements waiting; one more is dropped
+  attempted_cap: 512           # the titles this process remembers trying: each is asked once
+  poll_after_ms: 1500          # how soon the interface asks again about a title still pending
+  system_prompt: >-
+    The words below are a user's message reduced to its plain words. Write a short title for the
+    conversation using only these words, in an order that reads well, at most eight words. Answer
+    with the title alone.
+  answer_labels: ["title", "titre"]
+  # Quoted: YAML reads a bare on, off, yes or no as a boolean.
+  function_words: ["a", "an", "the", "of", "for", "to", "in", "on", "with", "and", "or", "how", "what", "why",
+                   "de", "du", "des", "la", "le", "les", "un", "une", "en", "et", "ou", "pour", "avec", "sur",
+                   "dans", "comment", "quoi", "pourquoi"]

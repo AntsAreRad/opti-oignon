@@ -60,7 +60,9 @@ state-changing endpoints.
 
 AES-256-GCM encryption for sensitive data fields, conversation messages
 and their titles among them: a title is content, made from the words its
-user typed or given by the user. SQLCipher on all databases via the
+user typed -- the local model, when it refines one, only selects and
+orders them, with a few function words -- or given by the user. SQLCipher
+on all databases via the
 centralized `safe_connect` wrapper. Per-user
 encryption keys derived from the user's password via Argon2id KDF.
 The audit chain is keyed with HMAC-SHA256, not signed (see below).

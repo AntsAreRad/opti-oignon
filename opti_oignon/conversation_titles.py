@@ -22,6 +22,12 @@ What no rule here can tell is a secret made of letters alone, typed in a turn th
 lists them -- a name that mostly means something else, like pass or pw, is not listed --, or alone in a turn before
 the one that does. A title is bounded in code points, cut at a space, one
 line, and says when it was cut.
+
+Rule (b), the refinement of a title by the local model (title_refiner), reads two more things here: ``kept_words``,
+the words of the title's turn rule (a) keeps -- all the model is ever handed --, and ``accept_refined``, the guard its
+answer passes or is refused by: rule (a)'s own words of it, dropping none, each one of those words or one of a closed
+list of function words. The model selects and orders the user's words; it adds none of its own. ``local_refine`` lays
+what a machine sets for itself (``local.yaml``) over the refinement's switch and model.
 """
 
 import bisect
@@ -29,7 +35,7 @@ import hashlib
 import itertools
 import re
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 PLACEHOLDER = "New conversation"
 # Where a title came from: the placeholder, rule (a), the model's refinement (block 180), the user (or an API caller
@@ -91,23 +97,52 @@ class DeriveConfig:
 
 
 @dataclass(frozen=True)
+class RefineConfig:
+    enabled: bool
+    model: str
+    timeout_s: int
+    keep_alive: str
+    num_ctx: int
+    num_predict: int
+    temperature: float
+    seed: int
+    max_input_chars: int
+    max_in_flight: int
+    max_queued: int
+    attempted_cap: int
+    poll_after_ms: int
+    system_prompt: str
+    # A leading label an answer may carry ("Title:"), and the words the model may add: composed and lowercased.
+    answer_labels: frozenset
+    function_words: frozenset
+
+
+@dataclass(frozen=True)
 class TitlesConfig:
     enabled: bool
     derive: DeriveConfig
     manual_max_chars: int
     search_scan_limit: int
+    refine: RefineConfig
 
 
 # The keys of each section and their types: the loader reads these and only these.
-_SECTIONS = {"enabled": bool, "derive": dict, "manual": dict, "search": dict}
+_SECTIONS = {"enabled": bool, "derive": dict, "manual": dict, "search": dict, "refine": dict}
 _DERIVE = {
     "max_chars": int, "min_letters": int, "max_user_turns": int, "max_token_chars": int, "max_case_switches": int,
     "max_read_chars": int, "ellipsis": str, "password_names": list, "password_lookalikes": dict,
 }
 _MANUAL = {"max_chars": int}
 _SEARCH = {"scan_limit": int}
+_REFINE = {
+    "enabled": bool, "model": str, "timeout_s": int, "keep_alive": str, "num_ctx": int, "num_predict": int,
+    "temperature": float, "seed": int, "max_input_chars": int, "max_in_flight": int, "max_queued": int,
+    "attempted_cap": int, "poll_after_ms": int, "system_prompt": str, "answer_labels": list, "function_words": list,
+}
 # The integers that may be zero; every other one is at least 1.
-_MAY_BE_ZERO = {"max_case_switches", "min_letters"}
+_MAY_BE_ZERO = {"max_case_switches", "min_letters", "seed"}
+# The keys a machine may set for itself in local.yaml, under titles.refine.
+_LOCAL_REFINE = ("enabled", "model")
 # How a pattern's word matches the text: x a whole run (or x with a trailing s); x* a run's start; *x a run's end (or
 # the end x and a trailing s); ~x~ anywhere in a run; *x* anywhere in a segment; +x anywhere in a segment longer than
 # x (nor x and a trailing s). A run is a word's letters cut at camelCase, a segment an identifier's letters joined.
@@ -150,6 +185,13 @@ def _marks():
                  if unicodedata.category(chr(code)) in ("Mn", "Mc", "Me", "Cf")}
         _MARK_TABLE[0] = table
     return table
+
+
+def _folded_word(word):
+    """``word`` as rule (b)'s guard compares it: composed and lowercased, nothing else. An accent, a mark, a variation
+    selector, a fullwidth or ligature form, a long s or a sharp s makes another word, never the one typed: case
+    folding (str.casefold) would make a sharp s and a double s, or a ligature and its letters, one word."""
+    return unicodedata.normalize("NFC", unicodedata.normalize("NFC", word).lower())
 
 
 def _bare(word):
@@ -207,6 +249,18 @@ def read_config(data):
         raise TitlesConfigError("derive.ellipsis is as long as a title may be")
     manual = _section(top["manual"], _MANUAL, "manual")
     search = _section(top["search"], _SEARCH, "search")
+    refine = _section(top["refine"], _REFINE, "refine")
+    for key in ("keep_alive", "system_prompt"):
+        if not refine[key].strip():
+            raise TitlesConfigError(f"refine.{key} is empty")
+    if not 0.0 <= refine["temperature"] <= 2.0:
+        raise TitlesConfigError("refine.temperature is out of range")
+    words = {}
+    for key in ("answer_labels", "function_words"):
+        if not all(isinstance(word, str) and word and all(_is_letter(char) or unicodedata.category(char)[0] == "M"
+                                                         for char in word) for word in refine[key]):
+            raise TitlesConfigError(f"refine.{key} holds an entry that is not a word of letters")
+        words[key] = frozenset(_folded_word(word) for word in refine[key])
     plain = ("password_names", "password_lookalikes")
     return TitlesConfig(
         enabled=top["enabled"],
@@ -217,7 +271,51 @@ def read_config(data):
         ),
         manual_max_chars=manual["max_chars"],
         search_scan_limit=search["scan_limit"],
+        refine=RefineConfig(
+            **{key: refine[key] for key in _REFINE if key not in words},
+            answer_labels=words["answer_labels"],
+            function_words=words["function_words"],
+        ),
     )
+
+
+def local_refine(entry, refine):
+    """The refinement's settings with what a machine sets for itself: ``(settings, reasons)``.
+
+    ``entry`` is the ``titles`` value of ``local.yaml`` -- never committed --, ``titles: {refine: {enabled: <bool>,
+    model: <name>}}``; ``refine`` the shipped ``RefineConfig``. Only a YAML boolean switches and only a name that is
+    not blank names the model; either stands without the other. Anything else sets nothing for what it touches, and
+    each reason it set nothing is in ``reasons``, to be said; what the shipped file says stands.
+    """
+    reasons = []
+    if entry is None:
+        return refine, reasons
+    if not isinstance(entry, dict):
+        return refine, ["holds no mapping for titles"]
+    unknown = sorted(str(key) for key in entry if key != "refine")
+    if unknown:
+        reasons.append(f"holds keys the titles section does not take ({', '.join(unknown)})")
+    section = entry.get("refine")
+    if section is None:
+        return refine, reasons
+    if not isinstance(section, dict):
+        return refine, reasons + ["holds no mapping for titles.refine"]
+    unknown = sorted(str(key) for key in section if key not in _LOCAL_REFINE)
+    if unknown:
+        reasons.append(f"holds keys titles.refine does not take ({', '.join(unknown)})")
+    changes = {}
+    if "enabled" in section:
+        if type(section["enabled"]) is bool:
+            changes["enabled"] = section["enabled"]
+        else:
+            reasons.append("holds no boolean titles.refine.enabled")
+    if "model" in section:
+        model = section["model"]
+        if isinstance(model, str) and model.strip():
+            changes["model"] = model.strip()
+        else:
+            reasons.append("holds no name for titles.refine.model")
+    return replace(refine, **changes), reasons
 
 
 def typed_text(content, origin, segments):
@@ -474,13 +572,13 @@ def _head(text, limit):
     return head
 
 
-def derive_title(text, cfg):
-    """Rule (a): a title of the plain words of ``text``, or None when it names a password or its plain words hold
-    too few letters.
+def kept_words(text, cfg):
+    """The words of ``text`` rule (a) keeps, in their order, before a title's bound: a list, or None when the text
+    names a password or the words kept hold fewer than ``cfg.min_letters`` letters.
 
-    ``cfg`` is a ``DeriveConfig``. The title holds no character of the C categories, no line break and no character of
-    Unicode's number categories (N); it is drawn from the first ``cfg.max_read_chars`` characters of ``text``, and is
-    at most ``cfg.max_chars`` code points, cut at a space with ``cfg.ellipsis`` after it.
+    ``cfg`` is a ``DeriveConfig``. They are drawn from the first ``cfg.max_read_chars`` characters of ``text``; the
+    password's name is looked for in all of them. Rule (a)'s title is these words, bounded; rule (b) hands them, and
+    nothing else, to the local model.
     """
     if not isinstance(text, str) or not text:
         return None
@@ -493,6 +591,20 @@ def derive_title(text, cfg):
     kept = [word for word in (token.strip(_PUNCT + "".join(_TSHEG)) for token in tokens) if _kept(word, cfg)]
     if sum(1 for word in kept for char in word if unicodedata.category(char)[0] == "L") < cfg.min_letters:
         return None
+    return kept
+
+
+def derive_title(text, cfg):
+    """Rule (a): a title of the plain words of ``text``, or None when it names a password or its plain words hold
+    too few letters.
+
+    ``cfg`` is a ``DeriveConfig``. The title holds no character of the C categories, no line break and no character of
+    Unicode's number categories (N); it is drawn from the first ``cfg.max_read_chars`` characters of ``text``, and is
+    at most ``cfg.max_chars`` code points, cut at a space with ``cfg.ellipsis`` after it.
+    """
+    kept = kept_words(text, cfg)
+    if kept is None:
+        return None
     title = " ".join(kept)
     if len(title) > cfg.max_chars:
         cut = title[: cfg.max_chars - len(cfg.ellipsis)]
@@ -503,6 +615,46 @@ def derive_title(text, cfg):
                 cut = cut[:-1]
         title = cut.rstrip() + cfg.ellipsis
     return title
+
+
+# A leading label and its colon, as an answer may begin ("Title:", "**Titre :**"); no two parts take the same
+# character, so it reads a line once.
+_LABEL = re.compile(r"[^\w:]*([^\W\d_]+)[^\w:]*:")
+# What a word of an answer is stripped of before it is compared: punctuation, and Markdown's emphasis and code marks.
+_ANSWER_STRIP = _PUNCT + "".join(_TSHEG) + "*_`~#"
+
+
+def accept_refined(answer, kept, cfg, refine):
+    """Rule (b)'s guard: the title a local model's ``answer`` gives for the words ``kept`` (``kept_words`` of the
+    title's turn), or None when it is refused -- the rule's title then stays.
+
+    The answer's first line that holds anything is read, a leading label of ``refine.answer_labels`` and its colon
+    taken off. It is refused unless rule (a) keeps every word of it -- a number, code, an address, a path, a word
+    holding a digit or naming a password, and the line names none -- and unless each of its words, composed and
+    lowercased, is exactly one of ``kept`` or one of ``refine.function_words``: an accent, a mark, a form or a
+    spelling changed makes a word the user did not type. The model selects and orders the user's words, and adds
+    none but those. ``cfg`` is a ``DeriveConfig``; the title is bounded as rule (a)'s is.
+    """
+    if not isinstance(answer, str) or not kept:
+        return None
+    line = next((line.strip() for line in answer.replace("\r", "\n").split("\n") if line.strip()), "")
+    line = unicodedata.normalize("NFC", line)
+    label = _LABEL.match(line)
+    if label is not None and _folded_word(label.group(1)) in refine.answer_labels:
+        line = line[label.end():]
+    words = kept_words(line, cfg)
+    if words is None:
+        return None
+    # Every word of the line is one rule (a) keeps: a word it drops refuses the answer, it is not dropped from it.
+    written = [token for token in (token.strip(_ANSWER_STRIP) for token in _SPACE.split(line)) if token]
+    if words != written:
+        return None
+    allowed = {_folded_word(word) for word in kept} | refine.function_words
+    if any(_folded_word(word) not in allowed for word in words):
+        return None
+    # A refined title is short: one the bound would cut is refused, not cut.
+    title = derive_title(line, cfg)
+    return title if title == " ".join(words) else None
 
 
 def first_typed_source(turns, cfg, *, defect=None):

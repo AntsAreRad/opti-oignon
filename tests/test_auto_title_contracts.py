@@ -1,5 +1,6 @@
-"""Contracts for the automatic conversation titles (block 179): the store titles a conversation itself, from the
-words the user typed in its first turns, inside the transaction that saves, deletes or lowers a user turn.
+"""Contracts for the automatic conversation titles (blocks 179 and 180): the store titles a conversation itself,
+from the words the user typed in its first turns, inside the transaction that saves, deletes or lowers a user turn;
+the local model may refine that title (rule b, off as shipped), held to the rule's own words.
 
   * TT1 -- rule (a) gives the design's golden titles: the plain words kept; a slash command, a path, an address, a
     key, a random string and every word holding a digit dropped; a turn that names a password titles nothing.
@@ -54,6 +55,41 @@ words the user typed in its first turns, inside the transaction that saves, dele
     turns are read in the order they were saved.
   * TT34 -- titles.yaml is read once, under a lock: a second first reader waits for the reading.
 
+Rule (b), block 180:
+
+  * TT15 -- a refined title lands only over the rule's own -- automatic, from the same turn under the same print,
+    its digest as read --, in one publish, and only as a title rule (a) keeps whole; a rename, a deletion, a changed
+    print or digest write nothing; a turn added leaves it; the rule draws it again when its print changes or its
+    own turn goes; a placeholder, a manual or legacy title and a sealed turn give no state to refine.
+  * TT16 -- the model's answer is held to the rule's own words: kept_words are rule (a)'s words before its bound;
+    an answer is its first line, a label taken off, refused when the rule would drop a word of it, when it names a
+    password, when a word is neither typed nor a function word, when the bound would cut it; a run of a script
+    written without spaces is given back whole or refused.
+  * TT17 -- a call past its deadline is given up, nothing written, and no other call to that model starts while it
+    lives; the queue holds max_queued jobs, one drain at a time; a job is pending until its deadline or its cancel,
+    and one that waited past its bound in the queue never runs.
+  * TT18 -- a backend that cannot say it answers on this machine is never called, whatever the mode: a LAN address,
+    a host name, no endpoint or an unreadable one; in the process, localhost, a loopback or an unspecified address
+    are; the governor is asked only for a call that may go.
+  * TT19 -- nothing is dispatched with the refinement or titles off, the emergency stop engaged or absent, a title
+    that is not the rule's own, no model named; each title is asked once in a process, a rename forgets it; a
+    failing store is no job, never an error; titles.yaml may name the model.
+  * TT20 -- the call is the background's: the shipped file and the defaults class titler as background with a
+    floor; it is admitted as titler, its wait bounded and its cancel handed over, its ticket held on the thread that
+    asks the backend, an admission no call holds handed back; a governor that cannot be had admits nothing.
+  * TT22 -- GET /api/conversations/{id}/title says pending, with titles.yaml's retry_after_ms, while a job lives,
+    and not after its deadline; the summary and the detail say it; a rename and a deletion cancel the job.
+  * TT24 -- the interface watches a pending title at the server's pace only, one watcher a conversation, and puts
+    the title the server answers in the list once nothing is pending.
+  * TT35 -- the model is handed the words rule (a) keeps of the title's turn, cut to max_input_chars, under the
+    system prompt of titles.yaml: no number, path, code, pasted part, answer or password-naming turn.
+  * TT36 -- the wiring on the real package's shape: the refinement handed the conversation right before each done,
+    the rename and the deletion cancelling it, the refiner importing nothing of the package but the titles module,
+    and the public locality check the private one.
+  * TT37 -- no word of a turn, of an answer or of a backend's error reaches the log: the outcomes are counted.
+  * TT38 -- titles.yaml's refine section is read exactly, every key typed and bounded; local.yaml sets the
+    machine's own switch and model, anything else said by name and setting nothing.
+
 Local-only (the public distribution ships no tests). conversation.py and conversation_titles.py are loaded in the
 shared isolation window: safe_connect a plain sqlite3 connection, DATA_DIR a temporary directory, the field key a
 reversible marker (E:) as tests/test_conversation_apply.py does. Nothing reaches a model, the network or data/.
@@ -61,9 +97,12 @@ reversible marker (E:) as tests/test_conversation_apply.py does. Nothing reaches
 
 import ast
 import base64
+import contextlib
+import dataclasses
 import hashlib
 import json
 import logging
+import re
 import sqlite3
 import sys
 import threading
@@ -81,6 +120,7 @@ from _isolation import isolate, source  # noqa: E402
 REPO = Path(__file__).resolve().parents[1]
 _CONVERSATION = "opti_oignon.conversation"
 _TITLES = "opti_oignon.conversation_titles"
+_REFINER = "opti_oignon.title_refiner"
 _TITLES_YAML = REPO / "opti_oignon" / "config" / "titles.yaml"
 
 BUDGET_S = {
@@ -111,6 +151,18 @@ BUDGET_S = {
     "test_tt32_uvicorns_lines_say_a_path_never_its_query": 4.0,
     "test_tt33_a_turn_that_names_a_password_titles_nothing_nor_any_later_turn": 4.0,
     "test_tt34_a_second_first_reader_of_titles_yaml_waits_for_the_reading": 4.0,
+    "test_tt15_a_refined_title_lands_only_over_the_rules_own": 4.0,
+    "test_tt16_the_models_answer_is_held_to_the_rules_own_words": 4.0,
+    "test_tt17_a_call_past_its_deadline_is_given_up_and_the_queue_is_bounded": 8.0,
+    "test_tt18_a_backend_that_cannot_say_it_answers_on_this_machine_is_never_called": 8.0,
+    "test_tt19_nothing_is_dispatched_unless_the_title_is_the_rules_own_and_all_may_run": 6.0,
+    "test_tt20_the_call_is_the_backgrounds_admitted_as_titler_its_ticket_held_where_it_is_asked": 6.0,
+    "test_tt22_the_title_route_says_pending_while_a_job_lives_and_the_routes_cancel_it": 4.0,
+    "test_tt24_the_interface_watches_a_pending_title_at_the_servers_pace": 4.0,
+    "test_tt35_the_model_is_handed_the_words_the_rule_keeps_and_nothing_else": 4.0,
+    "test_tt36_the_refinement_is_wired_on_the_real_package_shape": 4.0,
+    "test_tt37_no_word_of_a_turn_or_of_an_answer_reaches_the_log": 4.0,
+    "test_tt38_the_refine_section_is_read_exactly_and_a_machine_sets_its_own_switch": 4.0,
 }
 
 
@@ -127,7 +179,7 @@ def _encryption(has_key):
     return stand_in
 
 
-def _load(tmp_path, *, auto_capture=False, opaque=False, encryption=None):
+def _load(tmp_path, *, auto_capture=False, opaque=False, encryption=None, refiner=False, extra=None):
     """conversation.py and conversation_titles.py in the window, the field key a reversible marker: E: then the text,
     or, ``opaque``, E: then its base64, which holds none of its words as a real ciphertext does. Like the real one,
     the marker passes a value already marked through, and the store reads it as it reads the real prefixes."""
@@ -136,6 +188,8 @@ def _load(tmp_path, *, auto_capture=False, opaque=False, encryption=None):
     cfg = types.ModuleType("opti_oignon.config")
     cfg.DATA_DIR = tmp_path
     targets = {_TITLES: source("conversation_titles.py"), _CONVERSATION: source("conversation.py")}
+    if refiner:
+        targets[_REFINER] = source("title_refiner.py")
     packages = ()
     if auto_capture:
         targets["opti_oignon.memory.auto_capture"] = source("memory", "auto_capture.py")
@@ -143,6 +197,7 @@ def _load(tmp_path, *, auto_capture=False, opaque=False, encryption=None):
     seeded = {"opti_oignon.db_utils": db, "opti_oignon.config": cfg}
     if encryption is not None:
         seeded["opti_oignon.encryption"] = encryption
+    seeded.update(extra or {})
     loaded, restore = isolate(targets=targets, seeded=seeded, packages=packages)
     mod = loaded[_CONVERSATION]
     marked = ("E:",) + tuple(mod._ENCRYPTED_PREFIXES)
@@ -158,14 +213,18 @@ def _load(tmp_path, *, auto_capture=False, opaque=False, encryption=None):
     return mod, loaded, restore
 
 
-def _routes(manager):
-    """api/routes_conversations.py in a window of its own, its deps the store under test, its schemas the real ones."""
+def _routes(manager, refiner=None):
+    """api/routes_conversations.py in a window of its own, its deps the store under test, its schemas the real ones;
+    ``refiner`` the title refinement it reaches, when given."""
     deps = types.ModuleType("opti_oignon.api.deps")
     deps.CONVERSATION_AVAILABLE = True
     deps.conversation_manager = manager
     targets = {"opti_oignon.api.schemas": source("api", "schemas.py"),
                "opti_oignon.api.routes_conversations": source("api", "routes_conversations.py")}
-    loaded, restore = isolate(targets=targets, seeded={"opti_oignon.api.deps": deps}, packages=("opti_oignon.api",))
+    seeded = {"opti_oignon.api.deps": deps}
+    if refiner is not None:
+        seeded["opti_oignon.title_refiner"] = refiner
+    loaded, restore = isolate(targets=targets, seeded=seeded, packages=("opti_oignon.api",))
     return loaded["opti_oignon.api.routes_conversations"], loaded["opti_oignon.api.schemas"], restore
 
 
@@ -1611,5 +1670,937 @@ def test_tt34_a_second_first_reader_of_titles_yaml_waits_for_the_reading(tmp_pat
         first.join(5)
         second.join(5)
         assert got["first"] is not None and got["second"] is got["first"] and len(reads) == 1, "read once"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# Rule (b): the rule's title refined by the local model (block 180)
+# ---------------------------------------------------------------------------
+_TURN = "Plan the garden layout for spring with raised beds"
+
+
+def _locality():
+    """inference_backend.py's own locality check compiled alone -- ``_is_on_this_machine``, its public name and
+    ``ENDPOINT_IN_PROCESS`` as the file writes them --, with ``local_refusal`` a Daily stand-in that lets every request
+    go: a refinement that consulted it would call off the machine."""
+    tree = ast.parse(Path(source("inference_backend.py")).read_text(encoding="utf-8"))
+    kept = [node for node in tree.body
+            if (isinstance(node, ast.FunctionDef) and node.name in ("_is_on_this_machine", "is_on_this_machine"))
+            or (isinstance(node, ast.Assign) and any(getattr(t, "id", "") == "ENDPOINT_IN_PROCESS"
+                                                     for t in node.targets))]
+    module = types.ModuleType("opti_oignon.inference_backend")
+    exec(compile(ast.Module(body=kept, type_ignores=[]), "inference_backend.py", "exec"), module.__dict__)
+    module.local_refusal = lambda label, endpoint, where="": None
+    return module
+
+
+class _Governance:
+    """The resource governor's stand-in: what it was asked, the admissions handed back, the ticket each thread holds."""
+
+    def __init__(self, admitted=True, refuse_entry=False, on_admit=None):
+        self.admitted, self.refuse_entry, self.on_admit = admitted, refuse_entry, on_admit
+        self.asked, self.handed, self.local = [], [], threading.local()
+        governance = self
+
+        class _Governor:
+            def admit_or_wait(self, model, requested_ctx=None, caller="benchmark", extra_models=None, digest=None,
+                              wait_s=None, engine=None, cancel=None):
+                governance.asked.append({"model": model, "requested_ctx": requested_ctx, "caller": caller,
+                                         "wait_s": wait_s, "cancel": cancel})
+                if governance.on_admit is not None:
+                    governance.on_admit()
+                return types.SimpleNamespace(admitted=governance.admitted, num_ctx=2048, keep_alive="1m",
+                                             ticket_id=f"t{len(governance.asked)}", reason="busy")
+
+            def end_pending_load(self, ticket_id):
+                governance.handed.append(ticket_id)
+
+        @contextlib.contextmanager
+        def ticket_scope(decision):
+            if governance.refuse_entry:
+                raise RuntimeError("the ticket is refused on entry")
+            governance.local.ticket = decision.ticket_id
+            try:
+                yield
+            finally:
+                governance.local.ticket = None
+
+        governor = _Governor()
+        self.module = types.ModuleType("opti_oignon.resource_governor")
+        self.module.get_resource_governor = lambda: governor
+        self.module.ticket_scope = ticket_scope
+
+
+class _Backend:
+    """A backend stand-in: says where its requests go (its own, never forwarded), records each call with the ticket
+    its thread holds, and answers as told -- once its gate opens when one is given (``gates``: one per call, in
+    order), after ``on_call`` when given."""
+
+    forwards_requests = False
+
+    def __init__(self, governance, endpoint="in-process", answer="Garden layout for spring", gate=None, error=None,
+                 gates=(), on_call=None):
+        self.governance, self._endpoint, self.answer, self.gate, self.error = governance, endpoint, answer, gate, error
+        self.gates, self.on_call = list(gates), on_call
+        self.calls = []
+
+    def endpoint(self):
+        if isinstance(self._endpoint, BaseException):
+            raise self._endpoint
+        return self._endpoint
+
+    def generate(self, model, messages, options=None, keep_alive="30m", think=None, images=None):
+        self.calls.append({"model": model, "messages": messages, "options": dict(options or {}),
+                           "keep_alive": keep_alive, "think": think, "thread": threading.current_thread().name,
+                           "ticket": getattr(self.governance.local, "ticket", None)})
+        gate = self.gates[len(self.calls) - 1] if len(self.calls) <= len(self.gates) else self.gate
+        if gate is not None:
+            gate.wait(10)
+        if self.on_call is not None:
+            self.on_call()
+        if self.error is not None:
+            raise self.error
+        return types.SimpleNamespace(content=self.answer)
+
+
+def _refining(tmp_path, *, backend=None, governance=None, stop=False, backends=None, **refine):
+    """The store, the titles module and title_refiner.py in the window, the refinement on (its timeout one second,
+    ``refine`` keys replaced): the registry resolves model "m" to ``backend``, the governor is ``governance``, the
+    emergency stop engaged when ``stop`` is True, unreadable when it is "raise", absent from the package when it is
+    None (``state["stopped"]`` flips it mid-job); ``backends`` replaces the inference module's stand-in whole."""
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    governance = governance or _Governance()
+    backend = backend if backend is not None else _Backend(governance)
+    if backends is None:
+        backends = _locality()
+        backends.get_backend_registry = lambda: types.SimpleNamespace(resolve_backend={"m": backend}.get)
+    seeded = {"opti_oignon.inference_backend": backends, "opti_oignon.resource_governor": governance.module}
+    state = {"stopped": stop is True}
+    if stop is not None:
+        halt = types.ModuleType("opti_oignon.emergency_stop")
+
+        def is_stopped():
+            if stop == "raise":
+                raise OSError("the stop cannot be read")
+            return state["stopped"]
+
+        halt.is_stopped = is_stopped
+        seeded["opti_oignon.emergency_stop"] = halt
+    mod, loaded, restore = _load(tmp_path, refiner=True, extra=seeded)
+    shipped = _config(loaded[_TITLES])
+    cfg = dataclasses.replace(shipped, refine=dataclasses.replace(
+        shipped.refine, **{"enabled": True, "timeout_s": 1, **refine}))
+    mod._titles_read.update(done=True, config=cfg)
+    world = types.SimpleNamespace(mod=mod, refiner=loaded[_REFINER], titles=loaded[_TITLES], cfg=cfg,
+                                  backend=backend, governance=governance, state=state, db=tmp_path / "c.db")
+    return world, restore
+
+
+def _drained(world):
+    """A runner that drains the queue on the caller's thread: the outcome is read as maybe_refine returns."""
+    return lambda manager, cfg: world.refiner._drain(manager, cfg)
+
+
+def _titled(world, text=_TURN, *, manager=None):
+    """A conversation answered with model "m" whose first turn typed ``text``: its title is the rule's."""
+    manager = manager or world.mod.ConversationManager(db_path=world.db, publish_to_sync=False)
+    conv = manager.create_conversation(model="m")
+    _typed(manager, conv.id, text)
+    manager.add_message(conv.id, "assistant", "Here is a plan.", origin="assistant", context=[], lineage=[])
+    return manager, conv.id
+
+
+def _seal(path, conv_id):
+    """Every user turn of a conversation left as a turn of another key would be: encrypted, behind the store."""
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("UPDATE messages SET content = 'ENC2:c2VhbGVk' WHERE conversation_id = ? AND role = 'user'",
+                     (conv_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+# ---------------------------------------------------------------------------
+# TT15 -- a refined title lands only over the rule's own
+# ---------------------------------------------------------------------------
+def test_tt15_a_refined_title_lands_only_over_the_rules_own(tmp_path):
+    world, restore = _refining(tmp_path)
+    try:
+        mod, db = world.mod, world.db
+        calls = _spy(mod)
+        manager = mod.ConversationManager(db_path=db)
+        conv = manager.create_conversation(model="m")
+        _typed(manager, conv.id, _TURN)
+        turn, basis, title, words, model = manager.title_state(conv.id)
+        assert (title, model, turn) == (_TURN, "m", _row(db, conv.id)["title_turn"])
+        assert words == world.titles.kept_words(_TURN, world.cfg.derive) and basis == _row(db, conv.id)["title_basis"]
+        published = len(calls)
+        assert manager.commit_refined_title(conv.id, turn, basis, "Garden layout for spring") is True
+        row = _row(db, conv.id)
+        assert (row["title"], row["title_source"], row["title_turn"]) == ("E:Garden layout for spring", "refined", turn)
+        assert len(calls) == published + 1, "one publish"
+        assert manager.commit_refined_title(conv.id, turn, basis, "Raised beds") is False, "refined once"
+        assert manager.title_state(conv.id) is None, "a refined title is not the rule's own"
+        _typed(manager, conv.id, "And the watering")
+        assert _row(db, conv.id)["title_source"] == "refined", "a turn added leaves a refined title"
+        # Its words changed under it, its print changed, a rename, a deletion: nothing written, nothing published.
+        for spoil in ("basis", "print", "rename", "delete"):
+            other = manager.create_conversation(model="m")
+            _typed(manager, other.id, _TURN)
+            turn, basis, _title, _words, _model = manager.title_state(other.id)
+            if spoil == "basis":
+                _plain(db, other.id, title_basis="E:" + "0" * 64)
+                assert manager.title_state(other.id) is None, "a title whose words changed under it is not refined"
+            elif spoil == "print":
+                _plain(db, other.id, title_turn=turn.split(":")[0] + ":" + "0" * 16)
+                assert manager.title_state(other.id) is None, "a title drawn under another print is not refined"
+            elif spoil == "rename":
+                manager.rename_conversation(other.id, "Mine")
+            else:
+                manager.delete_conversation(other.id)
+            published = len(calls)
+            assert manager.commit_refined_title(other.id, turn, basis, "Garden layout") is False, spoil
+            assert len(calls) == published, f"{spoil}: nothing published"
+            if spoil != "delete":
+                assert _row(db, other.id)["title_source"] != "refined", spoil
+        # Only a title rule (a) keeps whole as it stands is written, whatever hands it.
+        last = manager.create_conversation(model="m")
+        _typed(manager, last.id, _TURN)
+        turn, basis, _title, _words, _model = manager.title_state(last.id)
+        for refused in ("Garden 2 layout", "the password garden", "Garden `x` layout", "", "garden " * 20, None):
+            assert manager.commit_refined_title(last.id, turn, basis, refused) is False, refused
+        assert _row(db, last.id)["title_source"] == "auto"
+        # The rule draws a refined title again when its print changes (the start) or its own turn goes.
+        assert manager.commit_refined_title(last.id, turn, basis, "Garden layout") is True
+        _plain(db, last.id, title_turn=turn.split(":")[0] + ":" + "0" * 16)
+        assert manager.tend_titles() >= 1
+        assert (_row(db, last.id)["title_source"], manager.get_conversation(last.id).title) == ("auto", _TURN)
+        turn, basis, _title, _words, _model = manager.title_state(last.id)
+        assert manager.commit_refined_title(last.id, turn, basis, "Garden layout") is True
+        assert manager.delete_last_message(last.id) is True
+        assert (_row(db, last.id)["title_source"], manager.get_conversation(last.id).title) == ("default",
+                                                                                                "New conversation")
+        # No title of the rule's own, no state: a placeholder, a manual or legacy title, a turn that does not decrypt.
+        plain = manager.create_conversation(model="m")
+        assert manager.title_state(plain.id) is None
+        named = manager.create_conversation(title="Mine", model="m")
+        _typed(manager, named.id, _TURN)
+        assert manager.title_state(named.id) is None
+        older = manager.create_conversation(model="m")
+        _typed(manager, older.id, _TURN)
+        _plain(db, older.id, title_source="legacy")
+        assert manager.title_state(older.id) is None
+        sealed = manager.create_conversation(model="m")
+        _typed(manager, sealed.id, _TURN)
+        _seal(db, sealed.id)
+        assert manager.title_state(sealed.id) is None, "a turn that does not decrypt starts nothing"
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# TT16 -- the model's answer is held to the rule's own words
+# ---------------------------------------------------------------------------
+def test_tt16_the_models_answer_is_held_to_the_rules_own_words(tmp_path):
+    mod, loaded, restore = _load(tmp_path)
+    try:
+        titles = loaded[_TITLES]
+        cfg = _config(titles)
+        derive, refine = cfg.derive, cfg.refine
+        # kept_words are rule (a)'s words before the bound: its title is them, bounded.
+        for text, _title in _GOLDEN:
+            kept = titles.kept_words(text, derive)
+            assert (kept is None) == (titles.derive_title(text, derive) is None), text
+            if kept is not None:
+                assert titles.derive_title(" ".join(kept), derive) == titles.derive_title(text, derive), text
+        kept = titles.kept_words("Plan the garden layout for spring with 3 raised beds, see src/a.py", derive)
+        assert kept == ["Plan", "the", "garden", "layout", "for", "spring", "with", "raised", "beds", "see"]
+        accepted = {
+            "Garden layout for spring": "Garden layout for spring",
+            "Title: Raised beds for spring": "Raised beds for spring",
+            "**Titre :** Garden layout": "Garden layout",
+            '"Spring garden layout"': "Spring garden layout",
+            "GARDEN LAYOUT\nA second line the model added": "GARDEN LAYOUT",
+            "How to plan the garden": "How to plan the garden",
+        }
+        for answer, title in accepted.items():
+            assert titles.accept_refined(answer, kept, derive, refine) == title, answer
+        for refused in ("3 raised beds", "Garden layout 2026", "the password garden", "Garden `rm -rf` layout",
+                        "1. Garden layout", "Jardin layout", "Summary: garden layout", "", "Title:", "   \n  ",
+                        "garden " * 20, "src/a.py garden", "garden@layout.com", None):
+            assert titles.accept_refined(refused, kept, derive, refine) is None, refused
+        assert titles.accept_refined("Garden layout", [], derive, refine) is None, "nothing kept: nothing refined"
+        # Composed and case folded, nothing else: an accent, a mark, a selector or a fullwidth form makes a word the
+        # user did not type, even one that folds to a function word.
+        wide = "".join(chr(0xFF00 + ord(char) - 0x20) for char in "garden")
+        for added in ("Th" + chr(0xE9) + " garden layout", "O" + chr(0xF9) + " garden", "L" + chr(0xE0) + " garden",
+                      "garden" + chr(0x337) * 6 + " layout", "garden" + chr(0xFE0F) + " layout", wide + " layout"):
+            assert titles.accept_refined(added, kept, derive, refine) is None, added
+        sin = titles.kept_words("Le p" + chr(0xE9) + "ch" + chr(0xE9) + " mignon", derive)
+        assert titles.accept_refined("Le peche mignon", sin, derive, refine) is None, "an accent taken off: another word"
+        upper = "LE P" + chr(0xC9) + "CH" + chr(0xC9) + " MIGNON"
+        assert titles.accept_refined(upper, sin, derive, refine) == upper, "its case is the same word"
+        # Lowercased, not case folded: a sharp s, a ligature, a long s or a symbol form is another word.
+        for typed, answered in (("Busse", "Bu" + chr(0xDF) + "e"), ("Masse", "Ma" + chr(0xDF) + "e"),
+                                ("Floss", "Flo" + chr(0xDF)), ("file", chr(0xFB01) + "le"), ("state", chr(0x17F) + "tate"),
+                                (chr(0x3B8) + "eta", chr(0x3D1) + "eta"), (chr(0x3BC) + "eson", chr(0xB5) + "eson")):
+            pair = titles.kept_words(typed + " garden layout", derive)
+            assert titles.accept_refined(answered + " garden", pair, derive, refine) is None, (typed, answered)
+            assert titles.accept_refined(typed.upper() + " garden", pair, derive, refine) is not None, typed
+        # An answer is composed as the words it is compared with were: a decomposed accent is the typed word.
+        composed = titles.kept_words("Cl" + chr(0xE9) + " USB non reconnue", derive)
+        assert titles.accept_refined("Cle" + chr(0x301) + " USB", composed, derive, refine) == "Cl" + chr(0xE9) + " USB"
+        # A script written without spaces: its run is one word, given back whole or refused.
+        run = "".join(chr(code) for code in (0x82B1, 0x56ED, 0x5E03, 0x5C40, 0x8BA1, 0x5212))
+        assert titles.kept_words(run, derive) == [run]
+        assert titles.accept_refined(run, [run], derive, refine) == run
+        assert titles.kept_words(run[:4], derive) == [run[:4]], "a part of the run is a word of its own"
+        assert titles.accept_refined(run[:4], [run], derive, refine) is None
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# TT17 -- a call past its deadline is given up, and the queue is bounded
+# ---------------------------------------------------------------------------
+def test_tt17_a_call_past_its_deadline_is_given_up_and_the_queue_is_bounded(tmp_path):
+    gate = threading.Event()
+    governance = _Governance()
+    backend = _Backend(governance, gate=gate)
+    world, restore = _refining(tmp_path, backend=backend, governance=governance, max_queued=2, max_in_flight=1)
+    try:
+        refiner = world.refiner
+        now = [100.0]
+        refiner._clock = lambda: now[0]
+        manager, first = _titled(world)
+        assert refiner.maybe_refine(manager, first, runner=_drained(world)) is True
+        assert refiner.counts().get("timeout") == 1 and len(backend.calls) == 1
+        assert _row(world.db, first)["title_source"] == "auto", "nothing committed"
+        # While the call given up lives, no other call to that model starts.
+        _manager, second = _titled(world, "Prune the apple trees in winter", manager=manager)
+        assert refiner.maybe_refine(manager, second, runner=_drained(world)) is True
+        assert refiner.counts().get("hung") == 1 and len(backend.calls) == 1
+        gate.set()
+        for thread in [t for t in threading.enumerate() if t.name == "oo-titler-call"]:
+            thread.join(5)
+        _manager, third = _titled(world, "Repot the lemon tree in spring", manager=manager)
+        backend.answer = "Lemon tree in spring"
+        assert refiner.maybe_refine(manager, third, runner=_drained(world)) is True
+        assert len(backend.calls) == 2 and refiner.counts().get("committed") == 1
+        assert manager.get_conversation(third).title == "Lemon tree in spring"
+        # The queue holds max_queued jobs and one more is dropped; one drain at a time.
+        drains, convs = [], []
+        for text in ("Sow the carrots", "Water the roses", "Mulch the beds", "Rake the leaves"):
+            _manager, conv = _titled(world, text, manager=manager)
+            convs.append(conv)
+        queued = [refiner.maybe_refine(manager, conv, runner=lambda m, c: drains.append(c)) for conv in convs]
+        assert queued == [True, True, False, False] and len(drains) == 1
+        assert refiner.counts().get("dropped_queue_full") == 2
+        assert [refiner.pending(conv) for conv in convs] == [True, True, False, False]
+        assert refiner.cancel(convs[1]) is True and refiner.pending(convs[1]) is False
+        # One job a conversation: a new title of a conversation whose job waits queues nothing more.
+        assert manager.delete_last_message(convs[0]) is True and manager.delete_last_message(convs[0]) is True
+        _typed(manager, convs[0], "Mulch the roses")
+        assert refiner.maybe_refine(manager, convs[0], runner=lambda m, c: drains.append(c)) is False
+        # A job is pending through each of its four waits -- the queue, the backend's resolution, the admission, the
+        # answer --, not after its deadline; dequeued past its wait in the queue, it never runs.
+        now[0] += 3 * world.cfg.refine.timeout_s
+        assert refiner.pending(convs[0]) is True
+        now[0] += world.cfg.refine.timeout_s + 1
+        assert refiner.pending(convs[0]) is False
+        refiner._drain(manager, world.cfg)
+        assert refiner.counts().get("expired") == 1 and len(backend.calls) == 2
+    finally:
+        restore()
+    # The attempts are bounded; a drain that cannot start takes its job back, its title asked again later.
+    world, restore = _refining(tmp_path / "bounds", attempted_cap=2)
+    try:
+        refiner = world.refiner
+        manager = world.mod.ConversationManager(db_path=world.db, publish_to_sync=False)
+        convs = [_titled(world, text, manager=manager)[1] for text in ("Sow the carrots", "Water the roses",
+                                                                         "Mulch the beds")]
+        for conv in convs:
+            assert refiner.maybe_refine(manager, conv, runner=_drained(world)) is True
+        assert len(refiner._attempted) == 2, "attempted_cap holds"
+
+        _manager, other = _titled(world, "Rake the leaves", manager=manager)
+        _manager, beside = _titled(world, "Sweep the paths", manager=manager)
+
+        def refused(manager, cfg):
+            # A job queued while this drain fails to start finds no drain either.
+            assert refiner.maybe_refine(manager, beside, runner=refused) is True
+            raise RuntimeError("no thread")
+
+        assert refiner.maybe_refine(manager, other, runner=refused) is False
+        assert not refiner._jobs and not refiner._queue and refiner._draining[0] == 0
+        assert refiner.counts().get("taken_back") == 2, "both taken back, none left queued without a drain"
+        assert refiner.maybe_refine(manager, other, runner=_drained(world)) is True
+        assert refiner.maybe_refine(manager, beside, runner=_drained(world)) is True
+    finally:
+        restore()
+    # With a drain still running, a start that fails takes nothing back: that drain runs the queue.
+    gate = threading.Event()
+    governance = _Governance()
+    backend = _Backend(governance, gate=gate)
+    world, restore = _refining(tmp_path / "running", backend=backend, governance=governance, timeout_s=5,
+                               max_in_flight=2)
+    try:
+        refiner = world.refiner
+        manager, first = _titled(world)
+        _manager, second = _titled(world, "Prune the apple trees in winter", manager=manager)
+        assert refiner.maybe_refine(manager, first) is True
+        for _ in range(500):
+            if backend.calls:
+                break
+            threading.Event().wait(0.01)
+
+        def refused(manager, cfg):
+            raise RuntimeError("no thread")
+
+        assert refiner.maybe_refine(manager, second, runner=refused) is False
+        assert first in refiner._jobs and second in refiner._jobs and refiner.pending(first), "nothing taken back"
+        gate.set()
+        for thread in [t for t in threading.enumerate() if t.name in ("oo-titler", "oo-titler-call")]:
+            thread.join(10)
+        assert len(backend.calls) == 2 and not refiner._jobs
+    finally:
+        restore()
+    # An older job's end keeps the newer job of its conversation: the deletion's cancel still reaches it.
+    gates = [threading.Event(), threading.Event()]
+    governance = _Governance()
+    backend = _Backend(governance, gates=gates)
+    world, restore = _refining(tmp_path / "newer", backend=backend, governance=governance, timeout_s=5)
+    try:
+        refiner = world.refiner
+        manager, conv = _titled(world)
+
+        def wait_calls(count):
+            for _ in range(500):
+                if len(backend.calls) >= count:
+                    return
+                threading.Event().wait(0.01)
+            raise AssertionError(f"{count} call(s) never came")
+
+        assert refiner.maybe_refine(manager, conv) is True
+        wait_calls(1)
+        assert refiner.cancel(conv) is True
+        assert refiner.maybe_refine(manager, conv, runner=lambda m, c: None) is True, "the cancel forgot the title"
+        gates[0].set()
+        wait_calls(2)
+        assert refiner.cancel(conv) is True, "the newer job is still the conversation's"
+        gates[1].set()
+        for thread in [t for t in threading.enumerate() if t.name in ("oo-titler", "oo-titler-call")]:
+            thread.join(10)
+        assert _row(world.db, conv)["title_source"] == "auto" and refiner.counts().get("cancelled") == 2
+    finally:
+        restore()
+    # A resolution of the backend that outlives the wait is given up; the drain goes on, and no other starts for that
+    # model while it lives.
+    gate = threading.Event()
+    governance = _Governance()
+    backend = _Backend(governance)
+    backends = _locality()
+    backends.get_backend_registry = lambda: types.SimpleNamespace(
+        resolve_backend=lambda model: backend if gate.wait(10) else None)
+    world, restore = _refining(tmp_path / "resolve", backend=backend, governance=governance, backends=backends)
+    try:
+        refiner = world.refiner
+        manager, first = _titled(world)
+        _manager, second = _titled(world, "Prune the apple trees in winter", manager=manager)
+        assert refiner.maybe_refine(manager, first, runner=_drained(world)) is True
+        assert refiner.maybe_refine(manager, second, runner=_drained(world)) is True
+        counts = refiner.counts()
+        assert (counts.get("resolve_timeout"), counts.get("hung"), len(backend.calls)) == (1, 1, 0)
+        assert "no_backend" not in counts, "a resolution given up is counted once"
+        gate.set()
+        for thread in [t for t in threading.enumerate() if t.name == "oo-titler-resolve"]:
+            thread.join(10)
+        _manager, third = _titled(world, "Repot the lemon tree in spring", manager=manager)
+        assert refiner.maybe_refine(manager, third, runner=_drained(world)) is True and len(backend.calls) == 1
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# TT18 -- a backend that cannot say it answers on this machine is never called
+# ---------------------------------------------------------------------------
+def test_tt18_a_backend_that_cannot_say_it_answers_on_this_machine_is_never_called(tmp_path):
+    cases = (("http://10.0.0.5:11434", False), ("http://ollama.lan:11434", False), ("http://192.168.1.2:8080", False),
+             (None, False), ("", False), (OSError("unreadable"), False),
+             ("in-process", True), ("http://127.0.0.1:11434", True), ("http://localhost:11434", True),
+             ("http://[::1]:11434", True), ("http://0.0.0.0:11434", True))
+    for n, (endpoint, called) in enumerate(cases + (("forwards", False), ("undeclared", False))):
+        governance = _Governance()
+        backend = _Backend(governance, endpoint="http://127.0.0.1:9000" if endpoint in ("forwards", "undeclared")
+                           else endpoint)
+        if endpoint == "forwards":
+            backend.forwards_requests = True
+        elif endpoint == "undeclared":
+            # A backend that does not say whether it forwards its requests: no such attribute at all.
+            backend = types.SimpleNamespace(calls=[], endpoint=lambda: "http://127.0.0.1:9000",
+                                            generate=lambda **kwargs: backend.calls.append(kwargs))
+        world, restore = _refining(tmp_path / f"case{n}", backend=backend, governance=governance)
+        try:
+            manager, conv = _titled(world)
+            world.refiner.maybe_refine(manager, conv, runner=_drained(world))
+            assert (len(backend.calls) == 1) is called, endpoint
+            assert bool(governance.asked) is called, f"{endpoint}: the governor is asked only for a call that may go"
+            if not called:
+                assert world.refiner.counts().get("refused_off_machine") == 1, endpoint
+        finally:
+            restore()
+
+
+# ---------------------------------------------------------------------------
+# TT19 -- nothing is dispatched unless the title is the rule's own and all may run
+# ---------------------------------------------------------------------------
+def test_tt19_nothing_is_dispatched_unless_the_title_is_the_rules_own_and_all_may_run(tmp_path):
+    for n, (setting, why) in enumerate(((dict(enabled=False), "refinement off"), ({}, "titles off"),
+                                         ({}, "stop engaged"), ({}, "stop absent"), ({}, "stop unreadable"))):
+        stop = {"stop engaged": True, "stop absent": None, "stop unreadable": "raise"}.get(why, False)
+        world, restore = _refining(tmp_path / f"off{n}", stop=stop, **setting)
+        try:
+            manager, conv = _titled(world)
+            if why == "titles off":
+                world.mod._titles_read.update(config=dataclasses.replace(world.cfg, enabled=False))
+            assert world.refiner.maybe_refine(manager, conv, runner=_drained(world)) is False, why
+            assert world.backend.calls == [] and world.refiner.pending(conv) is False, why
+        finally:
+            restore()
+    world, restore = _refining(tmp_path / "on")
+    try:
+        refiner, db = world.refiner, world.db
+        manager, conv = _titled(world)
+        # A placeholder, a manual, legacy or refined title, a turn that does not decrypt: nothing to refine.
+        plain = manager.create_conversation(model="m").id
+        named = manager.create_conversation(title="Mine", model="m").id
+        _typed(manager, named, _TURN)
+        _manager, older = _titled(world, manager=manager)
+        _plain(db, older, title_source="legacy")
+        _manager, refined = _titled(world, manager=manager)
+        _plain(db, refined, title_source="refined")
+        _manager, sealed = _titled(world, manager=manager)
+        _seal(db, sealed)
+        for other in (plain, named, older, refined, sealed):
+            assert refiner.maybe_refine(manager, other, runner=_drained(world)) is False, other
+        assert world.backend.calls == []
+        # No model named: the conversation has none and titles.yaml names none.
+        modelless = manager.create_conversation().id
+        _typed(manager, modelless, _TURN)
+        assert refiner.maybe_refine(manager, modelless, runner=_drained(world)) is False
+        assert refiner.counts().get("not_asked") == 1
+        # Each title is asked once in a process; a rename forgets the conversation's.
+        assert refiner.maybe_refine(manager, conv, runner=_drained(world)) is True and len(world.backend.calls) == 1
+        manager.use_automatic_title(conv)
+        assert refiner.maybe_refine(manager, conv, runner=_drained(world)) is False, "asked once"
+        refiner.cancel(conv)
+        assert refiner.maybe_refine(manager, conv, runner=_drained(world)) is True and len(world.backend.calls) == 2
+        # Dispatch never raises: a store that fails is no job.
+        broken = types.SimpleNamespace(titles_config=lambda: world.cfg, title_state=lambda conv_id: 1 / 0)
+        assert refiner.maybe_refine(broken, conv) is False
+    finally:
+        restore()
+    # Past dispatch: a stop engaged before the drain, during the admission or during the call, and a cancel during the
+    # call -- no call, the admission handed back, nothing written.
+    for n, moment in enumerate(("queued", "admission", "reread", "reread-cancel", "call", "cancel")):
+        governance = _Governance()
+        backend = _Backend(governance)
+        world, restore = _refining(tmp_path / f"past{n}", backend=backend, governance=governance)
+        try:
+            manager, conv = _titled(world)
+            if moment == "admission":
+                governance.on_admit = lambda: world.state.update(stopped=True)
+            elif moment == "call":
+                backend.on_call = lambda: world.state.update(stopped=True)
+            elif moment == "cancel":
+                backend.on_call = lambda: world.refiner.cancel(conv)
+            elif moment.startswith("reread"):
+                real, reads = manager.title_state, []
+
+                def reading(conv_id, real=real, reads=reads, moment=moment):
+                    found = real(conv_id)
+                    reads.append(conv_id)
+                    if len(reads) > 1:
+                        # The store's read once admitted: the stop or a cancel comes while it waits.
+                        if moment == "reread":
+                            world.state["stopped"] = True
+                        else:
+                            world.refiner.cancel(conv_id)
+                    return found
+
+                manager.title_state = reading
+            idle = []
+            assert world.refiner.maybe_refine(manager, conv, runner=lambda m, c: idle.append(c)) is True
+            if moment == "queued":
+                world.state["stopped"] = True
+            world.refiner._drain(manager, world.cfg)
+            assert len(backend.calls) == (1 if moment in ("call", "cancel") else 0), moment
+            assert governance.handed == (["t1"] if moment in ("admission", "reread", "reread-cancel") else []), moment
+            assert _row(world.db, conv)["title_source"] == "auto", f"{moment}: nothing written"
+        finally:
+            restore()
+    # A named model is asked for a conversation that has none.
+    governance = _Governance()
+    backend = _Backend(governance)
+    world, restore = _refining(tmp_path / "named", backend=backend, governance=governance, model="m")
+    try:
+        manager = world.mod.ConversationManager(db_path=world.db, publish_to_sync=False)
+        conv = manager.create_conversation().id
+        _typed(manager, conv, _TURN)
+        assert world.refiner.maybe_refine(manager, conv, runner=_drained(world)) is True
+        assert [call["model"] for call in backend.calls] == ["m"]
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# TT20 -- the call is the background's, admitted as titler, its ticket held where it is asked
+# ---------------------------------------------------------------------------
+def test_tt20_the_call_is_the_backgrounds_admitted_as_titler_its_ticket_held_where_it_is_asked(tmp_path):
+    shipped = yaml.safe_load((REPO / "opti_oignon" / "config" / "resource_governor.yaml").read_text(encoding="utf-8"))
+    assert shipped["classes"]["callers"]["titler"] == "background"
+    assert shipped["ctx_floor"]["titler"] == min(shipped["ctx_ladder"])
+    governor = _module("opti_oignon/resource_governor.py")
+    defaults = next(ast.literal_eval(node.value) for node in governor.body if isinstance(node, ast.Assign)
+                    and getattr(node.targets[0], "id", "") == "_DEFAULT_CALLER_CLASSES")
+    assert defaults["titler"] == "background"
+    floors = next(ast.literal_eval(node.value.keywords[0].value.body) for node in ast.walk(governor)
+                  if isinstance(node, ast.AnnAssign) and getattr(node.target, "id", "") == "ctx_floor")
+    assert floors["titler"] == min(shipped["ctx_ladder"]), "the defaults give the titler its floor"
+    world, restore = _refining(tmp_path / "admitted")
+    try:
+        manager, conv = _titled(world)
+        assert world.refiner.maybe_refine(manager, conv, runner=_drained(world)) is True
+        (asked,) = world.governance.asked
+        assert {key: asked[key] for key in ("model", "requested_ctx", "caller", "wait_s")} == {
+            "model": "m", "requested_ctx": world.cfg.refine.num_ctx, "caller": "titler",
+            "wait_s": float(world.cfg.refine.timeout_s)}
+        assert isinstance(asked["cancel"], threading.Event), "the job's cancel goes to the governor"
+        (call,) = world.backend.calls
+        assert (call["thread"], call["ticket"]) == ("oo-titler-call", "t1"), "the ticket held on the asking thread"
+        assert (call["options"]["num_ctx"], call["keep_alive"]) == (2048, "1m"), "the admitted window and residency"
+        assert world.governance.handed == []
+    finally:
+        restore()
+    for n, (governance, why) in enumerate(((_Governance(admitted=False), "not admitted"),
+                                           (_Governance(refuse_entry=True), "refused on entry"))):
+        backend = _Backend(governance)
+        world, restore = _refining(tmp_path / f"refused{n}", backend=backend, governance=governance)
+        try:
+            manager, conv = _titled(world)
+            world.refiner.maybe_refine(manager, conv, runner=_drained(world))
+            assert backend.calls == [], why
+            assert governance.handed == ([] if why == "not admitted" else ["t1"]), f"{why}: an unused admission"
+            assert _row(world.db, conv)["title_source"] == "auto", why
+        finally:
+            restore()
+    # A governor that cannot be had admits nothing: no call at all.
+    governance = _Governance()
+    backend = _Backend(governance)
+    governance.module.get_resource_governor = lambda: 1 / 0
+    world, restore = _refining(tmp_path / "ungoverned", backend=backend, governance=governance)
+    try:
+        manager, conv = _titled(world)
+        world.refiner.maybe_refine(manager, conv, runner=_drained(world))
+        assert backend.calls == [] and world.refiner.counts().get("not_admitted") == 1
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# TT22 -- the title route says pending while a job lives, and the routes cancel it
+# ---------------------------------------------------------------------------
+def test_tt22_the_title_route_says_pending_while_a_job_lives_and_the_routes_cancel_it(tmp_path):
+    from fastapi import HTTPException
+
+    world, restore = _refining(tmp_path, poll_after_ms=1234)
+    try:
+        refiner = world.refiner
+        now = [100.0]
+        refiner._clock = lambda: now[0]
+        idle = []
+        manager, conv = _titled(world)
+        _manager, gone = _titled(world, "Prune the apple trees in winter", manager=manager)
+        _manager, late = _titled(world, "Repot the lemon tree in spring", manager=manager)
+        for each in (conv, gone, late):
+            assert refiner.maybe_refine(manager, each, runner=lambda m, c: idle.append(c)) is True
+        routes, schemas, close = _routes(manager, refiner=refiner)
+        try:
+            assert routes.get_conversation_title(conv) == {
+                "title": _TURN, "title_source": "auto", "title_pending": True, "retry_after_ms": 1234}
+            assert routes.get_conversation(conv)["title_pending"] is True
+            job = refiner._jobs[conv]
+            renamed = routes.rename_conversation(conv, schemas.ConversationRename(title="Mine"))
+            assert renamed["title_pending"] is False and refiner.pending(conv) is False, "a rename cancels"
+            assert job.cancelled.is_set(), "the job itself is told: a wait at the governor ends"
+            assert routes.get_conversation_title(conv) == {
+                "title": "Mine", "title_source": "manual", "title_pending": False, "retry_after_ms": None}
+            job = refiner._jobs[gone]
+            routes.delete_conversation(gone)
+            assert refiner.pending(gone) is False and job.cancelled.is_set(), "a deletion cancels"
+            with pytest.raises(HTTPException) as raised:
+                routes.get_conversation_title(gone)
+            assert raised.value.status_code == 404
+            assert routes.get_conversation_title(late)["title_pending"] is True
+            now[0] += 4 * world.cfg.refine.timeout_s + 1
+            assert routes.get_conversation_title(late) == {
+                "title": "Repot the lemon tree in spring", "title_source": "auto", "title_pending": False,
+                "retry_after_ms": None}, "past its deadline a job is not pending"
+        finally:
+            close()
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# TT24 -- the interface watches a pending title at the server's pace
+# ---------------------------------------------------------------------------
+def _ts_function(text, name):
+    start = text.index(f"function {name}(")
+    return text[start:text.index("\n}\n", start)]
+
+
+def test_tt24_the_interface_watches_a_pending_title_at_the_servers_pace():
+    store = (REPO / "frontend" / "src" / "lib" / "stores" / "conversations.ts").read_text(encoding="utf-8")
+    api = (REPO / "frontend" / "src" / "lib" / "api" / "conversations.ts").read_text(encoding="utf-8")
+    load = _ts_function(store, "loadConversations")
+    assert re.search(r"conversations\.set\(list\);\s*(?://[^\n]*\n\s*)?"
+                     r"for \(const c of list\) if \(c\.title_pending\) watchTitle\(c\.id\);", load)
+    watch = _ts_function(store, "watchTitle")
+    assert "await api.getConversationTitle(id)" in watch
+    assert "again = answer.retry_after_ms;" in watch and "setTimeout(ask, again);" in watch
+    assert "answer.title_pending && typeof answer.retry_after_ms === 'number'" in watch
+    assert not re.search(r"\d", watch), "no delay of the client's own: the server paces the watch"
+    assert "if (watched.has(id)) return;" in watch and "watched.delete(id);" in watch
+    assert "title_pending: false" in watch, "the title the server answers, once nothing is pending"
+    assert re.search(r"export async function getConversationTitle\(id: string\): Promise<ConversationTitle> \{\s*"
+                     r"return apiGet<ConversationTitle>\(`/api/conversations/\$\{id\}/title`\);", api)
+
+
+# ---------------------------------------------------------------------------
+# TT35 -- the model is handed the words the rule keeps, and nothing else
+# ---------------------------------------------------------------------------
+_TYPED = "Plan the garden layout v2 for spring, see /srv/plan.txt and `make beds`"
+_DOCUMENT = "Confidential ledger of the northern farm"
+
+
+def _beside(world, manager):
+    """A conversation whose first turn typed _TYPED beside a pasted document, and an answer."""
+    conv = manager.create_conversation(model="m").id
+    content = _TYPED + "\n\n" + _DOCUMENT
+    manager.add_message(conv, "user", content, origin="typed",
+                        segments=[[0, len(_TYPED), "typed"], [len(_TYPED) + 2, len(content), "document"]])
+    manager.add_message(conv, "assistant", "Your answer mentions irrigation pumps.", origin="assistant", context=[],
+                        lineage=[])
+    return conv
+
+
+def test_tt35_the_model_is_handed_the_words_the_rule_keeps_and_nothing_else(tmp_path):
+    world, restore = _refining(tmp_path / "cut", max_input_chars=40)
+    try:
+        manager = world.mod.ConversationManager(db_path=world.db, publish_to_sync=False)
+        conv = _beside(world, manager)
+        assert world.refiner.maybe_refine(manager, conv, runner=_drained(world)) is True
+        handed, size = [], 0
+        for word in world.titles.kept_words(_TYPED, world.cfg.derive):
+            if size + len(word) + bool(handed) > 40:
+                break
+            handed.append(word)
+            size += len(word) + (len(handed) > 1)
+        assert world.backend.calls[0]["messages"][1] == {"role": "user", "content": " ".join(handed)}
+        assert len(" ".join(handed)) <= 40 < len(" ".join(world.titles.kept_words(_TYPED, world.cfg.derive)))
+    finally:
+        restore()
+    world, restore = _refining(tmp_path / "whole")
+    try:
+        manager = world.mod.ConversationManager(db_path=world.db, publish_to_sync=False)
+        conv = _beside(world, manager)
+        assert world.refiner.maybe_refine(manager, conv, runner=_drained(world)) is True
+        (call,) = world.backend.calls
+        system, user = call["messages"]
+        assert system == {"role": "system", "content": world.cfg.refine.system_prompt}
+        assert user == {"role": "user", "content": " ".join(world.titles.kept_words(_TYPED, world.cfg.derive))}
+        assert len(user["content"]) < world.cfg.refine.max_input_chars, "nothing here is past the cut"
+        for absent in ("v2", "srv", "txt", "make", "Confidential", "ledger", "northern", "irrigation", "answer"):
+            assert absent not in user["content"], absent
+        assert call["think"] is False and call["model"] == "m"
+        assert call["options"] == {"temperature": world.cfg.refine.temperature, "seed": world.cfg.refine.seed,
+                                   "num_predict": world.cfg.refine.num_predict, "num_ctx": 2048,
+                                   "timeout": world.cfg.refine.timeout_s}
+        # A turn that names a password titles nothing: nothing of it is ever handed.
+        _manager, named = _titled(world, "my password is hunter so plan the garden", manager=manager)
+        assert world.refiner.maybe_refine(manager, named, runner=_drained(world)) is False
+        assert len(world.backend.calls) == 1
+        # The title read again right before the call: its turn withdrawn, the conversation deleted by the store, its
+        # turn deleted -- the words are never handed.
+        idle = []
+        withdrawn = _beside(world, manager)
+        moved = _beside(world, manager)
+        _typed(manager, moved, "Then draw a chart of the beds")
+        deleted = _beside(world, manager)
+        _manager, retried = _titled(world, "Prune the apple trees in winter", manager=manager)
+        for each in (withdrawn, moved, deleted, retried):
+            assert world.refiner.maybe_refine(manager, each, runner=lambda m, c: idle.append(c)) is True
+        assert manager.withdraw_source("document:" + hashlib.sha256(_DOCUMENT.encode("utf-8")).hexdigest()) >= 1
+        assert manager.title_state(moved)[2] == "Then draw a chart of the beds", "the title moved to the next turn"
+        manager.delete_conversation(deleted)
+        assert manager.delete_last_message(retried) is True and manager.delete_last_message(retried) is True
+        world.refiner._drain(manager, world.cfg)
+        assert len(world.backend.calls) == 1 and world.refiner.counts().get("stale") == 4
+        assert len(world.governance.handed) == 4, "each admission no call holds is handed back"
+        # A re-read that fails is no reading: the words are not handed.
+        _manager, flaky = _titled(world, "Repot the lemon tree in spring", manager=manager)
+        real = manager.title_state
+        assert world.refiner.maybe_refine(manager, flaky, runner=lambda m, c: idle.append(c)) is True
+
+        def failing(conv_id):
+            raise sqlite3.OperationalError("the store cannot be read")
+
+        manager.title_state = failing
+        world.refiner._drain(manager, world.cfg)
+        manager.title_state = real
+        assert len(world.backend.calls) == 1 and world.refiner.counts().get("stale") == 5
+    finally:
+        restore()
+
+
+# ---------------------------------------------------------------------------
+# TT36 -- the refinement's wiring on the real package's shape
+# ---------------------------------------------------------------------------
+def _calls(node, name):
+    return [call for call in ast.walk(node) if isinstance(call, ast.Call)
+            and (getattr(call.func, "id", None) == name or getattr(call.func, "attr", None) == name)]
+
+
+def test_tt36_the_refinement_is_wired_on_the_real_package_shape():
+    chat = _module("opti_oignon/api/routes_chat.py")
+    for name in ("_stream_turn", "_stream_chat_coding"):
+        function = next(node for node in ast.walk(chat) if isinstance(node, ast.AsyncFunctionDef) and node.name == name)
+        sends = 0
+        for block in [node for node in ast.walk(function) if isinstance(getattr(node, "body", None), list)]:
+            for before, statement in zip(block.body, block.body[1:]):
+                done = [call for call in _calls(statement, "_send_token")
+                        if len(call.args) > 1 and getattr(call.args[1], "value", None) == "done"]
+                if done and isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Await):
+                    sends += 1
+                    refine = _calls(before, "_refine_title")
+                    assert isinstance(before, ast.Expr) and refine and [a.id for a in refine[0].args] == \
+                        ["conversation_id"], f"{name}: the refinement is handed the conversation right before done"
+        assert sends == 1, name
+    hand = next(node for node in chat.body if isinstance(node, ast.FunctionDef) and node.name == "_refine_title")
+    (dispatch,) = _calls(hand, "maybe_refine")
+    assert [a.id for a in dispatch.args] == ["conversation_manager", "conversation_id"]
+    assert dispatch.func.value.id == "_title_refiner"
+    for route in ("delete_conversation", "rename_conversation"):
+        body = _route_body(route)
+        cancels = _calls(body, "_cancel_refinement")
+        assert len(cancels) == 1 and [a.id for a in cancels[0].args] == ["conv_id"], route
+    rename = _route_body("rename_conversation")
+    lines = {name: _calls(rename, name)[0].lineno for name in ("_cancel_refinement", "rename_conversation")}
+    assert lines["_cancel_refinement"] < lines["rename_conversation"], "cancelled before the user's title lands"
+    refiner = _module("opti_oignon/title_refiner.py")
+    imported = [node for node in refiner.body if isinstance(node, (ast.Import, ast.ImportFrom))]
+    assert {alias.name for node in imported if isinstance(node, ast.Import) for alias in node.names} <= {
+        "collections", "importlib", "logging", "threading", "time"}
+    assert [(node.module, node.level, [a.name for a in node.names]) for node in imported
+            if isinstance(node, ast.ImportFrom)] == [("dataclasses", 0, ["dataclass", "field"]),
+                                                      (None, 1, ["conversation_titles"])]
+    backends = _module("opti_oignon/inference_backend.py")
+    base = next(node for node in backends.body if isinstance(node, ast.ClassDef) and node.name == "InferenceBackend")
+    assert any(isinstance(node, ast.AnnAssign) and node.target.id == "forwards_requests" and node.value.value is False
+               for node in base.body), "a backend's requests stay where its endpoint says, unless it says otherwise"
+    core = next(node for node in _module("opti_oignon/core_client.py").body
+                if isinstance(node, ast.ClassDef) and node.name == "RemoteCoreBackend")
+    assert any(isinstance(node, ast.Assign) and node.targets[0].id == "forwards_requests" and node.value.value is True
+               for node in core.body), "the core daemon's backend says it forwards"
+    public = next(node for node in backends.body if isinstance(node, ast.FunctionDef) and node.name ==
+                  "is_on_this_machine")
+    (returned,) = [node for node in ast.walk(public) if isinstance(node, ast.Return)]
+    assert returned.value.func.id == "_is_on_this_machine" and returned.value.args[0].id == "url"
+
+
+# ---------------------------------------------------------------------------
+# TT37 -- no word of a turn or of an answer reaches the log
+# ---------------------------------------------------------------------------
+def test_tt37_no_word_of_a_turn_or_of_an_answer_reaches_the_log(tmp_path, caplog):
+    cases = (("Garden layout for spring", None), ("Pumpkin secretword", None),
+             ("ignored", RuntimeError("boom pumpkin secretword garden")))
+    for n, (answer, error) in enumerate(cases):
+        governance = _Governance()
+        backend = _Backend(governance, answer=answer, error=error)
+        world, restore = _refining(tmp_path / f"case{n}", backend=backend, governance=governance)
+        try:
+            with caplog.at_level(logging.DEBUG):
+                manager, conv = _titled(world)
+                world.refiner.maybe_refine(manager, conv, runner=_drained(world))
+            assert len(backend.calls) == 1
+        finally:
+            restore()
+    assert "title refinement: committed" in caplog.text and "title refinement: guard_refused" in caplog.text
+    assert "title refinement: error" in caplog.text
+    for word in ("garden", "layout", "spring", "raised", "pumpkin", "secretword", "boom", "plan"):
+        assert word not in caplog.text.lower(), word
+
+
+# ---------------------------------------------------------------------------
+# TT38 -- the refine section is read exactly, and a machine sets its switch and model in local.yaml
+# ---------------------------------------------------------------------------
+def test_tt38_the_refine_section_is_read_exactly_and_a_machine_sets_its_own_switch(tmp_path, caplog):
+    mod, loaded, restore = _load(tmp_path)
+    try:
+        titles = loaded[_TITLES]
+        shipped = yaml.safe_load(_TITLES_YAML.read_text(encoding="utf-8"))
+        assert set(shipped["refine"]) == set(titles._REFINE)
+        refine = titles.read_config(shipped).refine
+        assert refine.enabled is False, "off as shipped"
+        assert refine.function_words >= {"the", "and", "de", "pour"} and refine.answer_labels == {"title", "titre"}
+        for key, kind in titles._REFINE.items():
+            if kind is int:
+                low = 0 if key in titles._MAY_BE_ZERO else 1
+                with pytest.raises(titles.TitlesConfigError, match=f"{key} is out of range"):
+                    titles.read_config({**shipped, "refine": {**shipped["refine"], key: low - 1}})
+        for key, value, word in (("temperature", 2.5, "temperature is out of range"),
+                                 ("temperature", 1, "temperature is not a float"),
+                                 ("keep_alive", "  ", "keep_alive is empty"), ("system_prompt", "", "system_prompt"),
+                                 ("function_words", ["the", "5"], "function_words"),
+                                 ("function_words", ["the", True], "function_words"),
+                                 ("answer_labels", ["title:"], "answer_labels"), ("enabled", "yes", "enabled"),
+                                 ("model", None, "model"), ("surprise", 1, "surprise")):
+            with pytest.raises(titles.TitlesConfigError, match=word):
+                titles.read_config({**shipped, "refine": {**shipped["refine"], key: value}})
+        with pytest.raises(titles.TitlesConfigError, match="refine"):
+            titles.read_config({k: v for k, v in shipped.items() if k != "refine"})
+        # local.yaml: only a YAML boolean switches, only a name that is not blank names the model.
+        base = titles.read_config(shipped).refine
+        assert titles.local_refine({"refine": {"enabled": True, "model": " small "}}, base)[0] == \
+            dataclasses.replace(base, enabled=True, model="small")
+        assert titles.local_refine(None, base) == (base, [])
+        for entry, reason in (({"refine": {"enabled": "yes"}}, "no boolean"), ({"refine": {"model": "  "}}, "no name"),
+                              ({"refine": {"enabled": True, "speed": 2}}, "speed"), ({"other": 1}, "other"),
+                              ([1], "no mapping for titles"), ({"refine": [1]}, "no mapping for titles.refine")):
+            settings, reasons = titles.local_refine(entry, base)
+            assert any(reason in said for said in reasons), entry
+            assert settings.enabled is (entry == {"refine": {"enabled": True, "speed": 2}}), entry
+        # The store lays the machine's file over titles.yaml, once, and says what it set nothing for.
+        folder = tmp_path / "config"
+        folder.mkdir()
+        (folder / "titles.yaml").write_text(_TITLES_YAML.read_text(encoding="utf-8"), encoding="utf-8")
+        mod._TITLES_PATH = folder / "titles.yaml"
+        for local, enabled, said in (("titles: {refine: {enabled: true, model: small}}\n", True, None),
+                                     ("titles: {refine: {enabled: 1}}\n", False, "holds no boolean"),
+                                     ("titles: [\n", False, "does not parse"),
+                                     ("- 1\n", False, "holds no mapping"),
+                                     ("onion: {enabled: true}\n", False, None)):
+            (folder / "local.yaml").write_text(local, encoding="utf-8")
+            mod._titles_read.update(done=False, config=None)
+            caplog.clear()
+            with caplog.at_level(logging.WARNING):
+                cfg = mod._titles_config()
+            assert cfg.refine.enabled is enabled, local
+            assert (said is None and "local.yaml" not in caplog.text) or (said in caplog.text), local
+            assert "small" not in caplog.text, "said by name, never with the file's content"
+        assert cfg.enabled is True, "a machine's file never turns rule (a) off"
     finally:
         restore()

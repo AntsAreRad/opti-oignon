@@ -252,6 +252,7 @@ _DEFAULT_CALLER_CLASSES = {
     "tuner": "background",
     "reverie": "background",
     "librarian": "background",
+    "titler": "background",
 }
 
 _BYTES_PER_GIB = 1024.0 ** 3
@@ -853,7 +854,7 @@ class GovernorConfig:
         default_factory=lambda: [32768, 16384, 8192, 4096]
     )
     ctx_floor: dict[str, int] = field(
-        default_factory=lambda: {"chat": 4096, "pipeline": 4096, "librarian": 4096}
+        default_factory=lambda: {"chat": 4096, "pipeline": 4096, "librarian": 4096, "titler": 4096}
     )
     idle_evict_threshold_s: float = 600.0
     pressure_soft_threshold: float = 0.85

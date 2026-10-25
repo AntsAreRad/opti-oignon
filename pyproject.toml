@@ -1159,6 +1159,13 @@ fail_under = 0
 # tests/test_auto_title_contracts.py, which repeats it with the title
 # encrypted. It stays in the tree word for word.
 #
+# test_q43_window_holds_and_the_module_is_import_pure_at_343_models and
+# test_q44_required_field_census_matches_the_snapshot_with_the_adoption_and_the_withdrawal
+# of tests/test_api_schemas_contracts.py held the schemas at 343 and their
+# required fields without a conversation's title as it stands. They give way
+# to q46 and q47 in the same file, word for word with the new schema. They
+# stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1558,4 +1565,6 @@ addopts = """
     --deselect=tests/test_startup_checklist_contracts.py::test_c5_report_serializes_with_coherent_counters
     --deselect=tests/test_allium_surface_contracts.py::test_af14_the_production_look_touches_only_the_frozen_modules_and_data_paths
     --deselect=tests/test_conversation_apply.py::test_apply_materialises_conversation_and_reencrypts
+    --deselect=tests/test_api_schemas_contracts.py::test_q43_window_holds_and_the_module_is_import_pure_at_343_models
+    --deselect=tests/test_api_schemas_contracts.py::test_q44_required_field_census_matches_the_snapshot_with_the_adoption_and_the_withdrawal
 """

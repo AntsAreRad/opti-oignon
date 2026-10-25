@@ -46,6 +46,8 @@ export async function loadConversations(): Promise<void> {
 	try {
 		const list = await api.listConversations({ limit: 100 });
 		conversations.set(list);
+		// A title the local model is refining: watched until the server says it is done.
+		for (const c of list) if (c.title_pending) watchTitle(c.id);
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : 'Failed to load conversations';
 		error.set(msg);
@@ -53,6 +55,46 @@ export async function loadConversations(): Promise<void> {
 	} finally {
 		loading.set(false);
 	}
+}
+
+/** The conversations whose title is being watched while the local model refines it. */
+const watched = new Set<string>();
+
+/**
+ * Watch a conversation's title while the local model refines it: ask the server again only when it says to
+ * (`retry_after_ms`, never a delay of the client's own), and put the title it answers in the list once nothing is
+ * pending. Stops when the server says nothing is pending, when the conversation is no longer in the list, or when a
+ * request fails; one watcher per conversation.
+ */
+export function watchTitle(id: string): void {
+	if (watched.has(id)) return;
+	watched.add(id);
+	const ask = async (): Promise<void> => {
+		let again: number | null = null;
+		try {
+			const answer = await api.getConversationTitle(id);
+			const listed = get(conversations).some((c) => c.id === id);
+			if (listed && answer.title_pending && typeof answer.retry_after_ms === 'number') {
+				again = answer.retry_after_ms;
+			} else if (listed) {
+				conversations.update((list) =>
+					list.map((c) =>
+						c.id === id
+							? { ...c, title: answer.title, title_source: answer.title_source, title_pending: false }
+							: c
+					)
+				);
+			}
+		} catch {
+			again = null;
+		}
+		if (again === null) {
+			watched.delete(id);
+			return;
+		}
+		setTimeout(ask, again);
+	};
+	void ask();
 }
 
 /** Select a conversation and load its messages. */

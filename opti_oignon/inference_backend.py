@@ -347,6 +347,15 @@ def _is_on_this_machine(url: str) -> bool:
     return address.is_loopback or address.is_unspecified
 
 
+def is_on_this_machine(url: str) -> bool:
+    """The locality check by its public name: whether ``url`` addresses this machine, no name resolved.
+
+    A caller that must never send a request off the machine, whatever the security mode, asks this rather than
+    ``local_refusal``, which lets a request leave in Daily.
+    """
+    return _is_on_this_machine(url)
+
+
 def _bulbe_refusal_for(label: str, endpoint: str | None, where: str = "") -> str | None:
     """Why a request of ``label`` may not leave the process now, or None.
 
@@ -794,6 +803,10 @@ class InferenceBackend(ABC):
     # process, llama-server): a sweep of counts through such an engine
     # measures one count, and the tuner keeps none of it.
     threads_per_call: bool = False
+    # Whether the backend hands its requests to another process that chooses
+    # where they go (the core daemon): its endpoint then says only the first
+    # hop. A caller that must keep a request on this machine never calls one.
+    forwards_requests: bool = False
 
     @property
     @abstractmethod

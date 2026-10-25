@@ -7,6 +7,7 @@ import type {
 	ConversationSummary,
 	ConversationDetail,
 	ConversationCreate,
+	ConversationTitle,
 	MessageItem
 } from '$lib/types';
 
@@ -47,6 +48,11 @@ export async function renameConversation(id: string, title: string): Promise<Con
 /** Give the title back to the server's rule: derived from the words typed in the first turns. */
 export async function automaticTitle(id: string): Promise<ConversationSummary> {
 	return apiPost<ConversationSummary>(`/api/conversations/${id}/title/auto`, {});
+}
+
+/** The title as it stands and whether the local model is refining it; while it is, `retry_after_ms` says when to ask again. */
+export async function getConversationTitle(id: string): Promise<ConversationTitle> {
+	return apiGet<ConversationTitle>(`/api/conversations/${id}/title`);
 }
 
 export async function deleteConversation(id: string): Promise<void> {

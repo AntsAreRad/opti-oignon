@@ -11,6 +11,36 @@ package costs.
 
 ### Added
 
+- [SECURITY] A conversation's automatic title may be refined by the local
+  model, off as shipped (`refine` in `opti_oignon/config/titles.yaml`; a
+  machine turns it on, or names its model, in `local.yaml`, never
+  committed). Once an answer is sent, the model titles.yaml or local.yaml
+  names, or else the one the conversation was answered with, is handed the
+  words the title rule keeps of the title's turn and nothing else -- never
+  the answer, a document, a pasted part, nor a number, code, an address or
+  a path the rule drops --, and asked for a short title
+  (`opti_oignon/title_refiner.py`). Once the call is admitted the title is
+  read again, and the stop and a cancel checked after it, right before the
+  call starts: a title renamed, deleted, or whose turn was withdrawn or
+  went is not asked about. The answer is refused unless the rule keeps
+  every word of it and each is exactly one of those words, composed and
+  lowercased -- a changed accent, form or spelling is another word --, or
+  one of a closed list of function words; refused, lost or late, the
+  rule's title stays, and the store writes it only while the title is
+  still the one refined. The words handed are those of the turn's first
+  `max_input_chars` characters, so a refined title may show a word the
+  rule's shorter title did not. Only a backend whose own requests stay on
+  this machine is called, whatever the security mode; one that hands them
+  to another process (the core daemon) is not, and a server on this
+  machine that sends a request on is judged by its own address. The call
+  is the resource governor's background (caller `titler`); each wait for
+  the model -- the queue, the backend's resolution, the admission, the
+  answer -- is bounded, the call given up past its deadline, and nothing
+  starts or is written with the emergency stop engaged. `GET
+  /api/conversations/{id}/title` says while a title is being refined and
+  when to ask again; the interface asks at that pace only. No word of a
+  turn or of an answer reaches the logs.
+
 - [SECURITY] Conversations are titled automatically. A conversation's
   title is made from the words its user typed in its first turns -- never
   a pasted part, an attached document, a turn the model reworded, a
@@ -49,7 +79,7 @@ package costs.
   still titled "New conversation" that hold a typed turn are titled when
   the backend starts, and a title drawn under an older list of names or an
   older rule is drawn again then, or at its conversation's next turn.
-  Refining a title with the local model comes in a block of its own.
+  The local model may refine a title (above).
 
 - [SECURITY] The knowledge base is encrypted at rest. The RAG store's
   chunks, the memory's facts, and the projects' and the documents' indexes

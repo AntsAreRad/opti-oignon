@@ -36,6 +36,10 @@ NAME = "core"
 class RemoteCoreBackend(InferenceBackend):
     """Every request forwarded to the core daemon over the loopback."""
 
+    # The daemon resolves and calls a backend of its own: the loopback is only
+    # the first hop of a request.
+    forwards_requests = True
+
     def __init__(self, base_url, token="", timeout_s=30.0):
         self.base_url = str(base_url).rstrip("/")
         self.token = token or ""

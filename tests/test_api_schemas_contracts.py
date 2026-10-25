@@ -1189,3 +1189,73 @@ def test_q45_constraint_census_matches_the_snapshot_with_the_adoption_and_the_wi
         }
     finally:
         restore()
+
+
+def test_q46_window_holds_and_the_module_is_import_pure_at_344_models():
+    """q43 word for word, at the count a conversation's title brought the
+    module to: the title as it stands and whether the local model refines it
+    (q43 is deselected by name; its literal was 343).
+    """
+    S, restore = _load()
+    try:
+        assert sys.modules.get("ollama", "absent") is None
+        project = {k: v for k, v in sys.modules.items() if k.split(".")[0] == "opti_oignon"}
+        for name, mod in project.items():
+            assert mod is None or name in (
+                "opti_oignon",
+                "opti_oignon.api",
+                _SCHEMAS,
+            ), f"unexpected live project module inside the window: {name}"
+        classes = _models(S)
+        assert len(classes) == 344
+        assert {n for n in classes if n.startswith("Onion")} == {
+            "OnionCodeResponse", "OnionCoreEntrySchema", "OnionPinRequest", "OnionPinResponse",
+            "OnionProposalDecisionResponse", "OnionProposalSchema", "OnionProposalsResponse",
+            "OnionRecallResponse", "OnionReceiptSchema", "OnionResolveResponse", "OnionStateResponse",
+            "OnionStatusResponse", "OnionSupersedeRequest",
+        }, "the thirteen are the onion's user surface and nothing else"
+        assert {
+            "MemoryUnendorsedSchema", "MemoryAdoptItem", "MemoryAdoptRequest", "MemoryAdoptResponse",
+            "SourceWithdrawRequest", "SourceWithdrawResponse",
+        } <= set(classes), "the six schemas the count grew by"
+        assert "ConversationTitle" in classes, "the schema the count grew by"
+        residue = {
+            k
+            for k, v in vars(S).items()
+            if not k.startswith("_")
+            and not (isinstance(v, type) and issubclass(v, BaseModel))
+        }
+        assert residue == {"Any", "Field"}
+    finally:
+        restore()
+
+
+def test_q47_required_field_census_matches_the_snapshot_with_the_conversation_title():
+    """q44 word for word, with the field a conversation's title refuses to go
+    without: the title itself (q44 is deselected by name; its snapshot stays
+    as it was, untouched).
+    """
+    S, restore = _load()
+    try:
+        actual = {}
+        for name, cls in _models(S).items():
+            req = tuple(n for n, f in cls.model_fields.items() if f.is_required())
+            if req:
+                actual[name] = req
+        assert actual == {
+            **REQUIRED,
+            "OnionCodeResponse": ("conversation_id", "key"),
+            "ChatDocument": ("filename", "content"),
+            "OnionProposalSchema": ("id", "text", "turn_id", "origin", "made_on"),
+            "OnionProposalsResponse": ("conversation_id",),
+            "OnionProposalDecisionResponse": ("conversation_id", "id", "decision"),
+            "OnionStatusResponse": ("enabled",),
+            "MemoryUnendorsedSchema": ("id", "text", "category", "digest"),
+            "MemoryAdoptItem": ("id", "digest"),
+            "MemoryAdoptRequest": ("items",),
+            "MemoryAdoptResponse": ("adopted", "refused"),
+            "SourceWithdrawResponse": ("source", "turns", "branch_messages", "fact_set_aside"),
+            "ConversationTitle": ("title",),
+        }
+    finally:
+        restore()

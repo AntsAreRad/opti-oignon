@@ -88,6 +88,7 @@ ctx_floor:
   chat: 4096
   pipeline: 4096
   librarian: 4096
+  titler: 4096
 
 # Backpressure.
 idle_evict_threshold_s: 600
@@ -130,6 +131,7 @@ classes:
     tuner: background
     reverie: background
     librarian: background
+    titler: background
   interactive:
     queued: false
   user:
