@@ -1166,6 +1166,19 @@ fail_under = 0
 # to q46 and q47 in the same file, word for word with the new schema. They
 # stay in the tree word for word.
 #
+# migrate reads ChromaDB's stores with the standard library and computes
+# each vector again with the embedder its namespace is queried with (block
+# 181): nothing imports chromadb any more. Twenty cm contracts of
+# tests/test_chroma_migration_contracts.py -- all but cm8b and cm13 -- read
+# through a stand-in of chromadb, or through chromadb itself, and held each
+# vector copied bit for bit. They give way to cz1-cz19 of
+# tests/test_chroma_file_migration_contracts.py, on the stores the real
+# chromadb 1.3.7 wrote and on stores made in their layout. mv9 of
+# tests/test_mode_verdict_contracts.py gives way to cz18, and vd11 of
+# tests/test_vector_db_contracts.py, which held the migration the one
+# importer of chromadb, to rm2 of tests/test_chromadb_removed_contracts.py.
+# They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1567,4 +1580,26 @@ addopts = """
     --deselect=tests/test_conversation_apply.py::test_apply_materialises_conversation_and_reencrypts
     --deselect=tests/test_api_schemas_contracts.py::test_q43_window_holds_and_the_module_is_import_pure_at_343_models
     --deselect=tests/test_api_schemas_contracts.py::test_q44_required_field_census_matches_the_snapshot_with_the_adoption_and_the_withdrawal
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm1_each_folder_the_command_knows_goes_to_its_namespace_and_another_is_left
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm2_every_item_moves_bit_for_bit_encrypted_and_each_folder_is_kept_beside
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm2b_with_no_key_the_store_is_written_as_every_store_is_and_said
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm3_each_refusal_changes_nothing
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm4_a_copy_that_does_not_prove_writes_nothing
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm5_an_id_the_store_holds_is_kept_and_a_run_stuck_after_its_commit_is_finished_by_the_next
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm6_a_signal_before_the_commit_changes_nothing_and_one_after_lets_the_run_finish
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm7_both_listings_and_the_space_each_version_gave
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm8_check_names_the_command_for_the_stores_it_moves_and_one_run_at_a_time
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm9_every_file_the_command_keeps_in_plaintext_is_one_git_ignores
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm10_a_memory_vector_moves_only_when_an_active_fact_holds_it_as_it_reads
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm11_a_holder_seen_before_the_commit_and_every_failure_a_refusal_by_name
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm12_the_real_chromadb_makes_stores_the_command_moves_whole
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm13b_a_repository_below_a_folder_named_like_a_copy_moves_as_any_other
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm13c_a_rag_home_spelled_another_way_moves_as_the_place_spells_it
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm14_a_resumed_run_removes_what_a_rewritten_or_deleted_fact_no_longer_holds
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm14b_a_vector_the_store_holds_with_the_text_its_fact_reads_is_kept
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm14c_a_copy_with_no_text_whose_fact_is_gone_is_removed
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm15_two_folders_holding_the_memory_move_together_the_current_text_kept
+    --deselect=tests/test_chroma_migration_contracts.py::test_cm15b_a_run_stopped_between_two_folders_leaves_only_the_text_the_fact_reads
+    --deselect=tests/test_mode_verdict_contracts.py::test_mv9_migrate_with_the_real_mode_and_the_real_chain_ends_and_records_once
+    --deselect=tests/test_vector_db_contracts.py::test_vd11_chromadb_is_imported_by_the_migration_alone_its_telemetry_off_asked_no_embedding
 """

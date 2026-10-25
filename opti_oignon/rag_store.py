@@ -53,6 +53,10 @@ except ImportError:
 RAG_STORE_AVAILABLE = VECTOR_STORE_AVAILABLE
 # The namespace of the knowledge base's store this store's collections live in.
 VECTOR_NAMESPACE = "knowledge"
+# The embedding model, and its server, this store embeds with when its caller names none -- the platform's
+# ``get_rag_store()``: ``db_encryption migrate`` computes the vectors of ChromaDB's collections again with them.
+EMBEDDING_MODEL = "mxbai-embed-large"
+OLLAMA_URL = "http://localhost:11434"
 
 
 def _waits(exc: BaseException) -> bool:
@@ -538,8 +542,8 @@ class RAGVectorStore:
     def __init__(
         self,
         data_dir: str | Path | None = None,
-        embedding_model: str = "mxbai-embed-large",
-        ollama_url: str = "http://localhost:11434",
+        embedding_model: str = EMBEDDING_MODEL,
+        ollama_url: str = OLLAMA_URL,
     ):
         # Resolve data directory
         if data_dir is None:
@@ -1463,8 +1467,8 @@ _store_instance: RAGVectorStore | None = None
 
 def get_rag_store(
     data_dir: str | Path | None = None,
-    embedding_model: str = "mxbai-embed-large",
-    ollama_url: str = "http://localhost:11434",
+    embedding_model: str = EMBEDDING_MODEL,
+    ollama_url: str = OLLAMA_URL,
 ) -> RAGVectorStore:
     """Return the module-level RAGVectorStore singleton."""
     global _store_instance

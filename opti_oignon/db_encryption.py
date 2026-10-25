@@ -1554,7 +1554,7 @@ def _migrate_said() -> int:
     from opti_oignon import chroma_migration
 
     try:
-        done = chroma_migration.migrate_all()
+        done = chroma_migration.migrate_all(say=_said_now)
     except EncryptionRefused as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 1
@@ -1571,6 +1571,14 @@ def _migrate_said() -> int:
     if done["signal"]:
         print(f"signal {done['signal']} came after the commit: the run finished", file=sys.stderr)
     return 0
+
+
+def _said_now(line: str) -> None:
+    """A line of a run under way, on stdout at once: a stdout that cannot be written costs that line alone."""
+    try:
+        print(line, flush=True)
+    except OSError:
+        pass
 
 
 def _said_first(say: Any, done: dict) -> None:
@@ -1635,8 +1643,12 @@ def _collection_said(entry: dict) -> str:
             if entry["left_out"] else "")
     gone = (f", {entry['removed']} removed: the store held them with a text no active fact of the memory holds now"
             if entry["removed"] else "")
-    return (f"  {entry['name']}, into the namespace {entry['namespace']}: {entry['written']} item(s) written, "
-            f"{entry['kept']} already there kept{left}{gone}")
+    computed = (f", their vectors computed again with {entry['model']} ({entry['dimension']} dimensions)"
+                if entry.get("model") and entry["written"] else "")
+    bare = (f", {entry['without_text']} without text, not written: ChromaDB's folder keeps them"
+            if entry.get("without_text") else "")
+    return (f"  {entry['name']}, into the namespace {entry['namespace']}: {entry['written']} item(s) written"
+            f"{computed}, {entry['kept']} already there kept{left}{gone}{bare}")
 
 
 def main(argv: Any = None) -> int:

@@ -97,12 +97,18 @@ package costs.
   with the encoder that made it, a query reading only its collection's
   active encoder. With the platform stopped,
   `python3 -m opti_oignon.db_encryption migrate` moves ChromaDB's stores
-  into it, all of them or none: every collection read through chromadb, its
-  telemetry off, written in one transaction and proved before it commits --
-  documents, metadata and vectors bit for bit, and ChromaDB's distances
-  found again in the space it measured them in --, then each ChromaDB
-  folder kept in a `plaintext-<time>` folder, which git ignores, to delete
-  once the platform reads its knowledge base again. Until then the
+  into it, all of them or none: each folder's database read with the
+  standard library alone, read-only -- chromadb is never imported, no byte
+  of ChromaDB's files is written, and a database whose layout it does not
+  know is refused by name --, each collection in the space chromadb
+  1.3.7 measures it in; each text embedded again by the embedder its namespace
+  is queried with -- the model its queries use, never a faster one or
+  another the server offers --, stored as that namespace stores its own,
+  and a sample of each collection embedded once more, alone, to prove
+  each text paired with its vector; written in one transaction and read
+  back before it commits; then each ChromaDB folder kept in a
+  `plaintext-<time>` folder, which git ignores, to delete once the
+  platform reads its knowledge base again. Until then the
   namespace waits: nothing of it is read, written or ingested, each call
   refused by name with the command, so nothing the platform deletes
   meanwhile comes back with the migration. The platform and the command
@@ -115,9 +121,19 @@ package costs.
   came --, and the active facts left with no vector of their text are
   counted. An item the store holds already is kept, and counted; a signal
   before the commit writes nothing; a folder that cannot be moved after it
-  is said, with what the store took, and the next run moves it. chromadb
-  itself rewrites some of its own files as it reads them. `check` names the
-  command beside each ChromaDB store it moves.
+  is said, with what the store took, and the next run moves it. An item
+  without text is counted and said, and stays in the kept folder alone.
+  The command needs the embedding models the platform is configured with,
+  served where the platform asks for them (`ollama pull mxbai-embed-large`
+  by default); a model the server does not serve, or would replace with
+  another, refuses the run before any vector is computed. ChromaDB 1.3.7's
+  own stores are proved read as chromadb reads them, the space of each
+  collection as a query of it measures; a file an earlier version left is
+  read as 1.3.7 reads it -- proved on such layouts that 1.3.7 itself was
+  made to read, not on a store an earlier version wrote --, and a
+  collection whose metadata says another space than the rest of its file
+  is refused. `check` names the command beside each ChromaDB store it
+  moves.
 - [SECURITY] Every database encrypted at rest in one offline command:
   `python3 -m opti_oignon.db_encryption encrypt`, with the platform stopped,
   takes every `*.db` of the repository's `data/` and of `opti_oignon/data/`,
