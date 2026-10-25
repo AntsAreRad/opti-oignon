@@ -3,7 +3,7 @@
 RAG HYBRID SEARCH ENGINE -- Vector + Keyword search fusion.
 
 Provides:
-- Vector search via existing ChromaDB store (rag_store)
+- Vector search via the knowledge base's store (rag_store)
 - BM25-style keyword search on stored chunks
 - Weighted score fusion (configurable alpha: vector vs keyword)
 - Result deduplication across search modes
@@ -220,7 +220,7 @@ class BM25Scorer:
 
 class HybridSearchEngine:
     """
-    Combines vector search (ChromaDB) with keyword search (BM25)
+    Combines vector search (the knowledge base's store) with keyword search (BM25)
     using weighted score fusion.
 
     The ``alpha`` parameter controls the blend:
@@ -468,7 +468,7 @@ class HybridSearchEngine:
         """
         Run BM25 keyword search on stored chunks.
 
-        Fetches all chunks from the ChromaDB collection, scores them
+        Fetches all chunks from the store's collection, scores them
         with BM25, and returns top results as a dict mapping
         chunk_id -> {score, content, metadata}.
         """
@@ -479,7 +479,7 @@ class HybridSearchEngine:
             if store is None or store._chroma is None:
                 return results
 
-            # Fetch chunks from ChromaDB
+            # Fetch chunks from the knowledge base's store
             try:
                 coll = store._chroma.get_collection(collection)
             except Exception:

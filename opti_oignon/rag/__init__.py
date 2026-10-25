@@ -9,7 +9,7 @@ Modules:
 - config: Centralized configuration
 - chunkers: Smart document chunking
 - embeddings: Ollama interface for embeddings
-- indexer: Document indexing into ChromaDB
+- indexer: Document indexing into the knowledge base's store
 - retriever: Semantic search
 - augmenter: Augmented prompt generation
 - batch_ingest: Batch ingestion engine with background processing

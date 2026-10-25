@@ -3,7 +3,12 @@
 #
 # Core framework
 fastapi>=0.104.0
-uvicorn>=0.24.0
+# The server's standard stack: its WebSocket implementation (the chat's
+# stream and the other WebSocket routes answer nothing without one), its
+# HTTP parser and its event loop.
+uvicorn[standard]>=0.24.0
+# Imported by the command-line client for the chat's stream (`oo ask`).
+websockets>=10.4
 pydantic>=2.0.0
 starlette>=0.27.0
 
@@ -16,11 +21,6 @@ requests>=2.31.0
 
 # LLM inference
 ollama>=0.1.0
-
-# Read only by `python3 -m opti_oignon.db_encryption migrate`, which moves
-# ChromaDB's stores into the knowledge base's encrypted store; the platform
-# itself no longer imports it.
-chromadb>=0.4.0
 
 # Data processing
 numpy>=1.24.0

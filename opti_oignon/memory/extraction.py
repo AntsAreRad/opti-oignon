@@ -18,7 +18,7 @@ the inference path uses) and a chat callable is injectable, so the runtime tests
 drive extraction deterministically without ollama installed. Extraction never
 writes the canonical store or the vector layer directly -- only through
 ``MemoryStore.add`` -- so dedup and the cross-layer consistency apply uniformly.
-The module imports no backend module that pulls fastapi or chromadb, so it loads
+The module imports no backend module that pulls fastapi, so it loads
 and tests in isolation via ``spec_from_file_location``.
 """
 

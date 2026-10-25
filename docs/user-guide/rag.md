@@ -9,6 +9,12 @@ knowledge base's vector store (`opti_oignon/data/rag/vectors.db`), encrypted
 at rest like every database of the platform. A ChromaDB store left by an
 earlier version is moved into it by
 `python3 -m opti_oignon.db_encryption migrate`, with the platform stopped.
+The command embeds every text again with the model each part of the
+knowledge base is queried with -- `mxbai-embed-large` for the RAG store,
+and the one `rag.yaml` names for the documents, the memory and the
+projects, the same by default --, so Ollama must be running and serve
+them (`ollama pull mxbai-embed-large` for the default configuration);
+it refuses, writing nothing, when one is not there.
 
 All processing stays local -- no data leaves your machine. The one
 exception is ingesting a web page by URL, which fetches that page.

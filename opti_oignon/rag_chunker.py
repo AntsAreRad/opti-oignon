@@ -77,7 +77,7 @@ class RAGChunk:
 
     @property
     def metadata(self) -> dict[str, Any]:
-        """Flat metadata dict suitable for ChromaDB storage."""
+        """Flat metadata dict suitable for the knowledge base's store."""
         return {
             "source_file": self.source_file,
             "file_type": self.file_type,

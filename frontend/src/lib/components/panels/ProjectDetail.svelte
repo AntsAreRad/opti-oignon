@@ -354,7 +354,7 @@
 								Reindex all files
 							</Button>
 							<span class="text-[11px]" style="color: var(--oo-fg-faint);">
-								Rebuild ChromaDB index for all project files
+								Rebuild the vector index for all project files
 							</span>
 						</div>
 

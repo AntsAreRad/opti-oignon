@@ -7,8 +7,8 @@ served via uvicorn (default port 8001).
 
 Heavy module imports are deferred via lazy_loader in deps.py.
 Route modules are thin wrappers and load eagerly so all endpoints are
-available immediately. The actual heavy dependencies (chromadb, etc.)
-only import on first access to the relevant API endpoint.
+available immediately. The heavy modules (the RAG pipeline and its store,
+among others) only import on first access to the relevant API endpoint.
 
 The platform's secrets leave the environment before anything else runs:
 importing the routes below starts processes (the sandbox's bubblewrap

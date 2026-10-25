@@ -90,7 +90,9 @@ collections:
 
 # -- Storage -----------------------------------------------------------------
 storage:
-  # Sub-directory under DATA_DIR/rag for ChromaDB v2 data
+  # The folder below DATA_DIR/rag where ChromaDB kept the knowledge base
+  # before vectors.db. No longer read: `db_encryption migrate` moves
+  # rag/chroma_v2 from its fixed place.
   chroma_subdir: "chroma_v2"
   # SQLite database filename for document/citation tracking
   db_filename: "rag_documents.db"

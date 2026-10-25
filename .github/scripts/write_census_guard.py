@@ -826,8 +826,9 @@ OUTSIDE = {
     "opti_oignon/benchmark_recommendations.py": f"benchmark recommendations for the dashboard; {_UNREAD}",
     "opti_oignon/benchmark_runner.py": f"benchmark runs for the dashboard; {_UNREAD}",
     "opti_oignon/chroma_migration.py": (
-        "the offline move of ChromaDB's stores into the knowledge base's store, the platform stopped: it copies "
-        "what the houses wrote there, unchanged, and proves the copy"),
+        "the offline move of ChromaDB's stores into the knowledge base's store, the platform stopped: it writes "
+        "the texts and metadata the houses wrote there, unchanged, their vectors computed again by the embedder "
+        "their namespace is queried with, and proves each text paired with its vector"),
     "opti_oignon/context_ledger.py": f"the per-request routing ledger for the dashboard; {_UNREAD}",
     "opti_oignon/feedback.py": f"the user's ratings; read by the dashboard and an offline export; {_UNREAD}",
     "opti_oignon/fine_tune_tracker.py": f"fine-tune variants and comparisons; {_UNREAD}",

@@ -3,7 +3,7 @@
 Lazy module loader for Opti-Oignon.
 
 Defers heavy module imports until first attribute access, reducing
-startup time. Modules like RAG (chromadb), coding agent, telemetry,
+startup time. Modules like RAG, coding agent, telemetry,
 benchmark, fine-tune tracker, and plugin marketplace are loaded on
 demand rather than at application boot.
 

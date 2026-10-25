@@ -37,7 +37,12 @@ classifiers = [
 
 dependencies = [
     "fastapi>=0.104.0",
-    "uvicorn>=0.24.0",
+    # The server's standard stack: its WebSocket implementation (the chat's
+    # stream and the other WebSocket routes answer nothing without one), its
+    # HTTP parser and its event loop.
+    "uvicorn[standard]>=0.24.0",
+    # Imported by the command-line client for the chat's stream (`oo ask`).
+    "websockets>=10.4",
     "pydantic>=2.0.0",
     "starlette>=0.27.0",
     # Required by FastAPI for multipart/form-data (file upload endpoints in
@@ -47,10 +52,6 @@ dependencies = [
     "httpx>=0.25.0",
     "requests>=2.31.0",
     "ollama>=0.1.0",
-    # Read only by `python3 -m opti_oignon.db_encryption migrate`, which moves
-    # ChromaDB's stores into the knowledge base's encrypted store; the
-    # platform itself no longer imports it.
-    "chromadb>=0.4.0",
     "numpy>=1.24.0",
     "pandas>=2.0.0",
     "scipy>=1.11.0",
@@ -1179,6 +1180,14 @@ fail_under = 0
 # importer of chromadb, to rm2 of tests/test_chromadb_removed_contracts.py.
 # They stay in the tree word for word.
 #
+# chromadb is no longer a dependency (block 182): the egress census no
+# longer classifies it, so an import of it is refused by name. ec12 of
+# tests/test_egress_census_guard_contracts.py, which held every one of 38
+# third-party names classified, chromadb among them, gives way to rm3 of
+# tests/test_chromadb_removed_contracts.py, which keeps its other
+# assertions on its own tables and holds the 37 others. It stays in the
+# tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1602,4 +1611,5 @@ addopts = """
     --deselect=tests/test_chroma_migration_contracts.py::test_cm15b_a_run_stopped_between_two_folders_leaves_only_the_text_the_fact_reads
     --deselect=tests/test_mode_verdict_contracts.py::test_mv9_migrate_with_the_real_mode_and_the_real_chain_ends_and_records_once
     --deselect=tests/test_vector_db_contracts.py::test_vd11_chromadb_is_imported_by_the_migration_alone_its_telemetry_off_asked_no_embedding
+    --deselect=tests/test_egress_census_guard_contracts.py::test_ec12_the_real_tree_is_green_and_only_a_named_retirement_lowers_its_floor
 """

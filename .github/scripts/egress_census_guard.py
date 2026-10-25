@@ -288,14 +288,6 @@ LIBRARIES = {
     "Crypto": ("offline", "symmetric ciphers and hashes, computed in process", ()),
     "argon2": ("offline", "password hashing, computed in process", ()),
     "bcrypt": ("offline", "password hashing, computed in process", ()),
-    "chromadb": (
-        "fetches on first use",
-        "its default embedding function downloads a model, and its client sends telemetry unless "
-        "told not to; both are sinks this census counts. The package imports it only to read "
-        "ChromaDB's stores in the offline migration into the knowledge base's store, its "
-        "telemetry off and no embedding asked of it (vd11)",
-        ("opti_oignon/chroma_migration.py", "vd11"),
-    ),
     "click": ("offline", "the command line's argument parser", ()),
     "cryptography": ("offline", "keys, signatures and ciphers, computed in process", ()),
     "ddgs": ("network", _CLIENT, ()),

@@ -15,7 +15,7 @@ Two responsibilities:
    surfaced, while the canonical row is retained for restore).
 
 The module imports no sibling at module scope (the stores are injected), so it
-loads and tests in isolation without ollama, fastapi, or chromadb.
+loads and tests in isolation without ollama or fastapi.
 """
 
 from __future__ import annotations

@@ -3,7 +3,7 @@
 A two-tier personal-memory store, aligned with the dual-layer principle:
 
 - ``canonical_store`` -- the SQLite WAL source of truth.
-- ``vector_store``    -- the ``oo_memories`` ChromaDB layer.
+- ``vector_store``    -- the ``oo_memories`` vector layer, in the knowledge base's store.
 - ``dedup``           -- double deduplication (Jaccard then cosine).
 - ``retrieval``       -- hybrid retrieval under the context-window budget.
 

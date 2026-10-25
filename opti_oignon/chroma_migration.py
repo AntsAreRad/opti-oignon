@@ -2,7 +2,7 @@
 """Move ChromaDB's stores into the knowledge base's store, the platform stopped: all of them, or none.
 
 ChromaDB kept the knowledge base's collections in folders of its own, in plaintext. ``migrate_all`` reads each
-folder's database, ``chroma.sqlite3``, with the standard library alone and read-only -- chromadb is never imported
+folder's database, ``chroma.sqlite3``, with the standard library alone and read-only -- ChromaDB's code never runs
 --: every collection's name, metadata and space, every item's id, text and metadata, in the order ChromaDB keeps
 them. The vectors are not there to be trusted (ChromaDB keeps them in index files of its own, which this command
 never opens): each text is embedded again by the embedder the module that queries its namespace embeds with, with
@@ -17,7 +17,7 @@ reads its knowledge base again. Until a folder has moved, its namespace of the s
 WHAT IS READ. A database whose ``migrations`` rows are the ones ChromaDB 1.3.7 records, or the first rows of each of
 its folders of migrations, as an earlier version left them; one database of collections; one metadata segment for
 each collection; each value of a metadata in exactly one of its columns; no write ChromaDB recorded and never
-applied. Any other is refused by name. A collection keeps the space chromadb 1.3.7 measures it in, read as 1.3.7
+applied. Any other is refused by name. A collection keeps the space ChromaDB 1.3.7 measures it in, read as 1.3.7
 reads the file: the space its schema records, or, before the schema, its configuration under ``vector_index``, when
 that is not the default; else the one its index's segment records; else squared L2. Before the schema, a collection
 whose metadata says another space is refused by name. An item without text is counted and said, and stays in the
@@ -506,7 +506,7 @@ def _collections(conn: Any, path: Path) -> list:
         if len(recorded) > 1:
             refuse(f"the index segments of {name} record {len(recorded)} spaces: this command reads one")
         space = _space_of(schema, configuration, next(iter(recorded), None), metadata, name, path)
-        # A collection without metadata has none, as chromadb gives it back.
+        # A collection without metadata has none, as ChromaDB gives it back.
         found.append({"name": name, "metadata": metadata or None, "space": space,
                       "items": _items(conn, path, name, own[0], item_values)})
     return found
@@ -584,7 +584,7 @@ def _applied(conn: Any, path: Path, name: str, collection_id: str, segment: str,
 
 
 def _space_of(schema: Any, configuration: Any, segment: Any, metadata: dict, name: str, path: Path) -> str:
-    """The space a collection is measured in, as chromadb 1.3.7 reads it from the file: the space its schema records
+    """The space a collection is measured in, as ChromaDB 1.3.7 reads it from the file: the space its schema records
     -- its embedding's index first, then its defaults --, or, before the schema, the one its configuration says under
     ``vector_index`` (1.x), unless that is ChromaDB's default, squared L2; then the space its index's segment records
     (``segment``, written by the versions before the configuration); then squared L2. 1.3.7 reads no other shape of

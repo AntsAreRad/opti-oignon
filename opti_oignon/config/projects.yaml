@@ -146,7 +146,9 @@ projects:
   # Project context / RAG configuration
   # ==========================================================================
   context:
-    # Base path for per-project ChromaDB collections (relative to data/)
+    # The folder below data/ where ChromaDB kept the per-project collections
+    # before vectors.db. No longer read: `db_encryption migrate` moves
+    # project_chroma from its fixed place.
     chroma_base_path: "project_chroma"
 
     # Summary: max approximate tokens for extractive summary

@@ -181,7 +181,7 @@ export async function listProjectConversations(
 // CONTEXT (INDEXATION + TRIGGERS + RAG)
 // =========================================================================
 
-/** Index a single file into ChromaDB. */
+/** Index a single file into the knowledge base's store. */
 export async function indexProjectFile(
 	projectId: string,
 	fileId: string

@@ -440,7 +440,7 @@ async def list_project_conversations(project_id: str) -> dict:
 
 @router.post("/projects/{project_id}/files/{file_id}/index")
 async def index_project_file(project_id: str, file_id: str) -> dict:
-    """Trigger indexation of a single project file into ChromaDB.
+    """Trigger indexation of a single project file into the knowledge base's store.
 
     Chunks the file, generates embeddings, stores in the per-project
     collection, and updates the file record with summary and key_terms.
@@ -479,7 +479,7 @@ async def index_project_file(project_id: str, file_id: str) -> dict:
 async def reindex_project(project_id: str) -> dict:
     """Reindex all files in a project.
 
-    Processes each file sequentially: chunks, embeds, stores in ChromaDB.
+    Processes each file sequentially: chunks, embeds, writes into the knowledge base's store.
     Returns a summary of results for all files.
     """
     _require_projects()

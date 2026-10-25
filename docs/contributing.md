@@ -37,7 +37,6 @@ from unittest.mock import MagicMock
 
 # Pre-seed heavy dependencies
 sys.modules.setdefault("ollama", MagicMock())
-sys.modules.setdefault("chromadb", MagicMock())
 
 # Load the module under test in isolation
 spec = importlib.util.spec_from_file_location(

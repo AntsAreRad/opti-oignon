@@ -72,22 +72,26 @@ prevent key material
 from being swapped to disk, with memset wipe on deallocation and a
 SIGTERM handler that wipes all tracked key instances.
 
-Closed exception (RS-01): the knowledge base -- the RAG store's
-chunks, the memory's facts, the projects' and the documents' indexes --
-is encrypted at rest. Its texts, its metadata and its embedding vectors,
+Closed exception (RS-01): the knowledge base -- the RAG store's chunks,
+the memory's facts, the projects' and the documents' indexes -- is
+encrypted at rest. Its texts, its metadata and its embedding vectors,
 which give most of a short text back, live in one database of their own,
 `opti_oignon/data/rag/vectors.db`, opened through `safe_connect` and
 encrypted with SQLCipher like every other database, its journals with
 it. ChromaDB, which kept them in plaintext files with no at-rest
-encryption, is no longer read. A ChromaDB store left by an earlier
-version stays in plaintext until
+encryption, is no longer installed with the platform, which reads
+nothing of its stores: it only looks whether one is left. A ChromaDB
+store left by an earlier version stays in plaintext until
 `python3 -m opti_oignon.db_encryption migrate`, with the platform
-stopped, moves its collections into the encrypted store, proved before
-it commits, and keeps the ChromaDB folders in a `plaintext-<time>`
-folder, which git ignores, to delete once the platform reads its
-knowledge base again; until then the platform reads and writes nothing
-of the part of the knowledge base that waits, so nothing deleted
-meanwhile comes back with the migration.
+stopped, moves its collections into the encrypted store: it reads
+ChromaDB's database with the standard library, read-only, embeds each
+text again with the model its namespace is queried with, which Ollama
+must serve, proves each text paired with its vector, and commits all of
+them or none. The command keeps the ChromaDB folders, with any item that
+had no text to embed, in a `plaintext-<time>` folder, which git ignores,
+to delete once the platform reads its knowledge base again; until then
+the platform reads and writes nothing of the part of the knowledge base
+that waits, so nothing deleted meanwhile comes back with the migration.
 `python3 -m opti_oignon.db_encryption check` names each such store and
 the command that moves it.
 

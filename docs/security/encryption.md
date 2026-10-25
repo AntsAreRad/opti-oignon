@@ -191,18 +191,29 @@ The knowledge base -- the RAG store's chunks, the memory's facts, the
 projects' and the documents' indexes, their texts, metadata and vectors --
 lives in `opti_oignon/data/rag/vectors.db`, a database of the `rag/`
 folder that `encrypt` takes like every other. ChromaDB, which kept it
-before in plaintext files, is no longer read. With the platform stopped,
+before in plaintext files, is no longer installed with the platform, which
+reads nothing of its stores: it only looks whether one is left, to wait
+for the migration. With the platform stopped,
 `python3 -m opti_oignon.db_encryption migrate` moves every ChromaDB store
 below the data directories -- `rag/chroma_v2/`, `rag/chroma_db/` (below
 `RAG_HOME` when it is set) and `project_chroma/`, each into a namespace of
-its own -- into it, all of them or none: each collection is read through
-chromadb, its telemetry off, and written in one transaction, which commits
-only once every item's document, metadata and vector read back as they
-were, and once the distances ChromaDB measures, on a sample of each
-collection, are found again in the space it measured them in. Then each
-ChromaDB folder is kept in a `plaintext-<time>` folder beside it, which
-git ignores, to delete once the platform reads its knowledge base again.
-Until a folder has moved, its namespace of the store is closed: the
+its own -- into it, all of them or none. Each folder's database,
+`chroma.sqlite3`, is read with the standard library alone, read-only -- no
+byte of ChromaDB's files is written, and a database whose layout,
+migrations or values it does not know is refused by name --, each
+collection in the space ChromaDB 1.3.7 measures it in. The vectors in
+ChromaDB's files are not read: each text is embedded again by the embedder
+its namespace is queried with, with the model those queries use, never a
+fallback, so Ollama must serve that model; and a sample of each collection
+-- its first and last items, the last of each request, its first ids -- is
+embedded once more, alone, and must give the same vector, to within 1e-2
+of the longer one's length, which proves each text paired with its vector.
+An item without text is counted, said, and left in the kept copy.
+Everything is written in one transaction, which commits only once every
+item's document, metadata and vector read back as they were written. Then
+each ChromaDB folder is kept in a `plaintext-<time>` folder beside it,
+which git ignores, to delete once the platform reads its knowledge base
+again. Until a folder has moved, its namespace of the store is closed: the
 platform reads and writes nothing of it, each call refused by name with
 the command, so nothing it deletes meanwhile comes back with the
 migration. A folder waits when it holds ChromaDB's database, when it, or
@@ -226,20 +237,19 @@ without a vector of their text -- those too, and those added meanwhile --
 are counted and found by their words. It refuses, writing nothing and
 moving nothing, while another run of `encrypt` or `migrate` is under way,
 while a process holds the store or a ChromaDB file or runs the platform --
-read again before the commit --, when chromadb does not import or does not
-read a store, when a key file does not load here, when the store is in
-plaintext while a key loads (`encrypt` first) or does not open, when the
-memory's facts cannot be read, when a collection's space or dimension
-differs from that of a collection the store holds with items in it -- an
-empty one takes the source's --, and when a collection does not read
-whole; an item the store holds already is kept, and counted, and a store
-or a folder the run made is removed again. chromadb itself rewrites some
-of its own files as it reads them. A signal before the commit stops the
-run, nothing written; a folder that cannot be moved once the store has
-committed is said, with what the store took from every folder, the command
-ends with 3, and the next run moves it. `check` names the command beside
-each ChromaDB store it moves; a ChromaDB store in another folder is named
-and left.
+read again before the commit --, when a namespace's embedder cannot embed
+or would embed with another model than its queries use, when a key file
+does not load here, when the store is in plaintext while a key loads
+(`encrypt` first) or does not open, when the memory's facts cannot be
+read, when a collection's space or dimension differs from that of a
+collection the store holds with items in it -- an empty one takes the
+source's --, and when a collection does not read whole; an item the store
+holds already is kept, and counted, and a store or a folder the run made
+is removed again. A signal before the commit stops the run, nothing
+written; a folder that cannot be moved once the store has committed is
+said, with what the store took from every folder, the command ends with 3,
+and the next run moves it. `check` names the command beside each ChromaDB
+store it moves; a ChromaDB store in another folder is named and left.
 
 
 ### Field-level encryption (AES-256-GCM)

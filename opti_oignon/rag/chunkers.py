@@ -35,7 +35,7 @@ class Chunk:
 
     @property
     def metadata(self) -> dict:
-        """Return metadata for ChromaDB."""
+        """Return metadata for the knowledge base's store."""
         return {
             "source_file": self.source_file,
             "file_type": self.file_type,

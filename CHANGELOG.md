@@ -3456,6 +3456,18 @@ package costs.
 
 ### Removed
 
+- chromadb is no longer a dependency: the platform keeps its knowledge
+  base in a store of its own, encrypted like every database of the
+  platform, and
+  `python3 -m opti_oignon.db_encryption migrate` reads the stores ChromaDB
+  left with the standard library, so nothing imports it. It also installed
+  the server's standard stack -- among it the WebSocket implementation the
+  chat's stream and the other WebSocket routes need -- and the
+  `websockets` library `oo ask` streams with: `uvicorn[standard]` and
+  `websockets` are now declared by the platform itself. An existing
+  installation keeps chromadb until it is uninstalled
+  (`pip uninstall chromadb`); nothing reads it.
+
 - The fact checker plugin is no longer delivered. It sent the claims of a
   reply to a web search engine, while Opti-Oignon checks claims against
   the user's own sources and takes no search engine's excerpt as one; and

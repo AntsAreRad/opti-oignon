@@ -547,7 +547,7 @@ class PineconeConnector(BaseVectorConnector):
 class ExternalVectorStoreManager:
     """
     Manages multiple external vector store connectors and provides
-    a unified query interface across local (ChromaDB) + external stores.
+    a unified query interface across local (the knowledge base's store) + external stores.
 
     Usage::
 
