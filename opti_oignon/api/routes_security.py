@@ -2067,7 +2067,11 @@ async def reseal_provenance_manifest() -> dict[str, Any]:
     only way to re-seal was to download every model again.
 
     Nothing is re-pinned. The digests are carried across verbatim -- this changes
-    the SCHEME, never the CLAIM.
+    the SCHEME, never the CLAIM. And nothing unverified is carried: the seal is
+    checked first, under the scheme it names and this host's key for it, and a
+    manifest that is absent, unreadable, unsealed or whose seal does not verify
+    here is refused by its reason (409) and never sealed again. One already
+    sealed under the host's scheme is left as it is (written: false).
     """
     if not PROVENANCE_SEAL_AVAILABLE:
         raise HTTPException(
@@ -2087,8 +2091,15 @@ async def reseal_provenance_manifest() -> dict[str, Any]:
     return {"success": True, "seal": manifest_seal_scheme(), **result}
 
 
+class EnrollModelsRequest(BaseModel):
+    """How to enrol: start again from a manifest that does not verify, or re-pin named models whose bytes changed."""
+
+    start_again: bool = False
+    repin: list[str] = Field(default_factory=list)
+
+
 @router.post("/pqc/enroll-models")
-async def enroll_on_disk_models() -> dict[str, Any]:
+async def enroll_on_disk_models(request: EnrollModelsRequest | None = None) -> dict[str, Any]:
     """Pin the GGUF models already on disk in the provenance manifest.
 
     The other missing half of entering the fortress. Under enforcement the load
@@ -2099,7 +2110,15 @@ async def enroll_on_disk_models() -> dict[str, Any]:
 
     Discovery runs through the model manager, which already knows the configured
     directories. The bytes on disk are hashed and pinned; nothing is fetched.
+
+    Only what the manifest's seal vouches for is carried: a manifest that does
+    not verify here is refused by its reason (409), nothing written, unless the
+    body asks to start again (start_again), which sets it aside untouched and
+    pins the models on disk afresh. A pinned model whose bytes changed is named
+    and refused (409), unless the body names it in repin. An empty body enrols
+    as before.
     """
+    ask = request or EnrollModelsRequest()
     if not PROVENANCE_SEAL_AVAILABLE:
         raise HTTPException(
             status_code=503,
@@ -2135,7 +2154,7 @@ async def enroll_on_disk_models() -> dict[str, Any]:
         }
 
     try:
-        result = enroll_models(models)
+        result = enroll_models(models, start_again=ask.start_again, repin=ask.repin)
     except ProvenanceError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:

@@ -3480,6 +3480,28 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] Pinning a model and re-sealing the provenance manifest carry
+  only what its seal vouches for. A download's pin, an enrolment
+  (`scripts/enroll_models.py`, `POST /api/security/pqc/enroll-models`) and
+  a re-seal (`scripts/reseal_model_manifest.py`,
+  `POST /api/security/pqc/reseal-manifest`) read the manifest's entries
+  without checking its seal and sealed them all again under the key: an
+  entry written by a process without the key, or a manifest whose seal had
+  been deleted, was vouched for at the next one. Each now checks the seal
+  first, under the scheme it names and this host's key for it, and refuses
+  by name, writing nothing, a manifest that cannot be read, is not sealed,
+  is sealed under a scheme or key this host cannot check, or whose seal
+  does not verify; an unreadable one is no longer overwritten. An
+  enrolment no longer re-pins a model whose pinned bytes changed: it names
+  it and writes nothing, and `--repin NAME` re-pins one whose bytes were
+  checked. `--start-again` sets a manifest it read and that does not
+  verify aside, untouched -- one it cannot read is refused --, and pins
+  the models on disk again, saying how many entries it dropped. A
+  re-seal of a manifest that already verifies under the host's
+  scheme writes nothing, and the re-seal script no longer reports a seal
+  it did not check as sealed. A manifest that is deleted still reads as a
+  host that never enrolled.
+
 - [SECURITY] The backend's children start without the platform's
   secrets. The launchers hand the backend the key file's passphrase
   (`OPTI_KEYFILE_PASSPHRASE`) and the master key
@@ -3758,10 +3780,10 @@ package costs.
   mode read stays what it was, and `check` says the mode the platform
   reads and why. A model manifest sealed by a process that lacked the
   passphrase was sealed under that public text: it now reads as invalid,
-  and vouches for nothing. Before any model download, re-seal or
-  enrolment -- each seals every entry it finds -- move it aside, and
-  never re-seal it; enrol the models again (`scripts/enroll_models.py`)
-  once their weights are checked against where they came from. A key
+  and vouches for nothing; a model download, a re-seal and an enrolment
+  refuse it by name. Once the weights are checked against where they
+  came from, `scripts/enroll_models.py --start-again` sets it aside,
+  untouched, and pins the models on disk again. A key
   file that is empty or cut now makes the mode read Bulbe where a
   lockfile is there, and setup and `encrypt` refuse: put back the copy
   of the key file kept elsewhere. - [SECURITY] The plugin allowlist

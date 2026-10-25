@@ -17,6 +17,15 @@ Enrolment decides these bytes are the right ones, so it HASHES them. That is why
 it differs from re-sealing, which renews a decision already made and must never
 re-hash. Run this when the models are the ones you meant to have.
 
+It carries only what the manifest's seal vouches for. A manifest whose seal does
+not verify here -- one a process without the key wrote into, whose seal was
+deleted, or sealed under a key this host cannot check -- is refused by its
+reason, and nothing is written. Once the weights are checked against where they
+came from, --start-again sets that manifest aside, untouched, and pins the models
+on disk from their bytes, saying how many entries it dropped. A pinned model
+whose bytes changed is never re-pinned on the way: it is named, nothing is
+written, and --repin NAME re-pins it once its bytes are checked.
+
 The full migration onto a fortress, in order:
 
     1. python -c "from opti_oignon.pqc_signatures import *; \
@@ -31,6 +40,7 @@ without re-hashing.
 
 Usage:
     python scripts/enroll_models.py [--manifest PATH] [--backends PATH] [--dry-run]
+                                    [--start-again] [--repin NAME ...]
 
 Exit code 0 on success, 1 on refusal.
 """
@@ -42,9 +52,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from opti_oignon.model_provenance import (  # noqa: E402
+    REASON_KEY_UNAVAILABLE,
+    REASON_MANIFEST_MISSING,
+    REASON_VERIFIED,
     ProvenanceError,
     enroll_models,
-    load_manifest,
+    read_manifest,
     resolve_seal_keys,
 )
 
@@ -112,6 +125,18 @@ def main() -> int:
         action="store_true",
         help="Report what would be enrolled and write nothing",
     )
+    parser.add_argument(
+        "--start-again",
+        action="store_true",
+        help="Set a manifest that does not verify aside and pin the models on disk afresh",
+    )
+    parser.add_argument(
+        "--repin",
+        action="append",
+        default=[],
+        metavar="NAME",
+        help="Re-pin this pinned model whose bytes changed, once they are checked (repeatable)",
+    )
     args = parser.parse_args()
 
     manifest_path = Path(args.manifest) if args.manifest else None
@@ -124,17 +149,8 @@ def main() -> int:
         print("Nothing to enrol. Add models or check llama_cpp.model_dirs.")
         return 0
 
-    existing = load_manifest(manifest_path) or {}
-    pinned = set((existing.get("entries") or {}).keys())
-    fresh = [m for m in models if m.name not in pinned]
-    print(f"Found {len(models)} model(s); {len(fresh)} not yet pinned.")
-    for m in models:
-        mark = " (already pinned)" if m.name in pinned else ""
-        print(f"  {m.name}{mark}")
-
     keys = resolve_seal_keys()
     if keys is None:
-        print()
         print("REFUSED: no key material this host is allowed to seal with.")
         print("A signature is required here and there is nothing to sign with.")
         print("Mint a keypair first: POST /api/security/pqc/generate-keys")
@@ -142,21 +158,70 @@ def main() -> int:
         print("would keep refusing -- correctly.")
         return 1
 
+    reading = read_manifest(manifest_path, keys=keys)
+    verified = reading.status == REASON_VERIFIED
+    pinned = set(reading.entries) if verified else set()
+    fresh = [m for m in models if m.name not in pinned]
+    print(f"Found {len(models)} model(s); {len(fresh)} not yet pinned.")
+    for m in models:
+        mark = " (already pinned)" if m.name in pinned else ""
+        print(f"  {m.name}{mark}")
+
+    missing = reading.status == REASON_MANIFEST_MISSING
+    if args.start_again and (verified or missing or not reading.read):
+        print()
+        why = ("it verifies here: enrol without --start-again" if verified else
+               "there is none: enrol without --start-again" if missing else
+               f"{reading.detail}: make it readable first")
+        print(f"REFUSED ({reading.status}): nothing to start again from -- {why}.")
+        return 1
+    if not (verified or missing or args.start_again):
+        print()
+        print(f"REFUSED ({reading.status}) -- the manifest: {reading.detail}.")
+        print("Its entries vouch for nothing; none is carried, and nothing is written.")
+        if reading.status == REASON_KEY_UNAVAILABLE:
+            print("Set OPTI_KEYFILE_PASSPHRASE, or put back the keypair that sealed it; or,")
+        print("once the weights are checked against where they came from, start again:")
+        print("  python scripts/enroll_models.py --start-again")
+        return 1
+
     if args.dry_run:
         print()
-        print(f"Would enrol {len(models)} model(s), sealed with {keys.scheme}.")
+        print(f"Manifest: {reading.status}.")
+        if args.start_again:
+            print(f"Would set it aside and pin {len(models)} model(s) afresh, sealed with {keys.scheme}.")
+        else:
+            print(f"Would pin {len(fresh)} new model(s), sealed with {keys.scheme}.")
+            print("A pinned model whose bytes changed is found only by hashing: the real run refuses it.")
         return 0
 
     try:
-        result = enroll_models(models, manifest_path=manifest_path)
+        result = enroll_models(
+            models, manifest_path=manifest_path, keys=keys, start_again=args.start_again, repin=args.repin
+        )
     except ProvenanceError as exc:
+        print()
         print(f"REFUSED: {exc}")
         return 1
 
     print()
+    for item in result["enrolled"]:
+        print(f"  pinned {item['model']} {item['sha256']}")
     print(
-        f"Enrolled {result['count']} model(s), sealed with {result['scheme']}."
+        f"Enrolled {result['count']} model(s), sealed with {result['scheme']}; "
+        f"{len(result['kept'])} kept as pinned."
     )
+    if result["repin_unused"]:
+        print(f"Not re-pinned (no changed pin by that name): {', '.join(result['repin_unused'])}")
+    if not result["written"]:
+        print("Nothing new: the manifest is left as it is.")
+    dropped = result.get("dropped")
+    if dropped:
+        count = "an unknown number of" if dropped["count"] is None else dropped["count"]
+        print(f"Started again: {count} entr(ies) dropped ({dropped['reason']}); the old manifest is set aside at")
+        print(f"  {result['set_aside']}")
+        for name in dropped["names"]:
+            print(f"  dropped {name!r}")
     return 0
 
 

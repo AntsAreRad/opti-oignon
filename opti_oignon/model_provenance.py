@@ -49,8 +49,15 @@ The seal is made with a key held by the same local user that runs the backend.
 An attacker who already owns that account owns the key and can re-seal the
 manifest. This design does not claim to defend against a full local compromise
 of the account. It defends against a tampered or corrupted download, against a
-substitution by any process that does NOT hold the key, and it turns "I think
-I am running these weights" into an auditable, verifiable pin.
+substitution by any process that does NOT hold the key -- one written into the
+manifest included: no enrolment, download pin or re-seal carries an entry from
+a manifest whose seal does not verify here --, and it turns "I think I am
+running these weights" into an auditable, verifiable pin. Two keys may vouch on
+one host: on a host that requires a signature, a manifest sealed with the key
+file's MAC still verifies for the writers, which lift it to the signature, so
+whoever holds the key file's key can vouch for entries until that manifest is
+lifted -- the load gate refuses it meanwhile. A manifest that is deleted reads
+as a host that never enrolled, and enrolment then pins what is on disk.
 
 A residual window remains between hashing the file and llama.cpp opening it,
 because llama-cpp-python takes a path rather than a file descriptor. Closing it
@@ -64,6 +71,7 @@ schemes are all public here.
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import hmac as _hmac
 import json
@@ -72,7 +80,7 @@ import os
 import stat
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -120,6 +128,14 @@ REASON_SEAL_INVALID = "seal_invalid"
 REASON_UNPINNED = "unpinned"
 REASON_DIGEST_MISMATCH = "digest_mismatch"
 REASON_FILE_UNREADABLE = "file_unreadable"
+# A manifest whose seal verifies and whose entries are not sound: only a key holder writes one. The writers refuse
+# it; the load gate is left as it is.
+REASON_MANIFEST_MALFORMED = "manifest_malformed"
+
+# How many names of a manifest that did not verify a writer's refusal reports, each cut to how many characters:
+# names anyone could have written, reported as data.
+_NAMES_SHOWN = 100
+_NAME_CHARS = 255
 
 _CHUNK = 1024 * 1024
 
@@ -179,6 +195,51 @@ class ProvenanceDecision:
             "model": self.model,
             "digest": self.digest,
         }
+
+
+@dataclass
+class ManifestReading:
+    """One read of the manifest for the writers: its verified entries, or why there are none.
+
+    ``status`` is REASON_VERIFIED or the reason the manifest does not verify here; ``scheme`` the scheme its seal
+    names; ``entries`` the verified ones, empty otherwise; ``found`` how many entries a manifest that did not
+    verify holds (None when they cannot be counted); ``names`` the first of them, cut, reported as data; ``detail``
+    the words of the reason; ``read`` whether the file's bytes were read at all.
+    """
+
+    status: str
+    scheme: str | None = None
+    entries: dict[str, Any] = field(default_factory=dict)
+    found: int | None = None
+    names: tuple[str, ...] = ()
+    detail: str = ""
+    read: bool = False
+
+
+class ManifestNotVerified(ProvenanceError):
+    """A writer refuses the manifest, by the reason it does not verify here, and writes nothing."""
+
+    def __init__(self, reading: ManifestReading, path: Path, message: str):
+        self.reason = reading.status
+        self.found = reading.found
+        self.names = list(reading.names)
+        self.path = path
+        super().__init__(f"{reading.status}: {message}")
+
+
+class PinnedFileChanged(ProvenanceError):
+    """An enrolment refuses pinned models whose bytes no longer hash to their pin, and writes nothing."""
+
+    reason = REASON_DIGEST_MISMATCH
+
+    def __init__(self, models: list[str]):
+        self.models = list(models)
+        super().__init__(
+            f"{REASON_DIGEST_MISMATCH}: {', '.join(self.models)} no longer hash to the digest the manifest pins; "
+            "check the bytes against where they came from, then re-pin each by its name "
+            "(scripts/enroll_models.py --repin NAME, or repin in POST /api/security/pqc/enroll-models); "
+            "nothing was written"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -612,12 +673,142 @@ def save_manifest(
     return target
 
 
+def _checking_keys(scheme: str, keys: SealKeys) -> tuple[SealKeys | None, str]:
+    """The key that checks a seal under ``scheme`` on this host, or None and why there is none.
+
+    ``keys`` -- the host's own sealing keys -- when the scheme is theirs; else the key file's loaded 32-byte key for
+    an HMAC seal, or the keypair's public half for a signature. Never the key file's bytes.
+    """
+    if scheme == keys.scheme:
+        return keys, ""
+    if scheme == SCHEME_HMAC:
+        raw = _extract_key_bytes(_hmac_key())
+        if raw:
+            return SealKeys(scheme=SCHEME_HMAC, sign_key=raw, verify_key=raw), ""
+        return None, "the key file's key does not load here"
+    try:
+        from opti_oignon.pqc_signatures import PQC_AVAILABLE
+    except Exception:  # noqa: BLE001 - a primitive that does not import checks nothing
+        PQC_AVAILABLE = False
+    if not PQC_AVAILABLE:
+        return None, "the post-quantum primitive is not available here"
+    pqc, why = _pqc_seal_keys()
+    if pqc is not None:
+        return SealKeys(scheme=SCHEME_PQC, verify_key=pqc.verify_key), ""
+    return None, why or "no post-quantum keypair"
+
+
+def _sound(manifest: dict[str, Any]) -> bool:
+    """Whether verified entries are entries: an object of objects, each with a string sha256, the version 1."""
+    version = manifest.get("version", MANIFEST_VERSION)
+    entries = manifest.get("entries", {})
+    return (type(version) is int and version == MANIFEST_VERSION and isinstance(entries, dict)
+            and all(isinstance(entry, dict) and isinstance(entry.get("sha256"), str) for entry in entries.values()))
+
+
+def read_manifest(
+    path: Path | str | None = None,
+    *,
+    keys: SealKeys,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
+) -> ManifestReading:
+    """The manifest as a writer may carry it: its entries only when its seal verifies here.
+
+    The one reader of the writers. The file is read once, by its bytes, and the entries it gives are those same
+    bytes' entries. They verify here when they parse as a JSON object; its seal is an object with a value; the
+    scheme the seal names is one this code knows; this host holds the key that checks that scheme
+    (``_checking_keys``); the seal verifies over the canonical payload; and the entries are sound. The seal is
+    global: whole, or not at all. Every other state is a reason, never an exception, and the entries are then
+    empty: absent (nothing at the path, or a link that leads nowhere) is ``manifest_missing``; a file that cannot be
+    read, or does not parse as a JSON object, ``manifest_unreadable``; no seal, ``seal_missing``; a seal that names
+    no scheme this code knows, or does not verify, ``seal_invalid``; no key here for the scheme it names, or a check
+    that raises, ``key_unavailable``; unsound entries under a verified seal, ``manifest_malformed``. The load gate
+    does not read through here: it keeps its own, stricter rule.
+    """
+    target = Path(path) if path is not None else DEFAULT_MANIFEST_PATH
+    try:
+        os.stat(target)
+        with open(target, "rb") as handle:
+            raw = handle.read()
+    except (FileNotFoundError, NotADirectoryError):
+        return ManifestReading(status=REASON_MANIFEST_MISSING)
+    except OSError as exc:
+        name = errno.errorcode.get(exc.errno or 0, str(exc.errno))
+        return ManifestReading(status=REASON_MANIFEST_UNREADABLE, detail=f"it cannot be read ({name}): not checked")
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return ManifestReading(status=REASON_MANIFEST_UNREADABLE, detail="it does not parse as JSON", read=True)
+    if not isinstance(manifest, dict):
+        return ManifestReading(status=REASON_MANIFEST_UNREADABLE, detail="it is not a JSON object", read=True)
+    held = manifest.get("entries", {})
+    found = len(held) if isinstance(held, dict) else None
+    names = tuple(str(name)[:_NAME_CHARS] for name in list(held)[:_NAMES_SHOWN]) if isinstance(held, dict) else ()
+
+    def refused(status: str, detail: str, scheme: str | None = None) -> ManifestReading:
+        return ManifestReading(status=status, scheme=scheme, found=found, names=names, detail=detail, read=True)
+
+    seal = manifest.get("seal")
+    if not isinstance(seal, dict) or not seal.get("value"):
+        return refused(REASON_SEAL_MISSING, "it carries no seal")
+    scheme = seal.get("scheme")
+    if scheme not in (SCHEME_PQC, SCHEME_HMAC):
+        return refused(REASON_SEAL_INVALID, f"its seal names no scheme this code knows ({str(scheme)[:40]!r})")
+    checking, why = _checking_keys(scheme, keys)
+    if checking is None:
+        return refused(REASON_KEY_UNAVAILABLE, f"this host holds no key that checks a {scheme} seal ({why})", scheme)
+    try:
+        verdict = verify_seal(_payload_of(manifest), seal, checking, verifier=verifier)
+    except Exception as exc:  # noqa: BLE001 - a check that raises checks nothing
+        return refused(REASON_KEY_UNAVAILABLE, f"the {scheme} check raised {type(exc).__name__}", scheme)
+    if verdict != REASON_VERIFIED:
+        return refused(REASON_SEAL_INVALID, f"its {scheme} seal does not verify", scheme)
+    if not _sound(manifest):
+        return refused(REASON_MANIFEST_MALFORMED, "its entries are not an object of objects, each with a string "
+                       "sha256, under version 1", scheme)
+    return ManifestReading(status=REASON_VERIFIED, scheme=scheme, entries=dict(held), found=found, names=names,
+                           read=True)
+
+
+def _refusal(reading: ManifestReading, path: Path) -> ManifestNotVerified:
+    """The refusal of a manifest that does not verify here, with the way out."""
+    if reading.status == REASON_MANIFEST_UNREADABLE and not reading.read:
+        way = "make it readable; nothing was written"
+    elif reading.status == REASON_KEY_UNAVAILABLE:
+        way = ("set OPTI_KEYFILE_PASSPHRASE so the key file loads, or put back the keypair that sealed it; or, once "
+               "the weights are checked against where they came from, start again from the models on disk "
+               "(scripts/enroll_models.py --start-again, or start_again in POST /api/security/pqc/enroll-models); "
+               "nothing was written")
+    else:
+        way = ("once the weights are checked against where they came from, start again from the models on disk "
+               "(scripts/enroll_models.py --start-again, or start_again in POST /api/security/pqc/enroll-models); "
+               "nothing was written")
+    return ManifestNotVerified(reading, path, f"{path}: {reading.detail}; {way}")
+
+
+def _set_aside(target: Path) -> Path:
+    """Link the manifest's bytes under ``<stem>.unverified-<UTC>.json`` beside it, never over another file."""
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    for attempt in range(1, 1000):
+        tail = "" if attempt == 1 else f"-{attempt}"
+        aside = target.with_name(f"{target.stem}.unverified-{stamp}{tail}{target.suffix}")
+        try:
+            os.link(target, aside)
+        except FileExistsError:
+            continue
+        except OSError as exc:
+            raise ProvenanceError(f"the manifest cannot be set aside ({exc}); nothing was written") from None
+        return aside
+    raise ProvenanceError("the manifest cannot be set aside: every name is taken; nothing was written")
+
+
 def record_model(
     model_path: Path | str,
     *,
     manifest_path: Path | str | None = None,
     keys: SealKeys | None = None,
     signer: Callable[[bytes, bytes], bytes] | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
     chunk_size: int = _CHUNK,
     placement: dict[str, Any] | None = None,
     benchmark: dict[str, Any] | None = None,
@@ -639,6 +830,15 @@ def record_model(
     Enrolment is an explicit act. Nothing here pins a model behind the user's
     back: the whole value of the pin is that somebody decided these bytes were
     the right ones.
+
+    The entries carried are only those of a manifest whose seal verifies here
+    (``read_manifest``): an absent manifest is a fresh start, and any other one
+    that does not verify is refused by its reason (``ManifestNotVerified``),
+    nothing written, so the download completes unpinned and says why. A seal
+    under another scheme this host can check is carried and sealed under the
+    host's, said in ``previous_scheme``. Re-pinning this one file replaces its
+    entry, and the digest it held is said in ``replaced``: the download is the
+    act on these bytes. No other file is hashed.
     """
     if benchmark is not None:
         label = benchmark.get("source") if isinstance(benchmark, dict) else None
@@ -659,8 +859,16 @@ def record_model(
             "No key material available to seal the model provenance manifest"
         )
 
-    manifest = load_manifest(manifest_path) or {}
-    entries = dict(manifest.get("entries") or {})
+    target = Path(manifest_path) if manifest_path is not None else DEFAULT_MANIFEST_PATH
+    reading = read_manifest(target, keys=seal_keys, verifier=verifier)
+    if reading.status == REASON_MANIFEST_MISSING:
+        entries: dict[str, Any] = {}
+    elif reading.status != REASON_VERIFIED:
+        raise _refusal(reading, target)
+    else:
+        entries = dict(reading.entries)
+    held = entries.get(resolved.name)
+    replaced = held.get("sha256") if isinstance(held, dict) and held.get("sha256") != digest else None
     entry: dict[str, Any] = {
         "sha256": digest,
         "size": resolved.stat().st_size,
@@ -675,10 +883,11 @@ def record_model(
     payload = {"version": MANIFEST_VERSION, "entries": entries}
     sealed = dict(payload)
     sealed["seal"] = compute_seal(payload, seal_keys, signer=signer)
-    save_manifest(sealed, manifest_path)
+    save_manifest(sealed, target)
 
     logger.info("Model pinned: %s (sha256=%s)", resolved.name, digest[:16])
-    return {"model": resolved.name, "sha256": digest, "scheme": seal_keys.scheme}
+    return {"model": resolved.name, "sha256": digest, "scheme": seal_keys.scheme,
+            "previous_scheme": reading.scheme, "replaced": replaced}
 
 
 def enroll_models(
@@ -687,7 +896,10 @@ def enroll_models(
     manifest_path: Path | str | None = None,
     keys: SealKeys | None = None,
     signer: Callable[[bytes, bytes], bytes] | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
     chunk_size: int = _CHUNK,
+    start_again: bool = False,
+    repin: list[str] | tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Pin several on-disk models under ONE seal.
 
@@ -708,10 +920,28 @@ def enroll_models(
     between this and re-sealing: enrolment is the act of deciding these bytes are
     the right ones, so it hashes them; re-sealing renews a decision already made
     and must never re-hash. Enrolling zero models writes nothing and says so.
+
+    Only a manifest whose seal verifies here is carried (``read_manifest``); an
+    absent one is a fresh start, and any other is refused by its reason,
+    nothing written. A verified entry whose file still hashes to it is kept as
+    it is, its ``recorded_at`` included; only a model not yet pinned is pinned.
+    A pinned model whose bytes changed is never re-pinned on the way: every such
+    model is named (``PinnedFileChanged``) and nothing is written, unless the
+    user names it in ``repin`` once its bytes are checked. When nothing is new
+    and the seal is already the host's, nothing is written (``written``).
+
+    ``start_again`` is the explicit way out of a manifest that does not verify:
+    since the seal is global, it has no verified entry. The old file is set
+    aside untouched, as ``<stem>.unverified-<UTC>.json`` beside it, nothing of
+    it is carried, the models handed in are pinned from their bytes, and the
+    result says how many entries were dropped, their first names and the
+    reason. It is refused on a manifest that verifies, on an absent one and on
+    one that cannot be read.
     """
     resolved = [Path(p) for p in model_paths]
     if not resolved:
-        return {"enrolled": [], "count": 0, "scheme": None}
+        return {"enrolled": [], "count": 0, "scheme": None, "kept": [], "repinned": [],
+                "repin_unused": sorted(set(repin)), "previous_scheme": None, "written": False}
 
     seal_keys = keys if keys is not None else resolve_seal_keys()
     if seal_keys is None:
@@ -721,8 +951,85 @@ def enroll_models(
             "one would be read as readiness the host does not have."
         )
 
-    manifest = load_manifest(manifest_path) or {}
-    entries = dict(manifest.get("entries") or {})
+    target = Path(manifest_path) if manifest_path is not None else DEFAULT_MANIFEST_PATH
+    reading = read_manifest(target, keys=seal_keys, verifier=verifier)
+    if start_again:
+        return _start_again(resolved, target, reading, seal_keys, signer=signer, chunk_size=chunk_size)
+    if reading.status == REASON_MANIFEST_MISSING:
+        entries: dict[str, Any] = {}
+    elif reading.status != REASON_VERIFIED:
+        raise _refusal(reading, target)
+    else:
+        entries = dict(reading.entries)
+
+    named = set(repin)
+    enrolled: list[dict[str, Any]] = []
+    kept: list[str] = []
+    repinned: list[str] = []
+    changed: list[str] = []
+    for path in resolved:
+        digest = compute_digest(path, chunk_size=chunk_size)
+        held = entries.get(path.name)
+        if isinstance(held, dict) and held.get("sha256") == digest:
+            kept.append(path.name)
+            continue
+        if isinstance(held, dict):
+            if path.name not in named:
+                changed.append(path.name)
+                continue
+            repinned.append(path.name)
+        entries[path.name] = {
+            "sha256": digest,
+            "size": path.stat().st_size,
+            "recorded_at": time.time(),
+        }
+        enrolled.append({"model": path.name, "sha256": digest})
+    if changed:
+        raise PinnedFileChanged(changed)
+
+    moved = reading.status == REASON_VERIFIED and reading.scheme != seal_keys.scheme
+    written = bool(enrolled) or moved
+    if written:
+        payload = {"version": MANIFEST_VERSION, "entries": entries}
+        sealed = dict(payload)
+        sealed["seal"] = compute_seal(payload, seal_keys, signer=signer)
+        save_manifest(sealed, target)
+
+    logger.info(
+        "Enrolled %d model(s) under %s, %d kept", len(enrolled), seal_keys.scheme, len(kept)
+    )
+    return {
+        "enrolled": enrolled,
+        "count": len(enrolled),
+        "scheme": seal_keys.scheme,
+        "kept": kept,
+        "repinned": repinned,
+        "repin_unused": sorted(named - set(repinned)),
+        "previous_scheme": reading.scheme,
+        "written": written,
+    }
+
+
+def _start_again(
+    resolved: list[Path],
+    target: Path,
+    reading: ManifestReading,
+    seal_keys: SealKeys,
+    *,
+    signer: Callable[[bytes, bytes], bytes] | None,
+    chunk_size: int,
+) -> dict[str, Any]:
+    """Pin ``resolved`` afresh beside a manifest that does not verify, which is set aside untouched."""
+    if reading.status == REASON_MANIFEST_MISSING:
+        raise ManifestNotVerified(reading, target, f"{target}: there is no manifest to start again from; enrol "
+                                  "without starting again; nothing was written")
+    if reading.status == REASON_VERIFIED:
+        raise ProvenanceError(f"the manifest verifies here ({target}): enrol without starting again, nothing of it "
+                              "is dropped; nothing was written")
+    if not reading.read:
+        raise ManifestNotVerified(reading, target, f"{target}: {reading.detail}, so it is not set aside; make it "
+                                  "readable; nothing was written")
+    entries: dict[str, Any] = {}
     enrolled: list[dict[str, Any]] = []
     for path in resolved:
         digest = compute_digest(path, chunk_size=chunk_size)
@@ -732,19 +1039,27 @@ def enroll_models(
             "recorded_at": time.time(),
         }
         enrolled.append({"model": path.name, "sha256": digest})
-
     payload = {"version": MANIFEST_VERSION, "entries": entries}
     sealed = dict(payload)
     sealed["seal"] = compute_seal(payload, seal_keys, signer=signer)
-    save_manifest(sealed, manifest_path)
-
-    logger.info(
-        "Enrolled %d model(s) under %s", len(enrolled), seal_keys.scheme
+    aside = _set_aside(target)
+    save_manifest(sealed, target)
+    logger.warning(
+        "Model provenance started again: %d model(s) pinned under %s; the manifest that did not verify (%s, %s "
+        "entries) set aside at %s", len(enrolled), seal_keys.scheme, reading.status,
+        "uncounted" if reading.found is None else reading.found, aside,
     )
     return {
         "enrolled": enrolled,
         "count": len(enrolled),
         "scheme": seal_keys.scheme,
+        "kept": [],
+        "repinned": [],
+        "repin_unused": [],
+        "previous_scheme": None,
+        "written": True,
+        "dropped": {"reason": reading.status, "count": reading.found, "names": list(reading.names)},
+        "set_aside": str(aside),
     }
 
 
@@ -770,6 +1085,7 @@ def reseal_manifest(
     manifest_path: Path | str | None = None,
     keys: SealKeys | None = None,
     signer: Callable[[bytes, bytes], bytes] | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
 ) -> dict[str, Any]:
     """Re-seal the manifest under the scheme this host is ALLOWED to perform.
 
@@ -792,13 +1108,26 @@ def reseal_manifest(
     key material there is nothing to sign with, and a silent HMAC here would hand
     back a manifest the fortress will reject while the operator believes the
     migration happened.
+
+    AND NOTHING UNVERIFIED IS CARRIED. The previous seal is checked first
+    (``read_manifest``), under the scheme it names and this host's key for it:
+    a manifest that is absent, cannot be read, carries no seal, or whose seal
+    does not verify here is refused by its reason and never sealed again -- a
+    seal anyone could have deleted or forged is no decision to renew. One that
+    already verifies under the host's scheme is left as it is (``written``
+    False).
     """
-    manifest = load_manifest(manifest_path)
-    if not manifest:
-        raise ProvenanceError(
-            "There is no model provenance manifest to re-seal. A manifest is "
-            "written when a model is enrolled; enrol one first."
-        )
+    target = Path(manifest_path) if manifest_path is not None else DEFAULT_MANIFEST_PATH
+    try:
+        os.stat(target)
+    except (FileNotFoundError, NotADirectoryError):
+        raise ManifestNotVerified(
+            ManifestReading(status=REASON_MANIFEST_MISSING), target,
+            f"{target}: there is no model provenance manifest to re-seal; a manifest is written when a model is "
+            "enrolled: enrol one first",
+        ) from None
+    except OSError:
+        pass  # the reader names it
 
     seal_keys = keys if keys is not None else resolve_seal_keys()
     if seal_keys is None:
@@ -806,27 +1135,34 @@ def reseal_manifest(
             "No key material available to seal the model provenance manifest"
         )
 
-    payload = _payload_of(manifest)
-    previous = manifest.get("seal")
-    previous_scheme = (
-        previous.get("scheme") if isinstance(previous, dict) else None
-    )
+    reading = read_manifest(target, keys=seal_keys, verifier=verifier)
+    if reading.status != REASON_VERIFIED:
+        raise _refusal(reading, target)
+    entries = reading.entries
+    if reading.scheme == seal_keys.scheme:
+        return {
+            "scheme": seal_keys.scheme,
+            "previous_scheme": reading.scheme,
+            "entries": len(entries),
+            "written": False,
+        }
 
+    payload = {"version": MANIFEST_VERSION, "entries": entries}
     sealed = dict(payload)
     sealed["seal"] = compute_seal(payload, seal_keys, signer=signer)
-    save_manifest(sealed, manifest_path)
+    save_manifest(sealed, target)
 
-    entries = payload.get("entries") or {}
     logger.info(
         "Model provenance manifest re-sealed: %d entries, %s -> %s",
         len(entries),
-        previous_scheme or "unsealed",
+        reading.scheme,
         seal_keys.scheme,
     )
     return {
         "scheme": seal_keys.scheme,
-        "previous_scheme": previous_scheme,
+        "previous_scheme": reading.scheme,
         "entries": len(entries),
+        "written": True,
     }
 
 

@@ -16,6 +16,11 @@ verbatim -- this changes the SCHEME, never the CLAIM. A re-seal that re-hashed
 the files on disk would bless whatever is sitting there now, which is precisely
 the substitution the manifest exists to refuse.
 
+And nothing unverified is carried. The seal is checked first, under the scheme
+it names and this host's key for it; a manifest whose seal is missing, forged
+or under a key this host cannot check is refused by its reason and never sealed
+again. "Already sealed" is said only of a seal that verified.
+
 The full migration onto a fortress, in order:
 
     1. python -c "from opti_oignon.pqc_signatures import *; \
@@ -37,9 +42,11 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from opti_oignon.model_provenance import (  # noqa: E402
+    REASON_KEY_UNAVAILABLE,
+    REASON_MANIFEST_MISSING,
+    REASON_VERIFIED,
     ProvenanceError,
-    load_manifest,
-    manifest_seal_scheme,
+    read_manifest,
     reseal_manifest,
     resolve_seal_keys,
 )
@@ -59,19 +66,8 @@ def main() -> int:
 
     path = Path(args.manifest) if args.manifest else None
 
-    manifest = load_manifest(path)
-    if not manifest:
-        print("No model provenance manifest. Nothing to re-seal.")
-        print("A manifest is written when a model is enrolled; enrol one first.")
-        return 1
-
-    current = manifest_seal_scheme(path)
-    entries = manifest.get("entries") or {}
-    print(f"Manifest: {len(entries)} model(s), sealed with {current or 'nothing'}")
-
     keys = resolve_seal_keys()
     if keys is None:
-        print()
         print("REFUSED: no key material this host is allowed to seal with.")
         print("A signature is required here and there is nothing to sign with.")
         print("Mint a keypair first -- and note that substituting a MAC would")
@@ -79,17 +75,33 @@ def main() -> int:
         print("migration had happened.")
         return 1
 
-    if current == keys.scheme:
+    reading = read_manifest(path, keys=keys)
+    if reading.status == REASON_MANIFEST_MISSING:
+        print("No model provenance manifest. Nothing to re-seal.")
+        print("A manifest is written when a model is enrolled; enrol one first.")
+        return 1
+    if reading.status != REASON_VERIFIED:
+        print(f"REFUSED ({reading.status}) -- the manifest: {reading.detail}.")
+        print("A seal this host cannot check vouches for nothing: it is never sealed again.")
+        if reading.status == REASON_KEY_UNAVAILABLE:
+            print("Set OPTI_KEYFILE_PASSPHRASE, or put back the keypair that sealed it; or,")
+        print("once the weights are checked against where they came from, start again:")
+        print("  python scripts/enroll_models.py --start-again")
+        return 1
+
+    entries = reading.entries
+    print(f"Manifest: {len(entries)} model(s), sealed with {reading.scheme}, verified here")
+    if reading.scheme == keys.scheme:
         print(f"Already sealed with {keys.scheme}. Nothing to do.")
         return 0
 
     if args.dry_run:
-        print(f"Would re-seal: {current or 'nothing'} -> {keys.scheme}")
+        print(f"Would re-seal: {reading.scheme} -> {keys.scheme}")
         print(f"Would carry {len(entries)} pin(s) across unchanged.")
         return 0
 
     try:
-        result = reseal_manifest(manifest_path=path)
+        result = reseal_manifest(manifest_path=path, keys=keys)
     except ProvenanceError as exc:
         print(f"REFUSED: {exc}")
         return 1

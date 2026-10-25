@@ -309,7 +309,11 @@ which anyone holding the key can forge and nobody else can verify. A key
 file that does not load here (a wrapped one without
 `OPTI_KEYFILE_PASSPHRASE`, or one holding no 32-byte key) makes and
 checks no MAC -- its bytes are never a key --, and where provenance is
-enforced the model is refused.
+enforced the model is refused. Pinning a model and re-sealing carry an
+entry only from a manifest whose seal verifies here, under the scheme it
+names and this host's key for it; any other manifest is refused by name
+and never sealed again. A manifest that is deleted reads as a host that
+never enrolled.
 The startup security checklist reports a missing primitive.
 
 ### What is not signed
