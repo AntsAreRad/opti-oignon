@@ -137,6 +137,9 @@ REASON_MANIFEST_MALFORMED = "manifest_malformed"
 _NAMES_SHOWN = 100
 _NAME_CHARS = 255
 
+# What stands at the manifest's path when it is not a regular file, named in the refusal.
+_KINDS = {stat.S_IFDIR: "a folder", stat.S_IFIFO: "a pipe", stat.S_IFCHR: "a device", stat.S_IFBLK: "a device"}
+
 _CHUNK = 1024 * 1024
 
 # The master key's size, an AES-256 key's (encryption._KEY_SIZE): a key file
@@ -720,18 +723,34 @@ def read_manifest(
     (``_checking_keys``); the seal verifies over the canonical payload; and the entries are sound. The seal is
     global: whole, or not at all. Every other state is a reason, never an exception, and the entries are then
     empty: absent (nothing at the path, or a link that leads nowhere) is ``manifest_missing``; a file that cannot be
-    read, or does not parse as a JSON object, ``manifest_unreadable``; no seal, ``seal_missing``; a seal that names
+    read, or does not parse as a JSON object -- one nested past what the parser reads included --,
+    ``manifest_unreadable``, as is, without being read, anything at the path that is not a regular file (a folder, a
+    pipe, which is never waited on, a device); no seal, ``seal_missing``; a seal that names
     no scheme this code knows, or does not verify, ``seal_invalid``; no key here for the scheme it names, or a check
     that raises, ``key_unavailable``; unsound entries under a verified seal, ``manifest_malformed``. The load gate
     does not read through here: it keeps its own, stricter rule.
     """
     target = Path(path) if path is not None else DEFAULT_MANIFEST_PATH
     try:
-        os.stat(target)
-        with open(target, "rb") as handle:
-            raw = handle.read()
+        # Non-blocking: a pipe at the path is refused below, never waited on.
+        fd = os.open(target, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+                     | getattr(os, "O_NOCTTY", 0))
     except (FileNotFoundError, NotADirectoryError):
         return ManifestReading(status=REASON_MANIFEST_MISSING)
+    except OSError as exc:
+        name = errno.errorcode.get(exc.errno or 0, str(exc.errno))
+        return ManifestReading(status=REASON_MANIFEST_UNREADABLE, detail=f"it cannot be read ({name}): not checked")
+    try:
+        try:
+            kind = stat.S_IFMT(os.fstat(fd).st_mode)
+            if kind != stat.S_IFREG:
+                what = _KINDS.get(kind, "another kind of file")
+                return ManifestReading(status=REASON_MANIFEST_UNREADABLE,
+                                       detail=f"it is not a regular file but {what}: not checked")
+            with open(fd, "rb", closefd=False) as handle:
+                raw = handle.read()
+        finally:
+            os.close(fd)
     except OSError as exc:
         name = errno.errorcode.get(exc.errno or 0, str(exc.errno))
         return ManifestReading(status=REASON_MANIFEST_UNREADABLE, detail=f"it cannot be read ({name}): not checked")
@@ -739,6 +758,9 @@ def read_manifest(
         manifest = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         return ManifestReading(status=REASON_MANIFEST_UNREADABLE, detail="it does not parse as JSON", read=True)
+    except RecursionError:
+        return ManifestReading(status=REASON_MANIFEST_UNREADABLE, detail="it nests deeper than the JSON parser reads",
+                               read=True)
     if not isinstance(manifest, dict):
         return ManifestReading(status=REASON_MANIFEST_UNREADABLE, detail="it is not a JSON object", read=True)
     held = manifest.get("entries", {})
@@ -770,20 +792,130 @@ def read_manifest(
                            read=True)
 
 
+# The ways out a refusal names, each the call that takes it.
+_ENROL = "enrol the models on disk (scripts/enroll_models.py, or POST /api/security/pqc/enroll-models)"
+_RESEAL = ("re-seal it (scripts/reseal_model_manifest.py, or POST /api/security/pqc/reseal-manifest): its pins are "
+           "carried as they are")
+_START_AGAIN = ("start again from the models on disk (scripts/enroll_models.py --start-again, or start_again in "
+                "POST /api/security/pqc/enroll-models)")
+_CHECKED = "once the weights are checked against where they came from, "
+
+
+def _primitive_alive() -> bool:
+    """Whether the post-quantum primitive resolved here: without it no signature is checked or made."""
+    try:
+        from opti_oignon.pqc_signatures import PQC_AVAILABLE
+    except Exception:  # noqa: BLE001 - a primitive that does not import checks nothing
+        return False
+    return bool(PQC_AVAILABLE)
+
+
+def _way_out(reading: ManifestReading) -> str:
+    """The way out of a manifest that does not verify here, for the reason it does not.
+
+    A signature this host cannot check is not started again over: starting again would set aside a signature that
+    may well verify, and write the host's own seal in its place. Without the primitive, the primitive is brought
+    back; without the keypair, the keypair that sealed it.
+    """
+    if reading.status == REASON_MANIFEST_UNREADABLE and not reading.read:
+        return "make it a readable file, or move away what stands at that path; nothing was written"
+    if reading.status == REASON_KEY_UNAVAILABLE and reading.scheme == SCHEME_PQC:
+        if not _primitive_alive():
+            return ("bring back the post-quantum primitive, without which this signature cannot be checked; the "
+                    "manifest is left as it is; nothing was written")
+        return (f"bring back the keypair that sealed it, so that this host loads it; or, {_CHECKED}{_START_AGAIN}; "
+                "nothing was written")
+    if reading.status == REASON_KEY_UNAVAILABLE:
+        return f"set OPTI_KEYFILE_PASSPHRASE so the key file loads; or, {_CHECKED}{_START_AGAIN}; nothing was written"
+    return f"{_CHECKED}{_START_AGAIN}; nothing was written"
+
+
 def _refusal(reading: ManifestReading, path: Path) -> ManifestNotVerified:
     """The refusal of a manifest that does not verify here, with the way out."""
-    if reading.status == REASON_MANIFEST_UNREADABLE and not reading.read:
-        way = "make it readable; nothing was written"
-    elif reading.status == REASON_KEY_UNAVAILABLE:
-        way = ("set OPTI_KEYFILE_PASSPHRASE so the key file loads, or put back the keypair that sealed it; or, once "
-               "the weights are checked against where they came from, start again from the models on disk "
-               "(scripts/enroll_models.py --start-again, or start_again in POST /api/security/pqc/enroll-models); "
-               "nothing was written")
-    else:
-        way = ("once the weights are checked against where they came from, start again from the models on disk "
-               "(scripts/enroll_models.py --start-again, or start_again in POST /api/security/pqc/enroll-models); "
-               "nothing was written")
-    return ManifestNotVerified(reading, path, f"{path}: {reading.detail}; {way}")
+    return ManifestNotVerified(reading, path, f"{path}: {reading.detail}; {_way_out(reading)}")
+
+
+# Keys of no host scheme: every seal is checked under the key of the scheme it names.
+_ANY_SCHEME = SealKeys(scheme="")
+
+
+def read_manifest_for_fortress(
+    path: Path | str | None = None,
+    *,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
+) -> ManifestReading:
+    """The manifest as Bulbe's load gate will judge it, read before the host becomes a fortress.
+
+    The gate takes one seal: an ``mldsa65`` signature that verifies under the keypair's public half. This reads
+    through ``read_manifest`` with keys of no host scheme, so each seal is checked under the key of the scheme it
+    names -- the key file's key for a MAC, the keypair's public half for a signature, the primitive first --
+    whatever the Daily policy seals with, and every state keeps the writers' name. A seal that verifies and is not
+    a signature is then ``seal_downgrade``, the gate's word, its entries withheld. Nothing is written.
+
+    One state is judged more strictly than the gate judges it: ``manifest_malformed``, a verified seal over
+    entries that are not sound. The gate might still load a model whose own entry is sound; the writers refuse
+    the whole manifest, so a fortress could pin nothing more until it is started again.
+    """
+    reading = read_manifest(path, keys=_ANY_SCHEME, verifier=verifier)
+    if reading.status == REASON_VERIFIED and reading.scheme != SCHEME_PQC:
+        return ManifestReading(
+            status=REASON_SEAL_DOWNGRADE, scheme=reading.scheme, found=reading.found, names=reading.names,
+            detail=f"its {reading.scheme} seal verifies here, and a fortress takes only an {SCHEME_PQC} signature",
+            read=True,
+        )
+    return reading
+
+
+def _signing_first() -> str:
+    """What makes this host seal with the signature before a writer seals for a fortress; empty when it does.
+
+    A writer seals under the scheme the host seals with. On a Daily host that seals with a MAC -- the shipped
+    policy -- an enrolment, a fresh start and a re-seal all write a MAC, which a fortress refuses as a downgrade,
+    and an enrolment over a signature that verifies writes it back as a MAC. The signature comes first. Asked of
+    a host whose primitive resolved (``fortress_way_out`` names the primitive before anything else); it reads the
+    host's state as ``resolve_seal_keys`` does, without its log.
+    """
+    wanted = _pqc_required() or _pqc_enabled()
+    keypair, _why = _pqc_seal_keys()
+    if wanted and keypair is not None:
+        return ""
+    mint = "make a keypair (POST /api/security/pqc/generate-keys)"
+    if wanted:
+        return f"{mint}, then "
+    also = "" if keypair is not None else f"{mint} and "
+    return (f"{also}set pqc: backup_signatures: true in security.yaml so this host seals with the signature (Daily "
+            "then requires it as well), then ")
+
+
+def fortress_way_out(reading: ManifestReading) -> str:
+    """The way out a fortress's preflight names for the state ``read_manifest_for_fortress`` found, on this host.
+
+    Each one, followed, leaves a manifest the fortress takes, or a host one step nearer it, and none weakens a seal
+    or sets aside one that still verifies. Without the post-quantum primitive no signature is checked or made, so
+    every way out but moving away what is not a file is to bring it back first. Every way out that writes a seal is
+    preceded by what makes this host seal with the signature (``_signing_first``). A MAC that verifies is re-sealed,
+    its pins carried; absent, or pinning nothing, the models on disk are enrolled; a seal that does not verify, or a
+    file that does not parse, is started again once the weights are checked; whatever stands at the path and is not
+    a file is made one or moved away. A signature this host cannot check for want of its keypair is not started
+    again over first: the keypair that sealed it is brought back, or else it is started again.
+    """
+    status = reading.status
+    if status == REASON_MANIFEST_UNREADABLE and not reading.read:
+        return "make it a readable file, or move away what stands at that path"
+    if not _primitive_alive():
+        return ("bring back the post-quantum primitive, without which this host can neither check nor make a "
+                "signature (the signing blocker names it), then ask again; the manifest is left as it is")
+    if status == REASON_KEY_UNAVAILABLE and reading.scheme == SCHEME_PQC:
+        return (f"bring back the keypair that sealed it, so that this host loads it (the signing blocker says why it "
+                f"does not); or, {_CHECKED}{_signing_first()}{_START_AGAIN}")
+    first = _signing_first()
+    if status == REASON_KEY_UNAVAILABLE:
+        return f"set OPTI_KEYFILE_PASSPHRASE so the key file loads; or, {_CHECKED}{first}{_START_AGAIN}"
+    if status in (REASON_MANIFEST_MISSING, REASON_VERIFIED) or (status == REASON_SEAL_DOWNGRADE and not reading.found):
+        return f"{first}{_ENROL}"
+    if status == REASON_SEAL_DOWNGRADE:
+        return f"{first}{_RESEAL}"
+    return f"{_CHECKED}{first}{_START_AGAIN}"
 
 
 def _set_aside(target: Path) -> Path:
@@ -913,8 +1045,9 @@ def enroll_models(
     Refuse rather than downgrade, exactly as sealing does everywhere else. If a
     signature is required here and no key can produce one, this raises and writes
     NOTHING. A partial manifest -- some pins, no seal, or a MAC where a signature
-    was required -- is worse than an absent one, because the escalation preflight
-    would then read a manifest that exists and believe the host was ready.
+    was required -- is worse than an absent one: a host that requires the
+    signature refuses every model it pins, and every writer refuses an unsealed
+    one by name until it is started again, where an absent one is a fresh start.
 
     The digests are computed from the BYTES on disk. That is the difference
     between this and re-sealing: enrolment is the act of deciding these bytes are
@@ -1028,7 +1161,7 @@ def _start_again(
                               "is dropped; nothing was written")
     if not reading.read:
         raise ManifestNotVerified(reading, target, f"{target}: {reading.detail}, so it is not set aside; make it "
-                                  "readable; nothing was written")
+                                  "a readable file, or move away what stands at that path; nothing was written")
     entries: dict[str, Any] = {}
     enrolled: list[dict[str, Any]] = []
     for path in resolved:

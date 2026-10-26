@@ -771,52 +771,38 @@ class SecurityModeManager:
             logger.error("the signing readiness could not be determined: %s", exc)
             return []
 
-        try:
-            from opti_oignon.model_provenance import (
-                SCHEME_PQC,
-                manifest_seal_scheme,
-            )
-
-            scheme = manifest_seal_scheme()
-        except Exception as exc:  # noqa: BLE001 - a broken import is not a verdict
-            logger.error("the manifest seal could not be read: %s", exc)
-            return blockers
-
-        if scheme is not None and scheme != SCHEME_PQC:
-            blockers.append(
-                f"the model provenance manifest is sealed with {scheme!r}, "
-                f"which a fortress reads as a downgrade and refuses. Every "
-                f"model on this host would be rejected."
-            )
-
         blockers.extend(SecurityModeManager._provenance_blockers())
         return blockers
 
     @staticmethod
     def _provenance_blockers() -> list[str]:
-        """The plainest brick of all: a gated backend and NO manifest.
+        """The manifest as the fortress's load gate will judge it, for a gated backend.
 
-        The downgrade check above fires only when a manifest EXISTS with the
-        wrong scheme. It says nothing about the host that has no manifest at
-        all -- which is every fresh install. On a fortress the load seam
-        enforces, and a model with no pin is refused as unpinned, so a host
-        that escalates here loads nothing. This closes that half. The two are
-        disjoint by construction: one needs a manifest present, the other needs
-        it absent, and neither can hide a failure of the other.
+        The gate takes one seal: a signature that verifies under the keypair's
+        public half, over a manifest that pins the model. Judging the seal by
+        what it CLAIMED let through a signature that does not verify -- one made
+        under a keypair since rotated, an entry added after sealing -- and the
+        host escalated into refusing every model it loads. The manifest is read
+        here as the gate will read it (``read_manifest_for_fortress``), and any
+        state the gate refuses is one blocker that names what was found and the
+        way out that works on this host: absent or pinning nothing, enrol; a MAC
+        that verifies, re-seal, once the host seals with the signature; a seal
+        that does not verify, start again once the weights are checked; a file
+        that cannot be read, make it readable. Nothing is written.
 
         Scoped to the brick on purpose. A backend whose load seam never calls
         the gate (Ollama, llama-server today) is not bricked by escalation, so
-        it earns no blocker even though loading unverified weights in a fortress
-        is its own weakness. That weakness is documented as a gap; turning it
-        into an escalation refusal would buy no security and only pin the host
-        in Daily -- the exact anti-pattern the rest of this preflight avoids.
+        its manifest -- absent, sealed with a MAC, or forged -- earns no blocker
+        even though loading unverified weights in a fortress is its own
+        weakness. That weakness is documented as a gap; turning it into an
+        escalation refusal would buy no security and only pin the host in Daily
+        -- the exact anti-pattern the rest of this preflight avoids. The scope
+        is asked before the manifest is read, and a reading that cannot run is
+        no verdict either: the host then escalates into a gate that refuses.
         """
         backend = _default_backend()
         try:
-            from opti_oignon.model_provenance import (
-                backend_enforces_provenance,
-                load_manifest,
-            )
+            from opti_oignon.model_provenance import backend_enforces_provenance
         except Exception as exc:  # noqa: BLE001 - a broken import is not a verdict
             logger.error("provenance readiness could not be determined: %s", exc)
             return []
@@ -824,14 +810,44 @@ class SecurityModeManager:
         if not backend_enforces_provenance(backend):
             return []
 
-        manifest = load_manifest()
-        if manifest and manifest.get("entries"):
-            return []
+        try:
+            from opti_oignon.model_provenance import (
+                REASON_MANIFEST_MALFORMED,
+                REASON_MANIFEST_MISSING,
+                REASON_VERIFIED,
+                fortress_way_out,
+                read_manifest_for_fortress,
+            )
 
+            reading = read_manifest_for_fortress()
+            if reading.status == REASON_VERIFIED and reading.entries:
+                return []
+        except Exception as exc:  # noqa: BLE001 - a check that cannot run is not a verdict
+            logger.error("the provenance manifest could not be judged: %s", exc)
+            return []
+        try:
+            way = fortress_way_out(reading)
+        except Exception as exc:  # noqa: BLE001 - the verdict stands without its advice
+            logger.error("the way out of the provenance manifest could not be named: %s", exc)
+            way = f"name the way out by hand: it could not be named here ({type(exc).__name__})"
+
+        if reading.status == REASON_MANIFEST_MISSING:
+            found = "this host has no provenance manifest"
+        elif reading.status == REASON_VERIFIED:
+            found = "its provenance manifest pins no model"
+        else:
+            found = (
+                f"its provenance manifest is refused ({reading.status}: "
+                f"{reading.detail})"
+            )
+        if reading.status == REASON_MANIFEST_MALFORMED:
+            # The gate may still load a model whose own entry is sound.
+            then = "In Bulbe nothing more is pinned until it is started again"
+        else:
+            then = "In Bulbe every model it loads is refused"
         return [
-            f"the load backend {backend!r} verifies model provenance and this "
-            f"host has no provenance manifest. In Bulbe every model load is "
-            f"refused as unpinned. Enrol the models on disk first."
+            f"the load backend {backend!r} verifies model provenance, and "
+            f"{found}. {then}. To escalate, {way}."
         ]
 
     def escalate_to_bulbe(
@@ -922,9 +938,9 @@ class SecurityModeManager:
                     "success": False,
                     "error": "fortress_not_ready",
                     "message": (
-                        "Bulbe requires the post-quantum signature. This host "
-                        "cannot produce or verify one yet, so it would refuse "
-                        "every model it owns and every backup it exports."
+                        "This host is not ready for Bulbe: the fortress would "
+                        "refuse what the blockers name, and the remedy lists "
+                        "the calls that make it ready. The mode is not changed."
                     ),
                     "blockers": blockers,
                     "remedy": [

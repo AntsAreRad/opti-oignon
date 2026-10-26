@@ -3480,6 +3480,33 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] Escalating to Bulbe judges the model provenance manifest as
+  the fortress's load gate will. The preflight read the scheme the seal
+  claimed and the presence of entries: a signature that does not verify --
+  made under a keypair since rotated, or over entries changed since --
+  passed, and the host escalated into refusing every model the `llama_cpp`
+  backend loads. It now checks the seal as the gate does, and refuses by
+  name a manifest that is absent or pins nothing, cannot be read, is not
+  sealed, is sealed with a MAC (a downgrade there) or whose seal does not
+  verify. Each refusal names a way out that works on this host: every one
+  that writes a seal first asks a host that seals with a MAC -- the
+  shipped Daily policy, under which an enrolment, a fresh start and a
+  re-seal all write a MAC -- to set `pqc: backup_signatures: true` in
+  `security.yaml`, after which Daily requires the signature as well. A
+  seal that does not verify is started again once the weights are checked,
+  never re-sealed. Without the post-quantum primitive, the way out is to
+  bring it back first, and a signature this host cannot check for want of
+  the primitive or of its keypair is never started again over -- by the
+  preflight or by the writers, whose refusals offered it. The refusal no
+  longer says the host cannot sign when only its manifest blocks. A
+  default backend that does not verify provenance (Ollama, the shipped
+  default) is no longer refused over a manifest its load never reads. The
+  preflight judges the manifest, not each model's bytes. The manifest's
+  readers -- the preflight, a download's pin, an enrolment and a re-seal
+  -- now refuse by name anything at its path that is not a regular file,
+  without reading it, where a pipe was waited on forever, and a manifest
+  nested deeper than the JSON parser reads, which raised.
+
 - [SECURITY] Pinning a model and re-sealing the provenance manifest carry
   only what its seal vouches for. A download's pin, an enrolment
   (`scripts/enroll_models.py`, `POST /api/security/pqc/enroll-models`) and

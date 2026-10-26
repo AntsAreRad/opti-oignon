@@ -1188,6 +1188,16 @@ fail_under = 0
 # assertions on its own tables and holds the 37 others. It stays in the
 # tree word for word.
 #
+# The escalation preflight judges the provenance manifest as the fortress's
+# load gate will (block 184), for a gated default backend only. f13 of
+# tests/test_fortress_readiness_contracts.py, which held a MAC-sealed
+# manifest a blocker on an ungated backend whose load never reads it, f18,
+# which held the absent manifest a blocker through a stand-in of the module
+# without its new reader, and f19, which held a manifest ready by the scheme
+# its seal claimed, give way to ev2, ev5, ev6 and ev7 of
+# tests/test_escalation_preflight_verifies_contracts.py, on the real module.
+# They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1612,4 +1622,7 @@ addopts = """
     --deselect=tests/test_mode_verdict_contracts.py::test_mv9_migrate_with_the_real_mode_and_the_real_chain_ends_and_records_once
     --deselect=tests/test_vector_db_contracts.py::test_vd11_chromadb_is_imported_by_the_migration_alone_its_telemetry_off_asked_no_embedding
     --deselect=tests/test_egress_census_guard_contracts.py::test_ec12_the_real_tree_is_green_and_only_a_named_retirement_lowers_its_floor
+    --deselect=tests/test_fortress_readiness_contracts.py::test_f13_a_mac_sealed_manifest_is_itself_a_blocker
+    --deselect=tests/test_fortress_readiness_contracts.py::test_f18_a_gated_backend_with_no_manifest_blocks_escalation
+    --deselect=tests/test_fortress_readiness_contracts.py::test_f19_a_gated_backend_with_a_manifest_is_not_falsely_bricked
 """
