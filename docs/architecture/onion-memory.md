@@ -775,7 +775,10 @@ onion could not be asked; a package that is there and breaks refuses the
 deletion. A conversation that comes back under its id -- a peer's later
 edit winning over the deletion -- keeps its onion in the process alone,
 the tombstone refusing its saves. A conversation deleted before the fifth
-schema keeps its rows in the file: nothing sweeps them yet.
+schema keeps its rows in the file: nothing sweeps them yet. The onion is
+the first store a deletion asks; the others, and what a deletion does
+not yet forget, are in the user guide (`docs/user-guide/chat.md`,
+conversation management).
 
 Two verbs work on a whole conversation, and `oo chat` gives them to the
 user as `/close` and `/open`. Closing runs the gate synchronously over

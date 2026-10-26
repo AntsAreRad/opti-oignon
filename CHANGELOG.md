@@ -3480,6 +3480,41 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] A deletion forgets what every store keyed by the conversation
+  drew from it: its branches and their turns, the facts proposed in it
+  whatever their decision, the feedback given in it, the questions and
+  answers the semantic cache kept of it, its links to every project (the
+  outputs it gave stay with the project, their source cleared), and the
+  artifacts, tool calls and coding session (its sandbox) the process held
+  of it; the deletion route stops the conversation's live replies first.
+  The conversation store's write lock is taken first, so a store another
+  process writes to fails the deletion before anything is forgotten; then
+  the onion and every store of the conversation's words; then the row and
+  the commit; then what keeps only ids, or the process's memory. Every
+  connection of these databases overwrites what any write frees -- a
+  lookup's rewrite, an invalidation, a single deletion -- and so does the
+  conversation store, whose messages' words stayed in its free pages; the
+  conversation store, the branches and the feedback also empty their
+  write-ahead logs, whose older frames kept the words while another
+  connection held them -- never waiting: a read in progress keeps a log,
+  said, until the next deletion. Within the process, a store that forgot a
+  conversation takes nothing new about it, a write already on its way when
+  the deletion came included: the mark is checked at the write, under the
+  lock the forgetting holds. The semantic cache keeps the conversation
+  each entry came from, which no lookup reads, so a deletion reaches what
+  the global scope cached with no conversation; the entries an older
+  version or an older build cached with none go at the first deletion. A
+  store that keeps the conversation's words and cannot forget refuses the
+  deletion by its name, saying what was already forgotten; the
+  conversation stays and every store takes its writes again, as it does
+  for a conversation a peer's later record brings back; a deletion asked
+  again finishes the work. A store of ids, or of the process's memory,
+  that cannot forget is said, and refuses nothing. The forgetting never
+  leans on the database driver's error classes, which the cipher's driver
+  does not share with sqlite3: under it, the semantic cache's first
+  connection in each process failed, its schema step adding a column it
+  already had.
+
 - [SECURITY] Deleting a conversation forgets what the onion memory drew
   from it. With persistence on, the onion's store kept a deleted
   conversation's turns, spans, summaries and what the librarian read of
@@ -3496,11 +3531,10 @@ package costs.
   says how many conversations are left. The store's fifth schema brings
   the tombstones; a build of an older schema refuses the file when it
   opens it. A conversation deleted before this keeps its rows: nothing
-  sweeps them yet. A deletion still leaves what other stores
-  drew from the conversation: its branches, the response cache for an
-  hour, the semantic cache, the facts drawn from it, the facts proposed
-  from it, its feedback, its project links, the artifacts the process
-  cached, and, with the sync package, the change feed.
+  sweeps them yet. A deletion still leaves the facts drawn from the
+  conversation, the response cache (an answer served for an hour, kept
+  until a later lookup cleans it up), and, with the sync package, the
+  change feed.
 
 - [SECURITY] Escalating to Bulbe judges the model provenance manifest as
   the fortress's load gate will. The preflight read the scheme the seal

@@ -82,6 +82,19 @@ DEFAULT_TTL_SECONDS = 3600
 DEFAULT_MAX_ENTRIES = 1000
 DEFAULT_MAX_CANDIDATES = 50
 DEFAULT_SCOPE = "conversation"
+# The conversation an entry an older version cached came from, which it did not keep: not known.
+_ORIGIN_UNKNOWN = "?"
+# The conversations this process forgot: none is cached again, so a turn that outlived its deletion lands nowhere,
+# until a refused deletion hands it back (``unforget_conversation``).
+_FORGOTTEN: set[str] = set()
+# Held while a mark is checked and an entry written, and while a forgetting marks and deletes.
+_MARKS_LOCK = threading.Lock()
+
+
+def _columns(conn: Any, table: str) -> set[str]:
+    """The columns ``table`` has, asked of the table itself: never of a driver's error, whose classes the cipher's
+    driver does not share with sqlite3."""
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 DEFAULT_AVG_RESPONSE_TOKENS = 250
 
 # =============================================================================
@@ -494,9 +507,21 @@ class SemanticCache:
                     created_at REAL NOT NULL,
                     last_accessed REAL NOT NULL,
                     hit_count INTEGER NOT NULL DEFAULT 0,
+                    source_conversation_id TEXT NOT NULL DEFAULT '?',
                     PRIMARY KEY (query_hash, conversation_id)
                 )
             """)
+            # Each entry keeps the conversation it was cached from, which no
+            # lookup reads, so a deletion reaches an entry the global scope
+            # cached with no conversation; an entry an older build writes, or
+            # an older file holds, says its origin is not known (_ORIGIN_UNKNOWN,
+            # the default; forget_conversation drops them).
+            if "source_conversation_id" not in _columns(conn, "cache_entries"):
+                conn.execute(
+                    "ALTER TABLE cache_entries "
+                    "ADD COLUMN source_conversation_id TEXT NOT NULL "
+                    f"DEFAULT '{_ORIGIN_UNKNOWN}'"
+                )
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_cache_conv
                 ON cache_entries(conversation_id)
@@ -525,13 +550,11 @@ class SemanticCache:
             # Guarded migration for pre-existing databases. Legacy
             # rows keep '' and therefore never match a requested fingerprint
             # (invalidation by attrition under the response-cache TTL).
-            try:
+            if "context_fingerprint" not in _columns(conn, "semantic_embeddings"):
                 conn.execute(
                     "ALTER TABLE semantic_embeddings "
                     "ADD COLUMN context_fingerprint TEXT NOT NULL DEFAULT ''"
                 )
-            except sqlite3.OperationalError:
-                pass  # column already exists
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_sem_model
                 ON semantic_embeddings(model)
@@ -556,6 +579,8 @@ class SemanticCache:
         try:
             conn = _safe_connect(self._db_path, check_same_thread=False)
             conn.row_factory = sqlite3.Row
+            # What any write frees is overwritten, never left in the file's free pages.
+            conn.execute("PRAGMA secure_delete = ON")
         except (sqlite3.Error, RuntimeError, OSError) as exc:
             self._note_layer_failure(exc)
             return None
@@ -792,28 +817,36 @@ class SemanticCache:
         if conn is None:
             return ""
         try:
-            conn.execute(
-                """INSERT INTO cache_entries
-                   (query_hash, query_text, response, model, conversation_id,
-                    embedding, embedding_dim, metadata, created_at,
-                    last_accessed, hit_count)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-                   ON CONFLICT(query_hash, conversation_id) DO UPDATE SET
-                       response = excluded.response,
-                       model = excluded.model,
-                       embedding = excluded.embedding,
-                       embedding_dim = excluded.embedding_dim,
-                       metadata = excluded.metadata,
-                       created_at = excluded.created_at,
-                       last_accessed = excluded.last_accessed,
-                       hit_count = 0
-                """,
-                (
-                    query_hash, query, response, model, conv_id,
-                    embedding_blob, embedding_dim, meta_json, now, now,
-                ),
-            )
-            conn.commit()
+            with _MARKS_LOCK:
+                # A conversation this process forgot is never cached again: a turn that outlived its deletion, or a
+                # put already on its way when it came, is refused here, under the lock the forgetting holds.
+                if conversation_id and conversation_id.strip() in _FORGOTTEN:
+                    logger.debug("Cache put declined: its conversation was deleted")
+                    return ""
+                conn.execute(
+                    """INSERT INTO cache_entries
+                       (query_hash, query_text, response, model, conversation_id,
+                        embedding, embedding_dim, metadata, created_at,
+                        last_accessed, hit_count, source_conversation_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+                       ON CONFLICT(query_hash, conversation_id) DO UPDATE SET
+                           response = excluded.response,
+                           model = excluded.model,
+                           embedding = excluded.embedding,
+                           embedding_dim = excluded.embedding_dim,
+                           metadata = excluded.metadata,
+                           created_at = excluded.created_at,
+                           last_accessed = excluded.last_accessed,
+                           hit_count = 0,
+                           source_conversation_id = excluded.source_conversation_id
+                    """,
+                    (
+                        query_hash, query, response, model, conv_id,
+                        embedding_blob, embedding_dim, meta_json, now, now,
+                        (conversation_id or "").strip(),
+                    ),
+                )
+                conn.commit()
         except (sqlite3.Error, RuntimeError, OSError) as exc:
             self._note_layer_failure(exc)
             return ""
@@ -829,6 +862,56 @@ class SemanticCache:
             embedding_dim > 0,
         )
         return query_hash
+
+    def forget_conversation(self, conversation_id: str) -> int:
+        """Delete every question and answer cached in a deleted conversation; how many.
+
+        Unlike a lookup, which degrades to a miss, a store that cannot be opened raises: a deletion that asks must
+        never take it for one with nothing to forget. A file that is not there holds nothing, and is not created.
+        An entry the global scope cached is reached by the conversation it came from (``source_conversation_id``).
+        The entries an older version or an older build cached with no conversation, one of which may be this one's,
+        go with the first forgetting (an entry dropped is only asked again): marked of an origin not known, or, in a
+        file still without the column, every entry with no conversation. The schema is never changed here. The
+        embeddings table holds only requests made outside any conversation. What is deleted is overwritten
+        (``secure_delete``). From then on, the conversation is never cached again in this process (``_FORGOTTEN``),
+        unless the forgetting fails.
+        """
+        try:
+            with _MARKS_LOCK:
+                # Marked under the puts' lock: a put that took it first is deleted below, one that takes it after is
+                # refused.
+                _FORGOTTEN.add(conversation_id)
+                return self._forget_entries(conversation_id)
+        except BaseException:
+            _FORGOTTEN.discard(conversation_id)
+            raise
+
+    def _forget_entries(self, conversation_id: str) -> int:
+        if not Path(self._db_path).exists():
+            return 0
+        if _safe_connect is None:
+            raise RuntimeError("the semantic cache's storage layer is not available, so it cannot be asked to forget")
+        conn = _safe_connect(self._db_path, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA secure_delete = ON")
+            columns = _columns(conn, "cache_entries")
+            where = "conversation_id = ?"
+            if "source_conversation_id" in columns:
+                where += " OR source_conversation_id = ?"
+            asked = (conversation_id,) * where.count("?")
+            gone = conn.execute(f"DELETE FROM cache_entries WHERE {where}", asked).rowcount
+            if "source_conversation_id" in columns:
+                gone += conn.execute(
+                    "DELETE FROM cache_entries WHERE conversation_id = '' AND source_conversation_id = ?",
+                    (_ORIGIN_UNKNOWN,)).rowcount
+            else:
+                # A file its schema step could not give the column: every entry it holds with no conversation is of
+                # an origin not known.
+                gone += conn.execute("DELETE FROM cache_entries WHERE conversation_id = ''").rowcount
+            conn.commit()
+            return gone
+        finally:
+            conn.close()
 
     def invalidate(self, conversation_id: str | None = None) -> int:
         """Evict cache entries.
@@ -1757,3 +1840,13 @@ class SemanticCache:
 # =============================================================================
 
 semantic_cache = SemanticCache()
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Forget what the semantic cache holds of a deleted conversation; how many entries."""
+    return semantic_cache.forget_conversation(conversation_id)
+
+
+def unforget_conversation(conversation_id: str) -> None:
+    """Cache the conversation again: its deletion was refused, and it stays."""
+    _FORGOTTEN.discard(conversation_id)

@@ -343,6 +343,10 @@ def _record(row: Iterable) -> PendingWrite:
     return PendingWrite(**values)
 
 
+class ConversationForgotten(ValueError):
+    """A proposal refused: its conversation was deleted in this process."""
+
+
 class PendingWriteStore:
     """The review queue: proposals waiting for the user, in one SQLite file encrypted like the other stores.
 
@@ -373,6 +377,8 @@ class PendingWriteStore:
     def _connect(self):
         conn = get_encrypted_connection(self.db_path, check_same_thread=False, timeout=5.0)
         try:
+            # What any write frees is overwritten, never left in the file's free pages.
+            conn.execute("PRAGMA secure_delete = ON")
             yield conn
             conn.commit()
         except Exception:
@@ -405,6 +411,9 @@ class PendingWriteStore:
         digest = _digest(store, action, arguments)
         conversation = conversation_id or ""
         with self._lock, self._connect() as conn:
+            # Refused under the lock the forgetting holds: a proposal already on its way when the deletion came too.
+            if conversation_id and str(conversation_id) in _FORGOTTEN:
+                raise ConversationForgotten(f"conversation {conversation_id} was deleted; nothing is proposed for it")
             known = self._select(
                 conn, "user_id = ? AND digest = ? AND (status = 'pending' OR (status = 'declined' "
                 "AND conversation_id = ? AND conversation_id != '')) "
@@ -446,6 +455,22 @@ class PendingWriteStore:
         """Delete every proposal of a user, whatever its decision (the per-user wipe); how many."""
         with self._lock, self._connect() as conn:
             return conn.execute("DELETE FROM pending_writes WHERE user_id = ?", (self._uid(user_id),)).rowcount
+
+    def forget_conversation(self, conversation_id: str) -> int:
+        """Delete every proposal made in a deleted conversation, whatever its decision; how many. What is deleted is
+        overwritten (every connection, ``secure_delete``); a failure raises. From the start, nothing new is proposed
+        for the conversation in this process (``_FORGOTTEN``), unless the forgetting fails."""
+        try:
+            with self._lock:
+                # Marked under the proposals' lock: a proposal that took it first is deleted below, one that takes it
+                # after is refused.
+                _FORGOTTEN.add(str(conversation_id))
+                with self._connect() as conn:
+                    return conn.execute(
+                        "DELETE FROM pending_writes WHERE conversation_id = ?", (str(conversation_id),)).rowcount
+        except BaseException:
+            _FORGOTTEN.discard(str(conversation_id))
+            raise
 
     def claim(self, pid: str, *, user_id: str | None = None) -> PendingWrite | None:
         """Mark a pending proposal accepted, once; the proposal, or None when it was not pending."""
@@ -502,6 +527,9 @@ class PendingWriteStore:
 
 
 _QUEUE: PendingWriteStore | None = None
+# The conversations this process forgot: anything new about one is refused, so a write in flight lands nowhere, until
+# a refused deletion hands it back (``unforget_conversation``).
+_FORGOTTEN: set[str] = set()
 _QUEUE_LOCK = threading.Lock()
 
 
@@ -512,6 +540,30 @@ def get_pending_store() -> PendingWriteStore:
         if _QUEUE is None:
             _QUEUE = PendingWriteStore()
         return _QUEUE
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Forget what the process's review queue holds of a deleted conversation; how many proposals.
+
+    A queue this process never opened, whose file is not in the data directory, holds nothing, and is not created;
+    nothing is proposed for the conversation in this process from then on all the same.
+    """
+    # Marked before the queue is looked for: a proposal that opens the queue meanwhile is refused, or deleted below.
+    _FORGOTTEN.add(str(conversation_id))
+    with _QUEUE_LOCK:
+        queue = _QUEUE
+    if queue is None and not _default_db_path().exists():
+        return 0
+    try:
+        return get_pending_store().forget_conversation(conversation_id)
+    except BaseException:
+        _FORGOTTEN.discard(str(conversation_id))
+        raise
+
+
+def unforget_conversation(conversation_id: str) -> None:
+    """Take proposals for the conversation again: its deletion was refused, and it stays."""
+    _FORGOTTEN.discard(str(conversation_id))
 
 
 def set_pending_store(store: Any) -> None:
@@ -846,6 +898,8 @@ class WriteGate:
                 record, new = queue.propose(store, action, arguments, self._provenance(key, typed, untyped),
                                             conversation_id=self.conversation_id, run_id=self.run_id,
                                             user_id=self.user_id)
+            except ConversationForgotten:
+                return "Not proposed: this conversation was deleted; nothing was saved."
             except Exception as exc:
                 logger.warning("pending write not recorded: %s", exc)
                 return "Not saved: the review queue is unavailable, so nothing was written or proposed."

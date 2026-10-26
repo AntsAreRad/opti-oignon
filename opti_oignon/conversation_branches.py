@@ -454,6 +454,28 @@ BRANCHES_AVAILABLE = True
 # ConversationBranchManager
 # ---------------------------------------------------------------------------
 
+# The conversations this process forgot: anything new about one is refused, so a write in flight lands nowhere, until
+# a refused deletion hands it back (``unforget_conversation``).
+_FORGOTTEN: set[str] = set()
+
+
+def _empty_log(conn: sqlite3.Connection, conversation_id: str) -> None:
+    """Empty the write-ahead log after a forgetting: while another connection keeps the log, its older frames still
+    hold the deleted turns. Never waits: a read in progress keeps the log, said, until the next forgetting or the last
+    connection's close removes it."""
+    try:
+        conn.execute("PRAGMA busy_timeout = 0")
+        busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+    except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+        logger.warning("the branches of conversation %s forgotten; the write-ahead log could not be emptied (%s: %s)",
+                       conversation_id, type(exc).__name__, exc)
+        return
+    if busy:
+        logger.warning("the branches of conversation %s forgotten; a read in progress keeps the write-ahead log, whose "
+                       "older frames hold them until the next forgetting or the last connection closes",
+                       conversation_id)
+
+
 class ConversationBranchManager:
     """
     Manages conversation branches with SQLite storage.
@@ -507,6 +529,8 @@ class ConversationBranchManager:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        # What any write frees is overwritten, never left in the file's free pages.
+        conn.execute("PRAGMA secure_delete = ON")
         return conn
 
     def _init_db(self) -> None:
@@ -701,6 +725,10 @@ class ConversationBranchManager:
         meta_json = json.dumps(metadata or {})
 
         with self._lock:
+            # Refused under the lock the forgetting holds: a fork already on its way when the deletion came too.
+            if conversation_id in _FORGOTTEN:
+                logger.warning("no branch of conversation %s: it was deleted", conversation_id)
+                return None
             conn = self._get_connection()
             try:
                 conn.execute(
@@ -971,6 +999,10 @@ class ConversationBranchManager:
         meta_json = json.dumps(metadata or {})
 
         with self._lock:
+            # Refused under the lock the forgetting holds: a turn already on its way when the deletion came too.
+            if conversation_id in _FORGOTTEN:
+                logger.warning("no message added to a branch of conversation %s: it was deleted", conversation_id)
+                return None
             conn = self._get_connection()
             try:
                 # Verify branch exists
@@ -1637,6 +1669,44 @@ class ConversationBranchManager:
             finally:
                 conn.close()
 
+    def forget_conversation(self, conversation_id: str) -> int:
+        """Forget every branch of a deleted conversation and every turn of them; the rows deleted.
+
+        Unlike ``delete_all_branches``, a failure raises: a deletion that asks must never take a store it could not
+        open for one with nothing to forget. What is deleted is overwritten (every connection, ``secure_delete``);
+        from the start, nothing new about the conversation is taken in this process (``_FORGOTTEN``), unless the
+        forgetting fails.
+        """
+        try:
+            return self._forget_rows(conversation_id)
+        except BaseException:
+            _FORGOTTEN.discard(conversation_id)
+            raise
+
+    def _forget_rows(self, conversation_id: str) -> int:
+        with self._lock:
+            # Marked under the writes' lock: a write that took it first is deleted below, one that takes it after is
+            # refused.
+            _FORGOTTEN.add(conversation_id)
+            conn = self._get_connection()
+            try:
+                gone = conn.execute(
+                    "DELETE FROM branch_messages WHERE conversation_id = ? "
+                    "OR branch_id IN (SELECT branch_id FROM branches WHERE conversation_id = ?)",
+                    (conversation_id, conversation_id),
+                ).rowcount
+                gone += conn.execute(
+                    "DELETE FROM branches WHERE conversation_id = ?", (conversation_id,)
+                ).rowcount
+                conn.commit()
+                _empty_log(conn, conversation_id)
+                return gone
+            except BaseException:
+                conn.rollback()
+                raise
+            finally:
+                conn.close()
+
     def get_config(self) -> dict[str, Any]:
         """Return the current configuration."""
         return dict(self._config)
@@ -1652,3 +1722,18 @@ except Exception as _init_err:
     logger.error("Failed to initialize ConversationBranchManager: %s", _init_err)
     branch_manager = None
     BRANCHES_AVAILABLE = False
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Forget what the branch store holds of a deleted conversation; the rows deleted.
+
+    A store that did not start (``branch_manager`` None) cannot be looked into, and raises.
+    """
+    if branch_manager is None:
+        raise RuntimeError("the branch store did not start, so it cannot be asked to forget")
+    return branch_manager.forget_conversation(conversation_id)
+
+
+def unforget_conversation(conversation_id: str) -> None:
+    """Take the conversation's branches again: its deletion was refused, and it stays."""
+    _FORGOTTEN.discard(conversation_id)

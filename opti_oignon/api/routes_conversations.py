@@ -7,6 +7,7 @@ en delegant au ConversationManager existant.
 """
 
 import logging
+import sys
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
@@ -66,6 +67,19 @@ def _cancel_refinement(conv_id: str) -> None:
     refiner = _refinement()
     if refiner is not None:
         refiner.cancel(conv_id)
+
+
+def _stop_live_turns(conv_id: str) -> None:
+    """Stop the conversation's live replies, if the chat routes are loaded: a turn that went on would write what its
+    deletion forgets. Never raises."""
+    chat = sys.modules.get("opti_oignon.api.routes_chat")
+    turns = getattr(chat, "live_chat_turns", None) if chat is not None else None
+    if turns is None:
+        return
+    try:
+        turns.stop(conv_id)
+    except Exception:  # noqa: BLE001 - a deletion never fails for it
+        logger.debug("the live turns of %s were not stopped", conv_id, exc_info=True)
 
 
 def _conv_to_summary(conv) -> dict:
@@ -186,12 +200,15 @@ def get_conversation(conv_id: str) -> dict:
 
 @router.delete("/{conv_id}", status_code=204)
 def delete_conversation(conv_id: str) -> Response:
-    """Delete a conversation and all its messages, and what the onion drew from it.
+    """Delete a conversation and all its messages, and what every store drew from it.
 
-    A copy the onion cannot forget refuses the deletion: 409, with the reason,
-    and nothing is deleted.
+    Its live replies are stopped first, whatever the outcome. A copy of its
+    words that cannot be forgotten refuses the deletion: 409, with the
+    reason, and the conversation is kept.
     """
     _check_available()
+    # Its live replies stop first: a turn that went on would write what the deletion forgets.
+    _stop_live_turns(conv_id)
 
     try:
         deleted = conversation_manager.delete_conversation(conv_id)
@@ -204,7 +221,7 @@ def delete_conversation(conv_id: str) -> Response:
         reason = getattr(exc, "reason", "unknown")
         raise HTTPException(
             status_code=409,
-            detail=f"the onion's copy of this conversation could not be forgotten ({reason}); nothing was deleted",
+            detail=f"a copy of this conversation could not be forgotten ({reason}); the conversation was not deleted",
         ) from exc
     # A refinement of its title writes nothing now.
     _cancel_refinement(conv_id)

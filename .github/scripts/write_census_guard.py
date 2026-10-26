@@ -479,8 +479,9 @@ STORES = {
     "branches": _store(
         "opti_oignon/conversation_branches.py", classes=("ConversationBranchManager",),
         writes=("fork", "add_branch_message", "update_branch", "merge_messages", "delete_branch",
-                "delete_all_branches"),
-        quiet=("delete_branch", "delete_all_branches"), place="db_path",
+                "delete_all_branches", "forget_conversation"),
+        functions=("forget_conversation",),
+        quiet=("delete_branch", "delete_all_branches", "forget_conversation"), place="db_path",
         aside={"withdraw_source": _WITHDRAWAL},
         reason="the conversation's branches, read back as the history of the branch the user is on",
     ),
@@ -502,6 +503,7 @@ STORES = {
             "update_config": "the cache's own settings; no content",
             "invalidate": _PURGE, "expire_stale": _PURGE, "remove_embedding": _PURGE,
             "remove_embeddings_for_model": _PURGE, "clear": _PURGE, "cleanup_orphans": _PURGE,
+            "forget_conversation": _PURGE,
         },
         reason="answers replayed for a similar request under the same context",
     ),
@@ -520,8 +522,9 @@ STORES = {
     "projects": _store(
         "opti_oignon/projects.py", classes=("ProjectStore",), instances=("project_store",),
         writes=("create_project", "update_project", "delete_project", "add_file", "remove_file", "add_output",
-                "remove_output", "link_conversation", "unlink_conversation"),
-        quiet=("delete_project", "remove_file", "remove_output", "unlink_conversation"),
+                "remove_output", "link_conversation", "unlink_conversation", "forget_conversation"),
+        functions=("forget_conversation",),
+        quiet=("delete_project", "remove_file", "remove_output", "unlink_conversation", "forget_conversation"),
         reason="projects: their system instructions and files, read into the turns of a linked conversation",
     ),
     "project_index": _store(
@@ -648,6 +651,10 @@ EXEMPT = {
         "gesture", "the user adopts a fact of memory, its text named by its digest, on the command line"),
     ("opti_oignon/conversation.py", "conversation"): ("script", "the module's self-test, run only as a program"),
     ("opti_oignon/conversation_wipe.py", "conversation"): ("quiet", "the wipe deletes conversations"),
+    ("opti_oignon/conversation.py", "branches"): (
+        "quiet", "a deletion forgets the branches of the conversation it deletes"),
+    ("opti_oignon/conversation.py", "projects"): (
+        "quiet", "a deletion unlinks the conversation it deletes from every project"),
     ("opti_oignon/executor.py", "conversation"): (
         "transcript", "the turn's messages, their model and task type, and the summary of the conversation's own "
                       "older messages, read back in their place"),

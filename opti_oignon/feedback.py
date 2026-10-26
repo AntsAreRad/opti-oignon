@@ -15,6 +15,7 @@ import io
 import json
 import logging
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -166,6 +167,30 @@ class FeedbackStats:
 # FEEDBACK STORE
 # =============================================================================
 
+# The conversations this process forgot: anything new about one is refused, so a write in flight lands nowhere, until
+# a refused deletion hands it back (``unforget_conversation``).
+_FORGOTTEN: set[str] = set()
+# Held while a mark is checked and the feedback written, and while a forgetting marks and deletes.
+_MARKS_LOCK = threading.Lock()
+
+
+def _empty_log(conn: sqlite3.Connection, conversation_id: str) -> None:
+    """Empty the write-ahead log after a forgetting: while another connection keeps the log, its older frames still
+    hold the deleted feedback. Never waits: a read in progress keeps the log, said, until the next forgetting or
+    the last connection's close removes it."""
+    try:
+        conn.execute("PRAGMA busy_timeout = 0")
+        busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+    except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+        logger.warning("the feedback of conversation %s forgotten; the write-ahead log could not be emptied (%s: %s)",
+                       conversation_id, type(exc).__name__, exc)
+        return
+    if busy:
+        logger.warning("the feedback of conversation %s forgotten; a read in progress keeps the write-ahead log, whose "
+                       "older frames hold them until the next forgetting or the last connection closes",
+                       conversation_id)
+
+
 class FeedbackStore:
     """SQLite-backed feedback storage with CRUD and aggregation.
 
@@ -228,6 +253,8 @@ class FeedbackStore:
         conn = _safe_connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        # What any write frees is overwritten, never left in the file's free pages.
+        conn.execute("PRAGMA secure_delete = ON")
         if not self._schema_ready:
             self._schema_ready = True
             self._init_db()
@@ -301,32 +328,37 @@ class FeedbackStore:
         if len(entry.feedback_text) > self.max_text_length:
             entry.feedback_text = entry.feedback_text[:self.max_text_length]
 
-        conn = self._get_conn()
-        try:
-            conn.execute(
-                """
-                INSERT OR REPLACE INTO feedback
-                (feedback_id, conversation_id, message_id, rating_type,
-                 rating_value, feedback_text, model_used, pipeline_used,
-                 task_type, timestamp)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    entry.feedback_id,
-                    entry.conversation_id,
-                    entry.message_id,
-                    entry.rating_type,
-                    entry.rating_value,
-                    entry.feedback_text,
-                    entry.model_used,
-                    entry.pipeline_used,
-                    entry.task_type,
-                    entry.timestamp,
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+        with _MARKS_LOCK:
+            # Refused at the write, under the lock the forgetting holds: feedback already on its way when the
+            # deletion came is refused too.
+            if entry.conversation_id and entry.conversation_id in _FORGOTTEN:
+                raise ValueError("this conversation was deleted; feedback about it is not kept")
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """
+                    INSERT OR REPLACE INTO feedback
+                    (feedback_id, conversation_id, message_id, rating_type,
+                     rating_value, feedback_text, model_used, pipeline_used,
+                     task_type, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        entry.feedback_id,
+                        entry.conversation_id,
+                        entry.message_id,
+                        entry.rating_type,
+                        entry.rating_value,
+                        entry.feedback_text,
+                        entry.model_used,
+                        entry.pipeline_used,
+                        entry.task_type,
+                        entry.timestamp,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
 
         logger.debug("Feedback added: %s (model=%s, pipeline=%s)",
                       entry.feedback_id, entry.model_used, entry.pipeline_used)
@@ -350,6 +382,33 @@ class FeedbackStore:
             if row:
                 return FeedbackEntry(**dict(row))
             return None
+        finally:
+            conn.close()
+
+    def forget_conversation(self, conversation_id: str) -> int:
+        """Delete every feedback entry given in a deleted conversation; how many. What is deleted is overwritten
+        (every connection, ``secure_delete``); a store whose file is not there holds nothing, and is not created; a
+        failure raises. From the start, no new feedback about the conversation is taken in this process
+        (``_FORGOTTEN``), unless the forgetting fails."""
+        try:
+            with _MARKS_LOCK:
+                # Marked under the writes' lock: feedback that took it first is deleted below, feedback that takes it
+                # after is refused.
+                _FORGOTTEN.add(conversation_id)
+                return self._forget_rows(conversation_id)
+        except BaseException:
+            _FORGOTTEN.discard(conversation_id)
+            raise
+
+    def _forget_rows(self, conversation_id: str) -> int:
+        if not Path(self._db_path).exists():
+            return 0
+        conn = self._get_conn()
+        try:
+            gone = conn.execute("DELETE FROM feedback WHERE conversation_id = ?", (conversation_id,)).rowcount
+            conn.commit()
+            _empty_log(conn, conversation_id)
+            return gone
         finally:
             conn.close()
 
@@ -721,3 +780,18 @@ try:
 except Exception as e:  # pragma: no cover
     logger.warning("FeedbackStore init failed: %s", e)
     feedback_store = None  # type: ignore[assignment]
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Forget what the feedback store holds of a deleted conversation; how many entries.
+
+    A store that did not start (``feedback_store`` None) cannot be looked into, and raises.
+    """
+    if feedback_store is None:
+        raise RuntimeError("the feedback store did not start, so it cannot be asked to forget")
+    return feedback_store.forget_conversation(conversation_id)
+
+
+def unforget_conversation(conversation_id: str) -> None:
+    """Take feedback about the conversation again: its deletion was refused, and it stays."""
+    _FORGOTTEN.discard(conversation_id)

@@ -141,6 +141,35 @@ when available). You can export and import conversations via the
 backup system (Workshop > Backup > Backup & restore, or the `oo backup`
 CLI).
 
+Deleting a conversation from the app stops its live replies -- even when
+the deletion is then refused --, removes its messages and forgets what
+the platform drew from it: the onion memory's copy, its branches and
+their turns, the facts proposed in it, the feedback given in it, what
+the semantic cache kept of it, under the global scope too, its links to
+projects -- the outputs it gave stay with the project --, the artifacts,
+tool calls and coding session the process held of it, and the agent runs
+it started. While another process writes to the conversation store, the
+deletion fails before anything is forgotten. What the databases delete
+is overwritten, whichever write freed it, and the write-ahead logs that
+held its words are emptied (a read in progress keeps one until the next
+deletion); the run journal writes its days again without the
+conversation's runs. Within the process, the stores then refuse anything
+new about the conversation, a write already on its way included, and its
+tool calls are no longer recorded; a coding session a reply that
+outlived the deletion opens again expires with its sandbox; another
+process sharing the stores is not held back. A store that keeps the
+conversation's words and cannot forget -- locked by another process, or
+not opened -- refuses the deletion and names itself; the conversation
+stays, every store takes its writes again, and a deletion asked again
+finishes the work. A conversation that comes back under its id, a peer's
+later edit winning over its deletion, is taken again by every store. A
+deletion does not yet forget the facts drawn from the conversation, the
+response cache (which serves an answer for an hour and keeps it until a
+later lookup cleans it up), or, with the sync package, the change feed's
+copies; and a conversation an older version deleted keeps what these
+stores drew from it, its words perhaps still in their free pages:
+nothing sweeps them yet.
+
 
 ## Conversation branches
 

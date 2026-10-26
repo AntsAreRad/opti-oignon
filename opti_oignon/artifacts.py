@@ -407,6 +407,11 @@ class ArtifactManager:
     def detector(self) -> ArtifactDetector:
         return self._detector
 
+    def forget_conversation(self, conversation_id: str) -> int:
+        """Let go of what this process holds of a deleted conversation's artifacts; how many. The artifacts
+        themselves live in the conversation's metadata, deleted with it."""
+        return len(self._cache.pop(conversation_id, None) or [])
+
     # -- Versioning helpers (Session 15 -- A2) --
 
     @staticmethod
@@ -735,3 +740,8 @@ class ArtifactManager:
 
 # Module-level singleton
 artifact_manager = ArtifactManager()
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Let go of what this process holds of a deleted conversation's artifacts; how many."""
+    return artifact_manager.forget_conversation(conversation_id)

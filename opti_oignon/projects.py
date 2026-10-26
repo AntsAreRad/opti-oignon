@@ -370,6 +370,8 @@ class ProjectStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        # What any write frees is overwritten, never left in the file's free pages.
+        conn.execute("PRAGMA secure_delete = ON")
         if not self._schema_ready:
             self._schema_ready = True
             self._init_db()
@@ -1045,6 +1047,23 @@ class ProjectStore:
             logger.info("Linked conversation %s to project %s", conversation_id, project_id)
         return True
 
+    def forget_conversation(self, conversation_id: str) -> int:
+        """Unlink a deleted conversation from every project, and clear it as the source of the outputs it gave; the
+        links removed. The outputs stay: they are the project's. A store whose file is not there holds nothing, and
+        is not created; a failure raises."""
+        if not Path(self._db_path).exists():
+            return 0
+        conn = self._get_conn()
+        try:
+            gone = conn.execute(
+                "DELETE FROM project_conversations WHERE conversation_id = ?", (conversation_id,)).rowcount
+            conn.execute("UPDATE project_outputs SET source_conversation_id = '' WHERE source_conversation_id = ?",
+                         (conversation_id,))
+            conn.commit()
+            return gone
+        finally:
+            conn.close()
+
     def unlink_conversation(self, project_id: str, conversation_id: str) -> bool:
         """Unlink a conversation from a project.
 
@@ -1174,3 +1193,8 @@ class ProjectStore:
 # =============================================================================
 
 project_store = ProjectStore()
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Forget what the project store holds of a deleted conversation: its links; how many."""
+    return project_store.forget_conversation(conversation_id)

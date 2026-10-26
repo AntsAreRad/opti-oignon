@@ -394,6 +394,15 @@ fail_under = 0
 # reaching the librarian inside a function, as the routes and the session
 # do.
 #
+# test_conversation_apply_does_not_republish of
+# tests/test_syn01_receive_contracts.py applies a peer's conversation and
+# its deletion and pins that neither publishes again. A deletion now asks
+# every store keyed by the conversation (block 186); that suite's window,
+# a stand-in package with no path, reaches the store modules only when an
+# earlier test cached them, and refuses the deletion otherwise. fe15 of
+# tests/test_conversation_forgets_everything_contracts.py keeps its
+# assertions word for word in a window holding the stores.
+#
 # cq10 pinned, among its assertions, that the health monitor discovers an
 # empty model list when no backend is registered. Under the listing
 # doctrine no backend is nobody looking, so discovery answers unknown;
@@ -1633,4 +1642,5 @@ addopts = """
     --deselect=tests/test_fortress_readiness_contracts.py::test_f18_a_gated_backend_with_no_manifest_blocks_escalation
     --deselect=tests/test_fortress_readiness_contracts.py::test_f19_a_gated_backend_with_a_manifest_is_not_falsely_bricked
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp7_the_executor_the_memory_routes_and_the_chat_session_import_the_librarian_and_nothing_else
+    --deselect=tests/test_syn01_receive_contracts.py::test_conversation_apply_does_not_republish
 """

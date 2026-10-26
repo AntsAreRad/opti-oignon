@@ -2048,3 +2048,13 @@ class ChatCodingManager:
 # ---------------------------------------------------------------------------
 
 chat_coding_manager = ChatCodingManager()
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Destroy the coding session of a deleted conversation, its sandbox with it; 1 when one was destroyed. A sandbox
+    that could not be destroyed raises, to be said."""
+    if chat_coding_manager.get_session(conversation_id) is None:
+        return 0
+    if not chat_coding_manager.destroy_session(conversation_id):
+        raise RuntimeError("the coding session's sandbox could not be destroyed")
+    return 1

@@ -502,7 +502,7 @@ def _stop_conversation_turns(conversation_id: str) -> int:
 
 
 class LiveChatTurns:
-    """Every live chat turn, for the emergency stop alone."""
+    """Every live chat turn, for the emergency stop and a conversation's deletion."""
 
     def cancel(self) -> int:
         """Set the stop of every live chat turn, anonymous ones included."""
@@ -512,6 +512,10 @@ class LiveChatTurns:
         for turn in turns:
             turn.stop.set()
         return len(turns)
+
+    def stop(self, conversation_id: str) -> int:
+        """Set the stop of every live turn of one conversation; how many there were."""
+        return _stop_conversation_turns(conversation_id)
 
 
 live_chat_turns = LiveChatTurns()

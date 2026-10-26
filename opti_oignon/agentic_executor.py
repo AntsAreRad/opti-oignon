@@ -1220,6 +1220,9 @@ class AgenticExecutor:
         """
         if not conversation_id or not tool_calls:
             return
+        # A conversation this process forgot keeps no tool call: a turn that outlived its deletion records nothing.
+        if conversation_id in _FORGOTTEN:
+            return
 
         if conversation_id not in self._tool_call_history:
             self._tool_call_history[conversation_id] = []
@@ -2939,3 +2942,20 @@ class AgenticExecutor:
 agentic_executor = AgenticExecutor(
     fast_tool_model=os.getenv("OPTI_FAST_TOOL_MODEL") or None,
 )
+
+
+# The conversations this process forgot: no tool call of theirs is recorded again, until one comes back under its
+# id (``unforget_conversation``).
+_FORGOTTEN: set[str] = set()
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Let go of the tool calls this process remembers of a deleted conversation; how many. None is recorded for it
+    from then on."""
+    _FORGOTTEN.add(conversation_id)
+    return agentic_executor.clear_tool_history(conversation_id)
+
+
+def unforget_conversation(conversation_id: str) -> None:
+    """Record the conversation's tool calls again: it came back under its id."""
+    _FORGOTTEN.discard(conversation_id)

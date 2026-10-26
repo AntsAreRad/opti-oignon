@@ -25,6 +25,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import sys
 import threading
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -762,7 +763,8 @@ def _sync_publish_conversation(
 
 
 class ConversationNotForgotten(RuntimeError):
-    """A deletion refused, nothing deleted: the onion's copy of the conversation could not be forgotten.
+    """A deletion refused, the conversation kept: a copy of its words could not be forgotten, the onion's or another
+    store's (``_FORGETTERS``).
 
     ``reason`` is the name of what refused, never a path or a word of the conversation: what an answer to a client
     may carry; the message, for the log, says the rest.
@@ -809,6 +811,181 @@ def _forget_onion(conv_id: str) -> None:
         raise ConversationNotForgotten(
             f"the onion's copy of conversation {conv_id} could not be forgotten ({type(exc).__name__}: {exc}); "
             "nothing was deleted", type(exc).__name__) from exc
+
+
+def _empty_log(conn: sqlite3.Connection, conversation_id: str) -> None:
+    """Empty the write-ahead log after a deletion: while another connection keeps the log, its older frames still
+    hold the deleted messages' words. Never waits: a read in progress keeps the log, said, until the next deletion
+    or the last connection's close removes it."""
+    try:
+        conn.execute("PRAGMA busy_timeout = 0")
+        busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+    except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+        logger.warning("conversation %s deleted; the write-ahead log could not be emptied (%s: %s)", conversation_id,
+                       type(exc).__name__, exc)
+        return
+    if busy:
+        logger.warning("conversation %s deleted; a read in progress keeps the write-ahead log, whose older frames hold "
+                       "its words until the next deletion or the last connection closes", conversation_id)
+
+
+def _holds(conn: sqlite3.Connection, conv_id: str) -> bool:
+    """Whether the store holds the conversation now."""
+    return conn.execute("SELECT 1 FROM conversations WHERE id = ?", (conv_id,)).fetchone() is not None
+
+
+def _forget_branches(conv_id: str) -> int:
+    from opti_oignon.conversation_branches import forget_conversation
+
+    return forget_conversation(conv_id)
+
+
+def _forget_proposals(conv_id: str) -> int:
+    from opti_oignon.pending_writes import forget_conversation
+
+    return forget_conversation(conv_id)
+
+
+def _forget_feedback(conv_id: str) -> int:
+    from opti_oignon.feedback import forget_conversation
+
+    return forget_conversation(conv_id)
+
+
+def _forget_semantic_cache(conv_id: str) -> int:
+    from opti_oignon.semantic_cache import forget_conversation
+
+    return forget_conversation(conv_id)
+
+
+def _forget_project_links(conv_id: str) -> int:
+    from opti_oignon.projects import forget_conversation
+
+    return forget_conversation(conv_id)
+
+
+def _in_memory(module: str) -> Any:
+    """``module`` if this process loaded it: one it never loaded holds nothing in its memory, and is never loaded
+    only to be asked."""
+    return sys.modules.get(module)
+
+
+def _forget_artifacts(conv_id: str) -> int:
+    held = _in_memory("opti_oignon.artifacts")
+    return held.forget_conversation(conv_id) if held is not None else 0
+
+
+def _forget_tool_history(conv_id: str) -> int:
+    held = _in_memory("opti_oignon.agentic_executor")
+    return held.forget_conversation(conv_id) if held is not None else 0
+
+
+def _forget_coding_session(conv_id: str) -> int:
+    held = _in_memory("opti_oignon.chat_coding_agent")
+    return held.forget_conversation(conv_id) if held is not None else 0
+
+
+# What else keeps something drawn from a conversation, forgotten when it is deleted, in this order: the store's name,
+# its module, the function that asks it (the module imported at the deletion, never with this one; a store of this
+# process's memory asked only if the process loaded it), and whether it keeps the conversation's words beyond this
+# process. The stores of words are asked before the commit, and one that cannot forget refuses the deletion; the
+# stores of ids, or of this process's memory and scratch space, are asked once it is committed, and one that cannot
+# forget is said.
+_FORGETTERS = (
+    ("branches", "opti_oignon.conversation_branches", _forget_branches, True),
+    ("proposed facts", "opti_oignon.pending_writes", _forget_proposals, True),
+    ("feedback", "opti_oignon.feedback", _forget_feedback, True),
+    ("semantic cache", "opti_oignon.semantic_cache", _forget_semantic_cache, True),
+    ("project links", "opti_oignon.projects", _forget_project_links, False),
+    ("artifact cache", "opti_oignon.artifacts", _forget_artifacts, False),
+    ("tool history", "opti_oignon.agentic_executor", _forget_tool_history, False),
+    ("coding session", "opti_oignon.chat_coding_agent", _forget_coding_session, False),
+)
+# A store whose module this tree does not have: it holds nothing of the conversation.
+_ABSENT = "absent"
+
+
+def _ask(conv_id: str, store: str, module: str, forget: Callable[[str], int]) -> Any:
+    """Ask one store to forget the conversation: None when it did, ``_ABSENT`` when this tree lacks its module (said),
+    else the failure."""
+    try:
+        forget(conv_id)
+    except ImportError as exc:
+        # Only a module that is not there is absence; one that is there and lacks its forgetting is broken.
+        if isinstance(exc, ModuleNotFoundError) and exc.name == module:
+            logger.warning("conversation %s: no %s in this tree, nothing of it there to forget", conv_id, store)
+            return _ABSENT
+        return exc
+    except Exception as exc:  # noqa: BLE001 - a store that cannot forget is named, never passed over in silence
+        return exc
+    return None
+
+
+def _forget_derived(conv_id: str) -> list[str]:
+    """Forget what every store keeping the conversation's words holds of it, after the onion and before the
+    conversation store's own write; the modules of the stores that forgot.
+
+    Each store forgets in its own transaction, in the order of ``_FORGETTERS``, and from then on refuses, in this
+    process, anything new about the conversation: a write already on its way is refused at the write, under the
+    store's own lock. One that cannot forget -- its module there and breaking, its store not opened, its forgetting
+    raising -- refuses the deletion by name (``ConversationNotForgotten``, the store in its reason): the stores before
+    it have forgotten already and take the conversation's writes again (``_remember_again``), and a deletion asked
+    again finds nothing left there. A store whose module this tree does not have holds nothing of it, and that is
+    said.
+    """
+    forgotten: list[str] = []
+    modules: list[str] = []
+    for store, module, forget, words in _FORGETTERS:
+        if not words:
+            continue
+        failure = _ask(conv_id, store, module, forget)
+        if failure is None:
+            forgotten.append(store)
+            modules.append(module)
+            continue
+        if failure is _ABSENT:
+            continue
+        _remember_again(conv_id, modules)
+        already = ", ".join(forgotten) if forgotten else "nothing else"
+        raise ConversationNotForgotten(
+            f"the {store} of conversation {conv_id} could not be forgotten ({type(failure).__name__}: "
+            f"{failure}); the conversation was not deleted; already forgotten: the onion, {already}",
+            f"{store}: {type(failure).__name__}") from failure
+    return modules
+
+
+def _let_go(conv_id: str) -> None:
+    """Once the deletion is committed: forget what keeps only ids, or this process's memory and scratch space, of the
+    conversation. One that cannot forget is said, and refuses nothing. Never raises."""
+    for store, module, forget, words in _FORGETTERS:
+        if words:
+            continue
+        failure = _ask(conv_id, store, module, forget)
+        if failure is None or failure is _ABSENT:
+            continue
+        logger.warning("conversation %s: its %s could not be forgotten (%s: %s); the deletion stands", conv_id,
+                       store, type(failure).__name__, failure)
+
+
+def _remember_again(conv_id: str, modules: list[str]) -> None:
+    """The stores of ``modules`` take the conversation's writes again: its deletion did not go through, and it
+    stays, or it came back under its id. Never raises."""
+    for module in modules:
+        held = sys.modules.get(module)
+        again = getattr(held, "unforget_conversation", None) if held is not None else None
+        if again is None:
+            continue
+        try:
+            again(conv_id)
+        except Exception as exc:  # noqa: BLE001 - a store that cannot be told keeps refusing, and that is said
+            logger.warning("conversation %s kept, but %s may refuse its writes until a restart (%s)", conv_id,
+                           module, type(exc).__name__)
+
+
+def _taken_back(conv_id: str) -> None:
+    """A conversation that came back under its id -- a peer's later record winning over its deletion: every store
+    takes its writes again."""
+    _remember_again(conv_id, [module for _store, module, _forget, _words in _FORGETTERS])
 
 
 def _forget_runs(conv_id: str) -> None:
@@ -897,6 +1074,8 @@ class ConversationManager:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        # A deleted message's words are overwritten, never left in the file's free pages.
+        conn.execute("PRAGMA secure_delete=ON")
         if not self._schema_ready:
             # Built on the connection just opened, without taking the lock:
             # a caller already holding it would otherwise deadlock here.
@@ -1406,35 +1585,55 @@ class ConversationManager:
                 conn.close()
 
     def delete_conversation(self, conv_id: str) -> bool:
-        """Delete a conversation and all its messages, and forget what the onion drew from it.
+        """Delete a conversation and all its messages, and forget what every store drew from it.
+
+        The store's write lock first; then the onion and every store of its
+        words (``_forget_derived``); then the row, the runs and the commit;
+        then the stores of ids and of this process's memory (``_let_go``).
 
         Args:
             conv_id: Conversation UUID
 
         Returns:
-            True if deletion succeeded
+            True if deletion succeeded; False when the store does not hold
+            it, or its own write fails -- before anything is forgotten when
+            another connection holds its lock.
 
         Raises:
-            ConversationNotForgotten: the onion's copy could not be forgotten;
-                the deletion is rolled back and nothing is deleted.
+            ConversationNotForgotten: a copy of its words could not be
+                forgotten, the onion's or another store's; the deletion is
+                rolled back, the conversation kept, and every store takes
+                its writes again.
         """
         with self._lock:
             conn = self._get_connection()
+            forgotten: list[str] = []
+            committed = False
             try:
+                # The store's write lock first: one another connection holds
+                # refuses the deletion before anything is forgotten. Then
+                # every copy of its words, the onion first -- one that cannot
+                # be forgotten refuses the deletion with the conversation
+                # untouched --, the row, the runs and the commit; then what
+                # keeps only ids, or this process's memory, of it.
+                conn.commit()
+                conn.execute("BEGIN IMMEDIATE")
+                if _holds(conn, conv_id):
+                    _forget_onion(conv_id)
+                    forgotten = _forget_derived(conv_id)
                 # ON DELETE CASCADE s'occupe des messages
                 cursor = conn.execute(
                     "DELETE FROM conversations WHERE id = ?", (conv_id,)
                 )
-                # The onion forgets first: a copy it cannot forget refuses the
-                # deletion before anything else of the conversation is let go.
-                if cursor.rowcount > 0:
-                    _forget_onion(conv_id)
                 # The journal forgets before the commit: a deletion cut short
                 # leaves the conversation, never its runs without it.
                 _forget_runs(conv_id)
                 conn.commit()
+                committed = True
                 deleted = cursor.rowcount > 0
                 if deleted:
+                    _let_go(conv_id)
+                    _empty_log(conn, conv_id)
                     logger.debug(f"Conversation supprimee: {conv_id}")
                     # A domain delete publishes a tombstone so the deletion
                     # converges on peers (its payload naming the conversation,
@@ -1445,11 +1644,14 @@ class ConversationManager:
                         updated_at=datetime.now().isoformat(),
                     )
                 return deleted
-            except ConversationNotForgotten:
+            except ConversationNotForgotten as exc:
                 conn.rollback()
-                logger.error("conversation %s not deleted: the onion's copy could not be forgotten", conv_id)
+                logger.error("conversation %s not deleted: a copy of it could not be forgotten (%s)", conv_id,
+                             exc.reason)
                 raise
             except Exception as e:
+                if not committed:
+                    _remember_again(conv_id, forgotten)
                 logger.error(f"Error deleting conversation {conv_id}: {e}")
                 return False
             finally:
@@ -1816,25 +2018,40 @@ class ConversationManager:
                 conn = self._get_connection()
                 try:
                     if deleted:
-                        conn.execute(
-                            "DELETE FROM messages WHERE conversation_id = ?",
-                            (conv_id,),
-                        )
-                        gone = conn.execute(
-                            "DELETE FROM conversations WHERE id = ?", (conv_id,)
-                        ).rowcount
-                        if gone:
+                        # As a user's deletion: the store's write lock, every
+                        # copy of its words, the onion first, the row, the
+                        # runs and the commit, then what keeps only ids or
+                        # this process's memory of it.
+                        conn.commit()
+                        conn.execute("BEGIN IMMEDIATE")
+                        forgotten: list[str] = []
+                        if _holds(conn, conv_id):
                             try:
                                 _forget_onion(conv_id)
-                            except ConversationNotForgotten:
-                                # Not applied, nothing deleted: the round drops
-                                # a record this returns False for, unjournalled.
+                                forgotten = _forget_derived(conv_id)
+                            except ConversationNotForgotten as exc:
+                                # Not applied, the conversation kept: the round
+                                # drops a record this returns False for,
+                                # unjournalled.
                                 conn.rollback()
-                                logger.error("a peer's deletion of %s not applied: the onion's copy could not be "
-                                             "forgotten", conv_id)
+                                logger.error("a peer's deletion of %s not applied: %s", conv_id, exc.reason)
                                 return False
-                        _forget_runs(conv_id)
-                        conn.commit()
+                        try:
+                            conn.execute(
+                                "DELETE FROM messages WHERE conversation_id = ?",
+                                (conv_id,),
+                            )
+                            gone = conn.execute(
+                                "DELETE FROM conversations WHERE id = ?", (conv_id,)
+                            ).rowcount
+                            _forget_runs(conv_id)
+                            conn.commit()
+                        except BaseException:
+                            _remember_again(conv_id, forgotten)
+                            raise
+                        if gone:
+                            _let_go(conv_id)
+                            _empty_log(conn, conv_id)
                         return True
 
                     meta_json = json.dumps(conv.get("metadata") or {})
@@ -1938,6 +2155,9 @@ class ConversationManager:
                                 "assistant refused", refused,
                             )
                     conn.commit()
+                    # A conversation deleted here and back under its id (a
+                    # peer's later record won): every store takes it again.
+                    _taken_back(conv_id)
                     return True
                 finally:
                     conn.close()
