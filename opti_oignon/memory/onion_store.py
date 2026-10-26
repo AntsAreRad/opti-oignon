@@ -52,6 +52,14 @@ only over that one: when another writer saved the conversation since, it is
 refused by name (``OnionStateStale``) and writes nothing. A load reads the
 rows and their generation inside one read transaction, so a save another
 process commits meanwhile is read whole or not at all.
+
+A deleted conversation is forgotten (``forget``): its rows leave every
+table, overwritten as they go -- every connection overwrites what it
+deletes, a save's replaced rows too, and a file written before that is
+rewritten once (``_scrub_if_pending``) --, and a tombstone keeps its id and
+the time, never a word. A save of a forgotten conversation is refused by name
+(``OnionStateForgotten``) whatever generation it names: a writer that read
+it before the deletion, or never saved it, writes nothing back.
 """
 
 import hashlib
@@ -176,6 +184,13 @@ CREATE TABLE IF NOT EXISTS onion_statements (
     statements TEXT NOT NULL,
     PRIMARY KEY (conversation, seq)
 );
+CREATE TABLE IF NOT EXISTS onion_forgotten (
+    conversation TEXT PRIMARY KEY,
+    forgotten_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS onion_scrub (
+    pending INTEGER PRIMARY KEY CHECK (pending = 1)
+);
 """
 
 
@@ -194,6 +209,11 @@ class OnionIntegrityError(OnionStoreError):
 class OnionStateStale(OnionStoreError):
     """A save refused, nothing written: the file holds a later generation of the conversation than the one the
     state was read or written at -- another writer sharing the file saved it since."""
+
+
+class OnionStateForgotten(OnionStoreError):
+    """A save refused, nothing written: the conversation was deleted and the file forgot it (``forget``); no writer,
+    of any generation, in this process or another, writes it back."""
 
 
 def _canonical(value):
@@ -373,6 +393,9 @@ class OnionStore:
                 f"the onion store at {self._path} would be written in plaintext; refused "
                 f"(set persistence.require_encryption to false in onion.yaml to allow it)"
             )
+        # The table holds conversation text: what a save replaces and what a forgetting deletes is overwritten, never
+        # left in the file's free pages, whatever the engine was built to do by default.
+        conn.execute("PRAGMA secure_delete = ON")
         return closing(conn)
 
     def _init_db(self):
@@ -413,6 +436,7 @@ class OnionStore:
                 except Exception:  # noqa: BLE001 - the engine may have rolled back already: the first error is told
                     pass
                 raise
+            self._scrub_if_pending(conn)
 
     # -- save --------------------------------------------------------------
 
@@ -441,6 +465,9 @@ class OnionStore:
             conn.isolation_level = None
             conn.execute("BEGIN IMMEDIATE")
             try:
+                if conn.execute("SELECT 1 FROM onion_forgotten WHERE conversation = ?", (cid,)).fetchone():
+                    raise OnionStateForgotten(f"onion state {cid}: the conversation was deleted and forgotten; not "
+                                              f"written back")
                 stored = _generation(conn, cid)
                 if generation is not None and stored != generation:
                     raise OnionStateStale(
@@ -593,6 +620,61 @@ class OnionStore:
     def conversations(self):
         with self._lock, self._conn() as conn:
             return [r[0] for r in conn.execute("SELECT conversation FROM onion_cursor ORDER BY conversation").fetchall()]
+
+    def forget(self, conversation_id):
+        """Forget a deleted conversation: every row of it, overwritten as it goes, and a tombstone; the rows deleted.
+
+        One write transaction: its rows leave every table, its cursor too, and ``onion_forgotten`` keeps its id and
+        the time -- never a word -- so that no writer, of any generation, in this process or another, writes it back
+        (``save`` refuses it by name). What is deleted is overwritten (``secure_delete``, on every connection of the
+        store); a file written before that is rewritten once no other connection holds it (``_scrub_if_pending``).
+        A forgetting another connection holds back waits as every write does, and is refused when the wait runs
+        out, nothing forgotten. The first forgetting's time stands.
+        """
+        cid = str(conversation_id)
+        if not cid:
+            raise OnionStoreError("a conversation id is required to forget an onion state")
+        with self._lock, self._conn() as conn:
+            conn.isolation_level = None
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                deleted = sum(conn.execute(f"DELETE FROM {table} WHERE conversation = ?", (cid,)).rowcount
+                              for table in TABLES)
+                conn.execute("INSERT OR IGNORE INTO onion_forgotten (conversation, forgotten_at) VALUES (?, ?)",
+                             (cid, _now()))
+                conn.execute("COMMIT")
+            except BaseException:
+                try:
+                    conn.execute("ROLLBACK")
+                except Exception:  # noqa: BLE001 - the engine may have rolled back already: the first error is told
+                    pass
+                raise
+            # The rows are gone and the tombstone stands; a file written before its deletions were overwritten is
+            # rewritten now if no other connection holds it.
+            self._scrub_if_pending(conn)
+        return deleted
+
+    def _scrub_if_pending(self, conn):
+        """Rewrite the file once if it was written before every connection overwrote what it deleted; True when it
+        needs no rewrite, or was rewritten.
+
+        A file of an older schema may keep in its free pages words a save replaced, or a deletion removed, before
+        ``secure_delete``: the step to the fifth schema marks it (``onion_scrub``), and the file is rewritten
+        (``VACUUM``), the mark with it, as soon as no other connection holds the file. That never waits: a rewrite
+        another connection holds back is said, and asked again at the next open and at the next forgetting. A file
+        this build created holds no such page and is never rewritten.
+        """
+        if not conn.execute("SELECT 1 FROM onion_scrub").fetchone():
+            return True
+        conn.execute("PRAGMA busy_timeout = 0")
+        try:
+            conn.execute("VACUUM")
+            conn.execute("DELETE FROM onion_scrub")
+        except Exception as exc:  # noqa: BLE001 - another connection holds the file, or the disk refuses: said
+            logger.warning("onion store %s: written before its deletions were overwritten, and not rewritten yet "
+                           "(%s); asked again at the next open and the next forgetting", self._path.name, exc)
+            return False
+        return True
 
 
 def _generation(conn, cid):
@@ -804,6 +886,19 @@ def _generations(conn):
         conn.execute("ALTER TABLE onion_cursor ADD COLUMN generation INTEGER NOT NULL DEFAULT 1")
 
 
+
+def _forgotten(conn):
+    """Schema 5, "forgotten": the tombstones of the conversations deleted and forgotten (``OnionStore.forget``).
+
+    The table is the schema's own; a file written before it gains it empty, and the mark that it is to be rewritten
+    once (``onion_scrub``): its deletions were not overwritten, so its free pages may keep words. A build of an
+    older schema then refuses the file by name, rather than write back a conversation this one forgot.
+    """
+    conn.execute("CREATE TABLE IF NOT EXISTS onion_forgotten (conversation TEXT PRIMARY KEY, forgotten_at TEXT "
+                 "NOT NULL)")
+    conn.execute("CREATE TABLE IF NOT EXISTS onion_scrub (pending INTEGER PRIMARY KEY CHECK (pending = 1))")
+    conn.execute("INSERT OR IGNORE INTO onion_scrub (pending) VALUES (1)")
+
 # The schema a file was written with, in SQLite's ``user_version``: 0 for
 # every file written before versions existed. Each migration brings a file
 # to its version, in order and once, inside one transaction with the tables
@@ -814,6 +909,7 @@ _MIGRATIONS = (
     (2, "references", _references),
     (3, "statements", _statements),
     (4, "generations", _generations),
+    (5, "forgotten", _forgotten),
 )
 SCHEMA_VERSION = _MIGRATIONS[-1][0]
 _SCHEMA_STATEMENTS = tuple(statement.strip() for statement in _SCHEMA.split(";") if statement.strip())

@@ -3480,6 +3480,28 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] Deleting a conversation forgets what the onion memory drew
+  from it. With persistence on, the onion's store kept a deleted
+  conversation's turns, spans, summaries and what the librarian read of
+  it, indefinitely, and served or reopened them; the process held its
+  state until a restart; and a writer that had never saved it could write
+  it all back. The store now deletes every row of it, overwriting what it
+  deletes on every connection, and keeps a tombstone -- the id and the
+  time, never a word -- that refuses any later save of it, from any
+  process; the onion lets go of it in the process. A file written before
+  is rewritten once, so the words its free pages kept go too. A store
+  that cannot forget -- held past its wait by another connection, or not
+  opened -- refuses the deletion by the reason's name (409), nothing
+  deleted; a peer's deletion is then not applied, and a wipe stops and
+  says how many conversations are left. The store's fifth schema brings
+  the tombstones; a build of an older schema refuses the file when it
+  opens it. A conversation deleted before this keeps its rows: nothing
+  sweeps them yet. A deletion still leaves what other stores
+  drew from the conversation: its branches, the response cache for an
+  hour, the semantic cache, the facts drawn from it, the facts proposed
+  from it, its feedback, its project links, the artifacts the process
+  cached, and, with the sync package, the change feed.
+
 - [SECURITY] Escalating to Bulbe judges the model provenance manifest as
   the fortress's load gate will. The preflight read the scheme the seal
   claimed and the presence of entries: a signature that does not verify --

@@ -104,6 +104,9 @@ _handed = threading.local()
 # the first turn goes to.
 _FEWEST_CHARS_PER_TOKEN = 2.5
 _refused = set()
+# The conversations deleted while this process ran (``forget_conversation``): their state is never installed again.
+# Ids only, never a word; a conversation's id is random and never reused.
+_forgotten = set()
 # What the queue counted since the process began, by event then motive:
 # names and numbers, never a word of a conversation nor its id.
 _counts = {}
@@ -1062,6 +1065,9 @@ def _current(conversation_id, state, config):
         if _states.get(conversation_id, state) is not state:
             # Another thread read it again first: its reading stands.
             return _states[conversation_id]
+        if conversation_id in _forgotten:
+            # Deleted since it was read: nothing of it is installed again.
+            return None
         if loaded is None:
             _states.pop(conversation_id, None)
             _watermark.pop(conversation_id, None)
@@ -1095,6 +1101,9 @@ def state_for(conversation_id, config=None):
             return state
     loaded = _load_state(conversation_id, config)
     with _lock:
+        if conversation_id in _forgotten:
+            # A turn that raced the deletion: a state of its own, never installed, so never kept nor saved.
+            return OnionState()
         state = _states.get(conversation_id)
         if state is None:
             state = _states[conversation_id] = loaded if loaded is not None else OnionState()
@@ -1215,6 +1224,8 @@ def peek_state(conversation_id, config=None):
     if loaded is None:
         return None
     with _lock:
+        if conversation_id in _forgotten:
+            return None
         state = _states.setdefault(conversation_id, loaded)
         _watermark.setdefault(conversation_id, len(state.flesh.turns()))
         return state
@@ -1235,8 +1246,16 @@ def _save_state(conversation_id, state, config):
     store = onion_store(config)
     if store is None:
         return None
-    from .onion_store import OnionStateStale
+    from .onion_store import OnionStateForgotten, OnionStateStale
 
+    with _lock:
+        forgotten = conversation_id in _forgotten
+    if forgotten:
+        _counted("store", "forgotten_save")
+        logger.warning("onion memory for %s: the conversation was deleted and forgotten here; not written back",
+                       conversation_id)
+        raise OnionStateForgotten(f"onion state {conversation_id}: the conversation was deleted and forgotten; not "
+                                  f"written back")
     try:
         with state.lock:
             with _lock:
@@ -1252,6 +1271,38 @@ def _save_state(conversation_id, state, config):
         raise
 
 
+def forget_conversation(conversation_id, config=None):
+    """Forget a deleted conversation's onion -- its rows in the store, then its state in this process; the rows
+    the store deleted.
+
+    The store forgets first, under its own tombstone (``OnionStore.forget``): it may refuse -- a file another
+    connection holds past the wait, a store that cannot be opened, a configuration that cannot be read and so
+    cannot say where the store is -- and the deletion it serves is then refused by its caller, nothing let go here.
+    A store moved, or on a volume mounted elsewhere since, is not looked for: a store made where the configuration
+    names one holds only the tombstone. Then the id joins ``_forgotten`` and
+    every holder of this process lets go of the conversation: its state, its watermark, its counter, the refusals
+    said of it. A state another thread still holds is no longer the one this process holds, so it is never saved
+    (``_save_state``); a turn that raced the deletion gets a state that is never installed (``state_for``).
+    """
+    cid = str(conversation_id or "")
+    if not cid:
+        raise ValueError("a conversation id is required to forget its onion")
+    # With a path configured the store is always asked, a file there or not: a store that cannot be opened -- a
+    # volume not mounted, a link to nowhere, a plaintext connection where encryption is required -- cannot be looked
+    # into, and a copy it may hold is never taken for none. Where no file stood, the store is made for the tombstone.
+    store = onion_store(config)
+    deleted = store.forget(cid) if store is not None else 0
+    with _lock:
+        _forgotten.add(cid)
+        _states.pop(cid, None)
+        _watermark.pop(cid, None)
+        _counters.pop(cid, None)
+        for said in [said for said in _refused if said[0] == cid]:
+            _refused.discard(said)
+    _counted("store", "forgotten")
+    return deleted
+
+
 def reset_librarian():
     with _lock:
         _states.clear()
@@ -1259,6 +1310,7 @@ def reset_librarian():
         _store.clear()
         _counters.clear()
         _refused.clear()
+        _forgotten.clear()
         _hung.clear()
         _holders.clear()
     with _count_lock:
@@ -2251,6 +2303,8 @@ def maybe_curate(conversation_id, messages, *, config=None, runner=None):
         if not config.enabled:
             return False
         if not conversation_id or not isinstance(messages, list) or not messages:
+            return False
+        if conversation_id in _forgotten:
             return False
         state = state_for(conversation_id, config)
         if state.mirror(messages):

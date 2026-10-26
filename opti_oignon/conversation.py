@@ -761,6 +761,56 @@ def _sync_publish_conversation(
         )
 
 
+class ConversationNotForgotten(RuntimeError):
+    """A deletion refused, nothing deleted: the onion's copy of the conversation could not be forgotten.
+
+    ``reason`` is the name of what refused, never a path or a word of the conversation: what an answer to a client
+    may carry; the message, for the log, says the rest.
+    """
+
+    def __init__(self, message: str, reason: str):
+        super().__init__(message)
+        self.reason = reason
+
+
+def _forget_onion(conv_id: str) -> None:
+    """Forget what the onion drew from a deleted conversation, before anything else of it is let go.
+
+    The librarian is imported at the deletion, never with this module. Its
+    store may hold the conversation's words, so unlike the run journal's, a
+    copy it cannot forget refuses the deletion: raised by name
+    (``ConversationNotForgotten``), and the caller rolls the deletion back.
+    A tree with no memory package cannot be asked at all: the deletion goes
+    on and that is said. A package that is there and does not load may hold
+    a store it cannot be asked about, and refuses the deletion too.
+    Lock order is conversation lock -> librarian lock -> store lock, and the
+    librarian never calls back into this module.
+    """
+    try:
+        from opti_oignon.memory import librarian
+    except ImportError as exc:
+        # The package, or its librarian, is not here (a tree without it, or a window that seeds none): nothing of
+        # the onion can have run from this tree. Anything else it lacks means a package that is there and breaks.
+        if exc.name not in ("opti_oignon.memory", "opti_oignon.memory.librarian"):
+            # The package is there and something it needs is not: it may hold a store it cannot be asked about.
+            raise ConversationNotForgotten(
+                f"the onion could not be asked to forget conversation {conv_id}: its package does not load "
+                f"({type(exc).__name__}: {exc}); nothing was deleted", type(exc).__name__) from exc
+        logger.warning("the onion could not be asked to forget conversation %s: its package is not here",
+                       conv_id, exc_info=True)
+        return
+    except Exception as exc:  # noqa: BLE001 - a package that is there and breaks may hold a store
+        raise ConversationNotForgotten(
+            f"the onion could not be asked to forget conversation {conv_id}: its package does not load "
+            f"({type(exc).__name__}: {exc}); nothing was deleted", type(exc).__name__) from exc
+    try:
+        librarian.forget_conversation(conv_id)
+    except Exception as exc:  # noqa: BLE001 - a copy that cannot be forgotten refuses the deletion
+        raise ConversationNotForgotten(
+            f"the onion's copy of conversation {conv_id} could not be forgotten ({type(exc).__name__}: {exc}); "
+            "nothing was deleted", type(exc).__name__) from exc
+
+
 def _forget_runs(conv_id: str) -> None:
     """Remove a deleted conversation's agent runs from the run journal, here or from a paired device.
 
@@ -1356,13 +1406,17 @@ class ConversationManager:
                 conn.close()
 
     def delete_conversation(self, conv_id: str) -> bool:
-        """Delete a conversation and all its messages.
+        """Delete a conversation and all its messages, and forget what the onion drew from it.
 
         Args:
             conv_id: Conversation UUID
 
         Returns:
             True if deletion succeeded
+
+        Raises:
+            ConversationNotForgotten: the onion's copy could not be forgotten;
+                the deletion is rolled back and nothing is deleted.
         """
         with self._lock:
             conn = self._get_connection()
@@ -1371,6 +1425,10 @@ class ConversationManager:
                 cursor = conn.execute(
                     "DELETE FROM conversations WHERE id = ?", (conv_id,)
                 )
+                # The onion forgets first: a copy it cannot forget refuses the
+                # deletion before anything else of the conversation is let go.
+                if cursor.rowcount > 0:
+                    _forget_onion(conv_id)
                 # The journal forgets before the commit: a deletion cut short
                 # leaves the conversation, never its runs without it.
                 _forget_runs(conv_id)
@@ -1387,6 +1445,10 @@ class ConversationManager:
                         updated_at=datetime.now().isoformat(),
                     )
                 return deleted
+            except ConversationNotForgotten:
+                conn.rollback()
+                logger.error("conversation %s not deleted: the onion's copy could not be forgotten", conv_id)
+                raise
             except Exception as e:
                 logger.error(f"Error deleting conversation {conv_id}: {e}")
                 return False
@@ -1758,9 +1820,19 @@ class ConversationManager:
                             "DELETE FROM messages WHERE conversation_id = ?",
                             (conv_id,),
                         )
-                        conn.execute(
+                        gone = conn.execute(
                             "DELETE FROM conversations WHERE id = ?", (conv_id,)
-                        )
+                        ).rowcount
+                        if gone:
+                            try:
+                                _forget_onion(conv_id)
+                            except ConversationNotForgotten:
+                                # Not applied, nothing deleted: the round drops
+                                # a record this returns False for, unjournalled.
+                                conn.rollback()
+                                logger.error("a peer's deletion of %s not applied: the onion's copy could not be "
+                                             "forgotten", conv_id)
+                                return False
                         _forget_runs(conv_id)
                         conn.commit()
                         return True

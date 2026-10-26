@@ -186,10 +186,26 @@ def get_conversation(conv_id: str) -> dict:
 
 @router.delete("/{conv_id}", status_code=204)
 def delete_conversation(conv_id: str) -> Response:
-    """Delete a conversation and all its messages."""
+    """Delete a conversation and all its messages, and what the onion drew from it.
+
+    A copy the onion cannot forget refuses the deletion: 409, with the reason,
+    and nothing is deleted.
+    """
     _check_available()
 
-    deleted = conversation_manager.delete_conversation(conv_id)
+    try:
+        deleted = conversation_manager.delete_conversation(conv_id)
+    except Exception as exc:
+        # Known by its name: the manager is the deps seam's, whatever module it
+        # comes from, and this is the one refusal it raises.
+        if type(exc).__name__ != "ConversationNotForgotten":
+            raise
+        # The reason's name only: the message, which may name a path on this machine, stays in the log.
+        reason = getattr(exc, "reason", "unknown")
+        raise HTTPException(
+            status_code=409,
+            detail=f"the onion's copy of this conversation could not be forgotten ({reason}); nothing was deleted",
+        ) from exc
     # A refinement of its title writes nothing now.
     _cancel_refinement(conv_id)
     if not deleted:

@@ -31,6 +31,10 @@ every import of the package.
     over three importers, each importing the librarian and nothing else,
     and the two surfaces that are not the executor reach it inside a
     function, never at module scope.
+  * ZP8 -- supersedes ZP7 once a deletion forgets the onion's copy: the
+    conversation store is a fourth importer, its deletion asking the
+    librarian to forget. The same properties over the four, the three that
+    are not the executor reaching the librarian inside a function.
 
 Local-only (the public distribution ships no tests). Reads the tree; loads
 nothing.
@@ -294,6 +298,34 @@ def test_zp7_the_executor_the_memory_routes_and_the_chat_session_import_the_libr
     assert set(importers) == _USER_SURFACES_WITH_SESSION, f"the three user surfaces import the onion, nothing else: {importers}"
     assert all(v == {"librarian"} for v in importers.values()), f"and each imports the librarian only: {importers}"
     for rel in sorted(_USER_SURFACES_WITH_SESSION - {"opti_oignon/executor.py"}):
+        assert not _module_scope_names_onion(REPO / rel), f"{rel} reaches the librarian inside a function, not at module scope"
+    for rel in _MODEL_TOOLS:
+        text = (_PACKAGE / rel).read_text(encoding="utf-8")
+        assert not any(m in text for m in ("core_store", "receipts", "librarian", "onion_store")), (
+            f"{rel} names no onion module: the model's tools have no path to the Core"
+        )
+    facade = (_PACKAGE / "memory" / "__init__.py").read_text(encoding="utf-8")
+    assert not any(f".{m} import" in facade or f"memory.{m}" in facade for m in _ONION), "the facade stays out of it"
+
+
+# The conversation store's deletion forgets what the onion drew from the conversation: a fourth importer, reaching
+# the librarian inside a function, as the routes and the session do.
+_USER_SURFACES_WITH_DELETION = _USER_SURFACES_WITH_SESSION | {"opti_oignon/conversation.py"}
+
+
+def test_zp8_the_three_surfaces_and_the_conversation_deletion_import_the_librarian_and_nothing_else():
+    allowed = _STDLIB_ONLY_AT_SCOPE | {"pathlib", "threading", "logging", "contextlib", "datetime"}
+    for path in sorted(_ONION_PATHS):
+        assert path.is_file(), f"{path.name} is part of the onion"
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        top = _imports_of(ast.Module(body=[s for s in tree.body if isinstance(s, (ast.Import, ast.ImportFrom))], type_ignores=[]))
+        offenders = {n for n in top if n.split(".")[0] not in allowed and not n.startswith("__future__")}
+        assert offenders == set(), f"{path.name} imports only the standard library at module scope: {offenders}"
+    importers = _onion_importers()
+    assert set(importers) == _USER_SURFACES_WITH_DELETION, (
+        f"the three user surfaces and the conversation deletion import the onion, nothing else: {importers}")
+    assert all(v == {"librarian"} for v in importers.values()), f"and each imports the librarian only: {importers}"
+    for rel in sorted(_USER_SURFACES_WITH_DELETION - {"opti_oignon/executor.py"}):
         assert not _module_scope_names_onion(REPO / rel), f"{rel} reaches the librarian inside a function, not at module scope"
     for rel in _MODEL_TOOLS:
         text = (_PACKAGE / rel).read_text(encoding="utf-8")

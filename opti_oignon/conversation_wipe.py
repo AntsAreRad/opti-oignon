@@ -471,6 +471,10 @@ class ConversationWipeManager:
 
         Paginates through the conversation store deleting as it goes; the
         progress guard prevents an infinite loop if a batch cannot be deleted.
+        A deletion refused -- the onion's store that could not forget, which
+        answers so for every conversation, held past its wait or not opened --
+        stops the purge at once, and how many are left is said: asking again
+        would wait as long for each.
         """
         mgr = self._get_conversation_manager()
         if mgr is None:
@@ -485,7 +489,16 @@ class ConversationWipeManager:
                 progressed = False
                 for c in convs:
                     cid = getattr(c, "id", None)
-                    if cid and mgr.delete_conversation(cid):
+                    if not cid:
+                        continue
+                    try:
+                        gone = mgr.delete_conversation(cid)
+                    except Exception as exc:
+                        left = len(mgr.list_conversations(limit=batch, offset=0))
+                        logger.warning("conversation_wipe: the purge stopped, %d conversation(s) left: a deletion "
+                                       "was refused (%s)", left, getattr(exc, "reason", type(exc).__name__))
+                        return purged
+                    if gone:
                         purged.add(cid)
                         progressed = True
                 if not progressed:

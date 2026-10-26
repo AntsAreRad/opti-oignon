@@ -743,6 +743,40 @@ process of a build before the fourth schema checks no generation: once one
 process has brought the file up, every process that holds it open is
 restarted, or it writes over what the others saved.
 
+Deleting a conversation forgets what the onion drew from it, before
+anything else of it is let go. The store deletes every row of it from
+every table, its cursor too, and keeps a tombstone: the conversation's id
+and the time, never a word. Every connection of the store overwrites what
+it deletes, a save's replaced rows included. A file of an older schema
+may keep in its free pages words deleted before that: the step to the
+fifth schema marks it, and it is rewritten once no other connection holds
+it -- never waiting, said when held back, asked again at the next open
+and the next forgetting. A save of a forgotten conversation is refused by
+name whatever generation it names, from this process or another sharing
+the file; a build of an older schema refuses the file by name when it
+opens it -- a process of an older build that already holds it open is
+restarted, or it writes a forgotten conversation back. The process lets
+go of the conversation's state, its watermark, its counter and the
+refusals said of it; a turn that raced the deletion gets a state of its
+own that is never kept, and nothing of the conversation is curated,
+served or reopened again.
+
+With a persistence path, a deletion always asks the store, a file there
+or not. A store that cannot be looked into -- another connection holding
+the file past the wait every write has, a store that cannot be opened, a
+volume not mounted, a link to nowhere, a plaintext connection where
+encryption is required -- refuses the deletion: nothing is deleted, the
+route answers 409 with the reason's name, a peer's deletion is not
+applied, and a wipe stops there and says how many conversations are
+left. A store moved, or a volume mounted elsewhere, is not looked for:
+the store made where the configuration names one then holds only the
+tombstone. A tree without the memory package deletes, and says that the
+onion could not be asked; a package that is there and breaks refuses the
+deletion. A conversation that comes back under its id -- a peer's later
+edit winning over the deletion -- keeps its onion in the process alone,
+the tombstone refusing its saves. A conversation deleted before the fifth
+schema keeps its rows in the file: nothing sweeps them yet.
+
 Two verbs work on a whole conversation, and `oo chat` gives them to the
 user as `/close` and `/open`. Closing runs the gate synchronously over
 the entire Flesh, whatever its cap, one span at a time: every span the
