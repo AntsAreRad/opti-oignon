@@ -650,6 +650,17 @@ export interface MemoryExtractResponse {
 	facts_proposed?: number;
 }
 
+/** A fact in the trash, and when it is erased for good (ISO-8601; empty when unknown, and soon). */
+export interface MemoryTrashedFact extends MemoryFact {
+	erase_at: string;
+}
+
+/** The trash of the facts: the days a deleted fact stays in it, and the facts it holds. */
+export interface MemoryTrash {
+	days: number;
+	facts: MemoryTrashedFact[];
+}
+
 // -- Search --
 
 export interface SearchResult {

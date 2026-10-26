@@ -386,16 +386,22 @@ _WITHDRAWAL = ("the user's withdrawal of a source: it adds the withdrawn kind to
 STORES = {
     "facts": _store(
         "opti_oignon/memory/dedup.py", classes=("MemoryStore",), accesses=("get_memory_store",),
-        writes=("add", "update", "touch", "soft_delete", "restore", "hard_delete", "adopt"),
-        quiet=("touch", "soft_delete", "hard_delete"), backs=("facts_canonical", "facts_vectors"),
+        writes=("add", "update", "touch", "soft_delete", "restore", "hard_delete", "adopt", "erase",
+                "forget_conversation"),
+        functions=("forget_conversation",),
+        quiet=("touch", "soft_delete", "hard_delete", "erase", "forget_conversation"),
+        aside={"claim": "a fact the user made theirs takes their act's source; it carries no content"},
+        backs=("facts_canonical", "facts_vectors"),
         reason="the user's facts, composed into the memory block of every turn",
     ),
     "facts_canonical": _store(
         "opti_oignon/memory/canonical_store.py", classes=("CanonicalMemoryStore",),
         accesses=("get_canonical_store",),
         writes=("add", "update", "touch", "soft_delete", "restore", "hard_delete", "clear",
-                "apply_synced_memory_canonical", "adopt"),
-        quiet=("touch", "soft_delete", "hard_delete", "clear"),
+                "apply_synced_memory_canonical", "adopt", "erase"),
+        quiet=("touch", "soft_delete", "hard_delete", "clear", "erase"),
+        aside={"settle_vector": "what the vector layer owed a fact is settled; it carries no content",
+               "owe_vector": "a fact's vector owed a drop or an add, for the trash's pass; it carries no content"},
         reason="the rows behind the facts, which the retriever reads",
     ),
     "facts_vectors": _store(
@@ -408,7 +414,7 @@ STORES = {
         writes=("add_fact", "update_fact", "activate_fact", "deactivate_fact", "delete_fact", "clear_all",
                 "deduplicate", "extract_and_store"),
         quiet=("deactivate_fact", "delete_fact", "clear_all", "deduplicate"), place="db_path",
-        reason="the frozen flat memory, read as the memory block's fallback and through the retriever's bridge",
+        reason="the old flat memory, moved into the facts and emptied, read by nothing else",
     ),
     "extraction": _store(
         "opti_oignon/memory/extraction.py", classes=("FactExtractor",), accesses=("get_extractor",),
@@ -655,6 +661,10 @@ EXEMPT = {
         "quiet", "a deletion forgets the branches of the conversation it deletes"),
     ("opti_oignon/conversation.py", "projects"): (
         "quiet", "a deletion unlinks the conversation it deletes from every project"),
+    ("opti_oignon/conversation.py", "facts"): (
+        "quiet", "a deletion erases the facts the model drew from the conversation it deletes"),
+    ("opti_oignon/memory/trash.py", "facts"): (
+        "quiet", "the trash erases the facts the user deleted, past its days or at the user's asking"),
     ("opti_oignon/executor.py", "conversation"): (
         "transcript", "the turn's messages, their model and task type, and the summary of the conversation's own "
                       "older messages, read back in their place"),
@@ -668,7 +678,18 @@ EXEMPT = {
     ("opti_oignon/source_withdrawal.py", "facts"): (
         "quiet", "the user's withdrawal of a fact sets it aside, restorable; it never adds one"),
     ("opti_oignon/memory/migration.py", "facts"): (
-        "migration", "it moves the legacy rows into the store, at start-up or when the user asks again: nothing new"),
+        "migration", "it moves the legacy rows into the store, at start-up or when the user asks again, an old fact "
+                     "out of service into the trash, taking back a copy that cannot go there; and puts back in the "
+                     "trash an old fact out of service that the first migration brought into service: nothing new"),
+    ("opti_oignon/memory/dedup.py", "facts_vectors"): (
+        "quiet", "a deletion erases the vectors of the facts drawn from the conversation it deletes"),
+    ("opti_oignon/memory/dedup.py", "facts_canonical"): (
+        "quiet", "a deletion erases the rows of the facts drawn from the conversation it deletes"),
+    ("opti_oignon/memory/canonical_store.py", "facts_vectors"): (
+        "quiet", "a peer's fact put out of service or erased drops this device's vector of it, as this device's own "
+                 "deletion does"),
+    ("opti_oignon/memory/migration.py", "legacy"): (
+        "quiet", "the move deletes each old row once its fact is in the store, and empties a store migrated before"),
     ("opti_oignon/memory/librarian.py", "flesh"): (
         "transcript", "the onion mirrors the conversation's own turns, and takes back the turns it took back; a "
                       "journal's plan catches the oldest of them up into the Cellar, each span under its bare "
@@ -740,7 +761,7 @@ ARGUED_SITES = {
     ("opti_oignon/memory/librarian.py", "receipts"): (
         ("OnionState._take_back", "supersede"),),
     ("opti_oignon/memory/migration.py", "facts"): (
-        ("migrate_legacy_to_store", "add"),),
+        ("_move", "add"), ("_move", "soft_delete"), ("_move", "hard_delete"), ("_retire", "soft_delete"),),
     ("opti_oignon/memory/onion_store.py", "cellar"): (
         ("_rebuild", "store"),),
     ("opti_oignon/memory/onion_store.py", "core"): (

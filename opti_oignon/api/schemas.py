@@ -293,6 +293,16 @@ class MemoryExtractResponse(BaseModel):
     # Facts drawn from what the user did not type: proposed for review, not written.
     facts_proposed: int = 0
 
+class MemoryTrashedSchema(MemoryFactSchema):
+    """A fact in the trash, and when it is erased for good (ISO-8601 UTC; empty when its last change cannot be
+    read, and the next pass erases it)."""
+    erase_at: str = ""
+
+class MemoryTrashResponse(BaseModel):
+    """The trash of the facts: the days a deleted fact stays in it, and the facts it holds."""
+    days: int
+    facts: list[MemoryTrashedSchema] = []
+
 
 # -- Onion memory: the user's surface on the Core and the receipts --
 

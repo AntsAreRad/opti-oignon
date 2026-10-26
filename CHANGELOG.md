@@ -3480,6 +3480,47 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] A fact deleted from memory no longer comes back, and a
+  conversation's deletion forgets the facts the model drew from it. The
+  memory store of earlier versions (`memories.db`) was never emptied after
+  its migration into the facts: whenever the facts gave a turn nothing --
+  no fact relevant, every fact deleted, the composer failing -- the window
+  carried that store's whole block instead, deleted facts included, and
+  right after an account wipe, which cleared the facts and never that
+  file, the next turn carried the old memories back; a second migration,
+  which the memory routes run on request, added every old fact again,
+  those deleted since among them. The window now carries no block in their
+  place. The migration moves each old fact into the facts and deletes its
+  old row, overwritten, writing its marker only once the old store is
+  empty; a store migrated before is emptied with nothing added -- an old
+  fact its first migration could not copy goes too, as it cannot be told
+  from one the user deleted since -- and an old fact out of service that
+  the first migration put back in service goes to the trash, unless the
+  old store also keeps it in service or the user confirmed it as theirs
+  since. A conversation's deletion now erases the facts drawn from it --
+  by the extraction the user asked of it, or by the automatic capture,
+  which now records its conversation -- in service or in the trash, a
+  peer's included, with their vectors (in a process that never opened the
+  vector layer, at the trash's next pass), and the peers told; a fact the
+  model draws from a conversation this process forgot is refused at the
+  write, under the lock the forgetting holds. The facts the user made
+  theirs stay: written by hand, asked of the agent, a proposal accepted --
+  and a drawn fact the user writes again, edits or confirms, which takes
+  that act's source; so do the old store's, and the automatic capture's of
+  before, whose conversation is not known. A peer's fact put out of
+  service or erased drops this device's vector of it -- at once where the
+  vector layer is open, else, or when it fails, at the trash's next pass
+  -- and gets it back when the peer puts it back in service; a peer's fact
+  drawn from a conversation this process forgot is refused. A deleted fact
+  now waits in a trash the memory panel shows, restorable (and restored
+  before it is edited), and is erased for good after `trash_days` (30,
+  `opti_oignon/config/memory.yaml`) or at once on request; the trash is
+  tended at start-up and every hour, and a fact deleted longer ago than
+  that is erased at the first start. Every connection of the facts' store
+  overwrites what any write frees -- an erased fact, the text an edit
+  replaced -- and an erasure empties its write-ahead log. The health
+  dashboard counts the facts in service, not the old store.
+
 - [SECURITY] A deletion forgets what every store keyed by the conversation
   drew from it: its branches and their turns, the facts proposed in it
   whatever their decision, the feedback given in it, the questions and
@@ -3531,10 +3572,9 @@ package costs.
   says how many conversations are left. The store's fifth schema brings
   the tombstones; a build of an older schema refuses the file when it
   opens it. A conversation deleted before this keeps its rows: nothing
-  sweeps them yet. A deletion still leaves the facts drawn from the
-  conversation, the response cache (an answer served for an hour, kept
-  until a later lookup cleans it up), and, with the sync package, the
-  change feed.
+  sweeps them yet. A deletion still leaves the response cache (an answer
+  served for an hour, kept until a later lookup cleans it up), and, with
+  the sync package, the change feed.
 
 - [SECURITY] Escalating to Bulbe judges the model provenance manifest as
   the fortress's load gate will. The preflight read the scheme the seal

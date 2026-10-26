@@ -274,6 +274,9 @@ class MemoryManager:
         conn = safe_connect(str(self._db_path), check_same_thread=False)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
+        # What a deletion frees is overwritten: the migration empties this
+        # store once its memories live in the facts.
+        conn.execute("PRAGMA secure_delete = ON")
         if not self._schema_ready:
             # Built on the connection just opened, without taking the lock:
             # a caller already holding it would otherwise hang here.
@@ -612,6 +615,36 @@ class MemoryManager:
             except Exception as e:
                 logger.error(f"Erreur suppression fait {fact_id}: {e}")
                 return False
+            finally:
+                conn.close()
+
+    @property
+    def db_path(self) -> Path:
+        """This store's file: the migration reads it only when it is
+        there, and never creates it to find it empty."""
+        return self._db_path
+
+    def held(self) -> list[MemoryFact]:
+        """Every fact this store holds, in service or not; raises when it
+        cannot be read. The migration reads it so: a store it could not read
+        is never taken for an empty one."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                rows = conn.execute("SELECT * FROM memories ORDER BY created_at").fetchall()
+                return [self._row_to_fact(r) for r in rows]
+            finally:
+                conn.close()
+
+    def empty_log(self) -> bool:
+        """Empty the write-ahead log after the migration's deletions, never
+        waiting; whether it was emptied (a read in progress keeps it, and
+        the last connection's close removes it)."""
+        with self._lock:
+            conn = self._get_connection()
+            try:
+                conn.execute("PRAGMA busy_timeout = 0")
+                return not conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
             finally:
                 conn.close()
 

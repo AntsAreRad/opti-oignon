@@ -6,7 +6,7 @@
  */
 
 import { apiGet, apiPost, apiDelete } from './client';
-import type { MemoryFact, MemoryAddRequest, MemoryExtractResponse } from '$lib/types';
+import type { MemoryFact, MemoryAddRequest, MemoryExtractResponse, MemoryTrash } from '$lib/types';
 
 /** List all facts in memory. */
 export async function listFacts(params?: {
@@ -33,14 +33,34 @@ export async function createFact(request: MemoryAddRequest): Promise<MemoryFact>
 	});
 }
 
-/** Delete a specific fact. */
+/** Move a fact to the trash: out of the window, restorable until the trash erases it. */
 export async function deleteFact(factId: string): Promise<void> {
 	return apiDelete<void>(`/api/memory/${factId}`);
 }
 
-/** Delete all facts in memory. */
+/** Move every fact in memory to the trash. */
 export async function clearAllFacts(): Promise<{ cleared: boolean; count: number }> {
 	return apiDelete<{ cleared: boolean; count: number }>('/api/memory');
+}
+
+/** The facts in the trash, each with when it is erased for good, and the trash's days. */
+export async function listTrash(): Promise<MemoryTrash> {
+	return apiGet<MemoryTrash>('/api/memory/trash');
+}
+
+/** Take a fact out of the trash, back into service. */
+export async function restoreFact(factId: string): Promise<MemoryFact> {
+	return apiPost<MemoryFact>(`/api/memory/${factId}/restore`);
+}
+
+/** Erase one fact in the trash for good. */
+export async function eraseFact(factId: string): Promise<{ erased: boolean; id: string }> {
+	return apiDelete<{ erased: boolean; id: string }>(`/api/memory/trash/${factId}`);
+}
+
+/** Erase every fact in the trash for good. */
+export async function emptyTrash(): Promise<{ erased: number }> {
+	return apiDelete<{ erased: number }>('/api/memory/trash');
 }
 
 /** Extrait les faits d'une conversation et les stocke. */

@@ -858,6 +858,12 @@ def _forget_semantic_cache(conv_id: str) -> int:
     return forget_conversation(conv_id)
 
 
+def _forget_facts(conv_id: str) -> int:
+    from opti_oignon.memory.dedup import forget_conversation
+
+    return forget_conversation(conv_id)
+
+
 def _forget_project_links(conv_id: str) -> int:
     from opti_oignon.projects import forget_conversation
 
@@ -885,6 +891,11 @@ def _forget_coding_session(conv_id: str) -> int:
     return held.forget_conversation(conv_id) if held is not None else 0
 
 
+def _forget_capture_mark(conv_id: str) -> int:
+    held = _in_memory("opti_oignon.memory.auto_capture")
+    return held.forget_conversation(conv_id) if held is not None else 0
+
+
 # What else keeps something drawn from a conversation, forgotten when it is deleted, in this order: the store's name,
 # its module, the function that asks it (the module imported at the deletion, never with this one; a store of this
 # process's memory asked only if the process loaded it), and whether it keeps the conversation's words beyond this
@@ -896,10 +907,12 @@ _FORGETTERS = (
     ("proposed facts", "opti_oignon.pending_writes", _forget_proposals, True),
     ("feedback", "opti_oignon.feedback", _forget_feedback, True),
     ("semantic cache", "opti_oignon.semantic_cache", _forget_semantic_cache, True),
+    ("facts", "opti_oignon.memory.dedup", _forget_facts, True),
     ("project links", "opti_oignon.projects", _forget_project_links, False),
     ("artifact cache", "opti_oignon.artifacts", _forget_artifacts, False),
     ("tool history", "opti_oignon.agentic_executor", _forget_tool_history, False),
     ("coding session", "opti_oignon.chat_coding_agent", _forget_coding_session, False),
+    ("capture mark", "opti_oignon.memory.auto_capture", _forget_capture_mark, False),
 )
 # A store whose module this tree does not have: it holds nothing of the conversation.
 _ABSENT = "absent"
@@ -911,8 +924,10 @@ def _ask(conv_id: str, store: str, module: str, forget: Callable[[str], int]) ->
     try:
         forget(conv_id)
     except ImportError as exc:
-        # Only a module that is not there is absence; one that is there and lacks its forgetting is broken.
-        if isinstance(exc, ModuleNotFoundError) and exc.name == module:
+        # Only a module that is not there is absence -- it, or the package it would be in; one that is there and
+        # lacks its forgetting is broken.
+        if isinstance(exc, ModuleNotFoundError) and exc.name and (exc.name == module
+                                                                 or module.startswith(exc.name + ".")):
             logger.warning("conversation %s: no %s in this tree, nothing of it there to forget", conv_id, store)
             return _ABSENT
         return exc

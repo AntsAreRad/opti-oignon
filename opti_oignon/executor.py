@@ -123,14 +123,6 @@ except ImportError:
 # a broken tree into a silently degraded prompt.
 from . import context_dedup as _context_dedup
 
-# Cross-conversation memory import (v1.4.0 -- F1, Session 11)
-try:
-    from .memory import memory_manager as _memory_manager
-    MEMORY_AVAILABLE = True
-except ImportError:
-    MEMORY_AVAILABLE = False
-    _memory_manager = None
-
 # The dual-layer working block from the new MemoryStore-backed
 # retriever. The compressed block is injected into the prompt; the full archive
 # stays searchable for recovery. The block is wrapped as untrusted context at
@@ -2226,9 +2218,9 @@ class Executor:
         """The wrapped working-memory block and its label, or an empty string and the clean label.
 
         The label says what the block may carry that the user never
-        endorsed: a block of the frozen legacy store is memory as a whole;
-        the working block is memory unless every fact it places is endorsed,
-        and its lineage names each fact it places. The onion lays its own
+        endorsed: the working block is memory unless every fact it places is
+        endorsed, and its lineage names each fact it places. An empty working
+        block is no block: nothing stands in for it. The onion lays its own
         window, as a journal (``_onion_window``): it is never asked for a
         block here.
 
@@ -2283,16 +2275,9 @@ class Executor:
                 memory_block = ""
                 label = (["memory"], [])
 
-        # Belt-and-suspenders: if the unified composer is entirely unavailable,
-        # fall back to the (frozen, migrated) legacy flat block.
-        if not memory_block and MEMORY_AVAILABLE and _memory_manager is not None:
-            label = (["memory"], [])
-            try:
-                memory_block = _memory_manager.format_for_prompt(max_tokens=500) or ""
-            except Exception as e:
-                logger.debug(f"Memory injection skipped: {e}")
-                memory_block = ""
-
+        # No other block stands in for an empty one: the old store's memories
+        # live in the facts since their migration, and a fact deleted there
+        # must not come back from a copy.
         if memory_block:
             if not UNTRUSTED_WRAP_AVAILABLE or _wrap_untrusted is None:
                 logger.warning(

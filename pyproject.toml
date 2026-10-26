@@ -403,6 +403,25 @@ fail_under = 0
 # tests/test_conversation_forgets_everything_contracts.py keeps its
 # assertions word for word in a window holding the stores.
 #
+# test_migrates_all_facts and test_force_ignores_marker of
+# tests/test_memory_migration.py pinned the old store's migration as a copy:
+# its marker written with every old row left in place, and a forced run that
+# adds every old fact again. The migration now moves (block 187): an old row
+# is deleted once its fact is in the store, the marker waits for an empty old
+# store, and a store migrated before is emptied with nothing added, so a fact
+# the user deleted since never comes back. ft4 and ft5 of
+# tests/test_facts_forgotten_contracts.py keep their other assertions and pin
+# the move. fe12 of tests/test_conversation_forgets_everything_contracts.py
+# kept the old store as read into the window when the facts give nothing;
+# ft13 keeps its census whole and names the old store as emptied.
+#
+# test_q46_window_holds_and_the_module_is_import_pure_at_344_models and
+# test_q47_required_field_census_matches_the_snapshot_with_the_conversation_title
+# of tests/test_api_schemas_contracts.py held the schemas at 344 and their
+# required fields without the facts' trash (block 187). They give way to q48
+# and q49 in the same file, word for word with the two new schemas. They
+# stay in the tree word for word.
+#
 # cq10 pinned, among its assertions, that the health monitor discovers an
 # empty model list when no backend is registered. Under the listing
 # doctrine no backend is nobody looking, so discovery answers unknown;
@@ -1643,4 +1662,9 @@ addopts = """
     --deselect=tests/test_fortress_readiness_contracts.py::test_f19_a_gated_backend_with_a_manifest_is_not_falsely_bricked
     --deselect=tests/test_memory_harness_no_pipeline_contracts.py::test_zp7_the_executor_the_memory_routes_and_the_chat_session_import_the_librarian_and_nothing_else
     --deselect=tests/test_syn01_receive_contracts.py::test_conversation_apply_does_not_republish
+    --deselect=tests/test_memory_migration.py::test_migrates_all_facts
+    --deselect=tests/test_memory_migration.py::test_force_ignores_marker
+    --deselect=tests/test_conversation_forgets_everything_contracts.py::test_fe12_every_table_keyed_by_a_conversation_is_forgotten_or_named
+    --deselect=tests/test_api_schemas_contracts.py::test_q46_window_holds_and_the_module_is_import_pure_at_344_models
+    --deselect=tests/test_api_schemas_contracts.py::test_q47_required_field_census_matches_the_snapshot_with_the_conversation_title
 """

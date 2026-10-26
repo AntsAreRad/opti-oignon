@@ -143,32 +143,58 @@ CLI).
 
 Deleting a conversation from the app stops its live replies -- even when
 the deletion is then refused --, removes its messages and forgets what
-the platform drew from it: the onion memory's copy, its branches and
-their turns, the facts proposed in it, the feedback given in it, what
-the semantic cache kept of it, under the global scope too, its links to
-projects -- the outputs it gave stay with the project --, the artifacts,
-tool calls and coding session the process held of it, and the agent runs
-it started. While another process writes to the conversation store, the
-deletion fails before anything is forgotten. What the databases delete
-is overwritten, whichever write freed it, and the write-ahead logs that
-held its words are emptied (a read in progress keeps one until the next
-deletion); the run journal writes its days again without the
-conversation's runs. Within the process, the stores then refuse anything
-new about the conversation, a write already on its way included, and its
-tool calls are no longer recorded; a coding session a reply that
-outlived the deletion opens again expires with its sandbox; another
-process sharing the stores is not held back. A store that keeps the
-conversation's words and cannot forget -- locked by another process, or
-not opened -- refuses the deletion and names itself; the conversation
-stays, every store takes its writes again, and a deletion asked again
-finishes the work. A conversation that comes back under its id, a peer's
-later edit winning over its deletion, is taken again by every store. A
-deletion does not yet forget the facts drawn from the conversation, the
-response cache (which serves an answer for an hour and keeps it until a
-later lookup cleans it up), or, with the sync package, the change feed's
-copies; and a conversation an older version deleted keeps what these
-stores drew from it, its words perhaps still in their free pages:
-nothing sweeps them yet.
+the platform drew from it: the onion memory's copy, the facts the model
+drew from it -- by the extraction you asked of it, or by the automatic
+capture --, its branches and their turns, the facts proposed in it, the
+feedback given in it, what the semantic cache kept of it, under the
+global scope too, its links to projects -- the outputs it gave stay with
+the project --, the artifacts, tool calls and coding session the process
+held of it, and the agent runs it started. While another process writes
+to the conversation store, the deletion fails before anything is
+forgotten. What the databases delete is overwritten, whichever write
+freed it, and the write-ahead logs that held its words are emptied (a
+read in progress keeps one until the next deletion); the run journal
+writes its days again without the conversation's runs. Within the
+process, the stores then refuse anything new about the conversation, a
+write already on its way included, and its tool calls are no longer
+recorded; a coding session a reply that outlived the deletion opens
+again expires with its sandbox; another process sharing the stores is
+not held back. A store that keeps the conversation's words and cannot
+forget -- locked by another process, or not opened -- refuses the
+deletion and names itself; the conversation stays, every store takes its
+writes again, and a deletion asked again finishes the work. A
+conversation that comes back under its id, a peer's later edit winning
+over its deletion, is taken again by every store. The facts you made
+yours stay: written by hand, asked of the agent, a proposal you
+accepted, or a fact drawn from it that you wrote again, edited or
+confirmed; so do the facts of the memory store of earlier versions, and
+those the automatic capture kept before it said which conversation it
+drew from -- where they came from is not known. A deletion does not yet
+forget the response cache (which serves an answer for an hour and keeps
+it until a later lookup cleans it up), or, with the sync package, the
+change feed's copies; and a conversation an older version deleted keeps
+what these stores drew from it, its words perhaps still in their free
+pages: nothing sweeps them yet.
+
+
+## Memory
+
+The memory panel lists the facts the assistant keeps about you; each
+turn's memory block is composed from them alone. Deleting a fact moves
+it to the trash: it leaves the window at once, and the panel's trash
+shows it with the day it is erased, until you restore it. After 30 days
+(`trash_days` in `opti_oignon/config/memory.yaml`) it is erased for
+good: its text overwritten, and paired devices told. A fact in the trash
+is restored before it is edited. You can erase a fact in the trash at
+once, or empty the trash; Clear all moves every fact to the trash. A
+fact deleted more than 30 days before this version is erased at its
+first start.
+
+The memory store of earlier versions (`memories.db`) is moved into the
+facts at the first start, and then emptied: a fact deleted since never
+comes back from it. A fact that store kept out of service lands in the
+trash, unless that store also kept it in service, or you confirmed it as
+yours since.
 
 
 ## Conversation branches

@@ -20,6 +20,8 @@ from .schemas import (
     MemoryExtractResponse,
     MemoryFactSchema,
     MemoryRecordSchema,
+    MemoryTrashedSchema,
+    MemoryTrashResponse,
     MemoryUnendorsedSchema,
     OnionCodeResponse,
     OnionPinRequest,
@@ -41,8 +43,8 @@ router = APIRouter(prefix="/api/memory", tags=["memory"])
 # M3: the legacy /api/memory surface (list/add/delete/clear/extract) is now
 # backed by the coordinated MemoryStore -- a single source of truth -- mapped
 # onto the existing MemoryFactSchema so the frontend (memory.ts, MemoryPanel)
-# is unchanged. memory_manager is retained only for the one-shot migration and
-# is otherwise frozen. Single-user mode resolves user_id=None to the local user.
+# is unchanged. The old store (memory_manager) is only moved into it, then
+# emptied. Single-user mode resolves user_id=None to the local user.
 # ---------------------------------------------------------------------------
 try:
     from ..conversation import conversation_manager as _conv_manager
@@ -54,6 +56,12 @@ try:
 except Exception:  # pragma: no cover - store optional
     _STORE_OK = False
     _get_store = _extract_and_store = _migrate_legacy = _conv_manager = None
+
+# The trash of the facts: a deleted fact waits there, then is erased for good.
+try:
+    from ..memory import trash as _trash
+except Exception:  # pragma: no cover - store optional
+    _trash = None
 
 try:
     from ..memory.canonical_store import CATEGORIES as _CANON_CATEGORIES
@@ -129,9 +137,45 @@ def add_fact(request: MemoryAddRequest) -> dict:
     return _store_to_fact_schema(record)
 
 
+def _require_trash():
+    if _trash is None:
+        raise HTTPException(status_code=503, detail="Memory trash not available")
+    return _trash
+
+
+# The trash's routes come before ``/{fact_id}``: a path is matched in the
+# order the routes are declared, and "trash" is no fact's id.
+@router.get("/trash", response_model=MemoryTrashResponse)
+def list_trash() -> MemoryTrashResponse:
+    """The facts in the trash, each with when it is erased for good, and the trash's days."""
+    store = _require_store()
+    days, held = _require_trash().listing(store=store, user_id=None)
+    return MemoryTrashResponse(
+        days=days,
+        facts=[MemoryTrashedSchema(**_store_to_fact_schema(record).model_dump(), erase_at=at or "")
+               for record, at in held],
+    )
+
+
+@router.delete("/trash")
+def empty_trash() -> dict:
+    """Erase every fact in the trash at once: overwritten, and the paired devices told."""
+    store = _require_store()
+    return {"erased": _require_trash().empty(store=store, user_id=None)}
+
+
+@router.delete("/trash/{fact_id}")
+def erase_fact(fact_id: str) -> dict:
+    """Erase one fact in the trash at once; a fact in service is never erased here."""
+    store = _require_store()
+    if not _require_trash().erase(fact_id, store=store, user_id=None):
+        raise HTTPException(status_code=404, detail="Fact not in the trash")
+    return {"erased": True, "id": fact_id}
+
+
 @router.delete("/{fact_id}")
 def delete_fact(fact_id: str) -> dict:
-    """Soft-delete a fact (recoverable via the store's restore)."""
+    """Move a fact to the trash: out of the window, restorable, erased for good after the trash's days."""
     store = _require_store()
     deleted = store.soft_delete(fact_id, user_id=None)
     if not deleted:
@@ -141,7 +185,7 @@ def delete_fact(fact_id: str) -> dict:
 
 @router.delete("")
 def clear_all_facts() -> dict:
-    """Soft-delete all active facts (recoverable; the store has no hard clear)."""
+    """Move every fact in service to the trash (restorable, erased for good after the trash's days)."""
     store = _require_store()
     records = store.list(active_only=True, user_id=None)
     count = 0
@@ -359,9 +403,23 @@ def onion_decline_proposal(conv_id: str, proposal_id: str) -> dict:
     return OnionProposalDecisionResponse(conversation_id=conv_id, id=proposal_id, decision="declined").model_dump()
 
 
+# After ``/extract/{conv_id}``: "extract" is no fact's id.
+@router.post("/{fact_id}/restore", response_model=MemoryFactSchema)
+def restore_fact(fact_id: str) -> MemoryFactSchema:
+    """Take a fact out of the trash, back into service; 404 when it is not in the trash."""
+    store = _require_store()
+    if not store.restore(fact_id, user_id=None):
+        raise HTTPException(status_code=404, detail="Fact not in the trash")
+    record = store.get(fact_id, user_id=None)
+    if record is None:  # pragma: no cover - erased meanwhile
+        raise HTTPException(status_code=404, detail="Fact not found")
+    return _store_to_fact_schema(record)
+
+
 @router.post("/migrate")
 def migrate_memory() -> dict:
-    """Re-run the one-shot legacy -> store migration (idempotent; dedup-merged)."""
+    """Run the move of the old memory store again: one never migrated moves, one migrated before is emptied and
+    nothing is added (a fact the user deleted since never comes back)."""
     if _migrate_legacy is None:
         raise HTTPException(status_code=503, detail="Migration not available")
     return _migrate_legacy(force=True)
@@ -487,11 +545,18 @@ def edit_memory(
         raise HTTPException(status_code=422, detail="Invalid category")
     store = get_memory_store()
     user_id = current_user.get("sub")
+    # Words the user wrote: a fact the model drew becomes theirs first, and
+    # stays when its conversation goes.
+    claim = getattr(store, "claim", None)
+    if request.text is not None and callable(claim):
+        claim(fact_id, "manual", user_id=user_id)
+    # A fact in the trash is not edited (the store refuses it: an edit would
+    # restart the days it waits there); it is restored first.
     record = store.update(
         fact_id, text=request.text, category=request.category, user_id=user_id
     )
     if record is None:
-        raise HTTPException(status_code=404, detail="Memory not found")
+        raise HTTPException(status_code=404, detail="Memory not found, or in the trash")
     # The user's own edit: the text as it then reads is theirs.
     if request.text is not None:
         _endorse_written(store, record, request.text, user_id=user_id)
@@ -555,7 +620,14 @@ def adopt_memories(request: MemoryAdoptRequest, current_user: dict = Depends(_ge
     user_id = current_user.get("sub")
     adopted, refused = [], []
     for item in request.items:
-        (adopted if store.adopt(item.id, item.digest, user_id=user_id) else refused).append(item.id)
+        if store.adopt(item.id, item.digest, user_id=user_id):
+            # Confirmed as theirs: a fact the model drew stays when its conversation goes.
+            claim = getattr(store, "claim", None)
+            if callable(claim):
+                claim(item.id, "manual", user_id=user_id)
+            adopted.append(item.id)
+        else:
+            refused.append(item.id)
     return {"adopted": adopted, "refused": refused}
 
 

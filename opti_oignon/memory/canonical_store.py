@@ -28,13 +28,14 @@ from __future__ import annotations
 import hashlib
 import logging
 import sqlite3
+import sys
 import threading
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable, Iterable, Iterator
 
 logger = logging.getLogger(__name__)
 
@@ -302,6 +303,49 @@ def _sync_publish_memory_fact(
         )
 
 
+def open_vector_layer() -> Any:
+    """This process's vector layer when it is open, else None. It is never opened only to drop a vector: a store
+    reached by a sync round, a deletion in another process, or a test, is not made to open the knowledge base's file
+    and its key. What the layer holds of a fact is then owed (``owed_vectors``), and the trash's pass, which opens it,
+    settles it."""
+    module = sys.modules.get("opti_oignon.memory.vector_store")
+    return getattr(module, "_vector_store", None) if module is not None else None
+
+
+def _drop_vector(fact_id: str) -> bool:
+    """Drop this device's vector of a fact a peer put out of service or erased: the vector layer keeps its text.
+    False when the layer is not open in this process, or fails: the drop is then owed."""
+    layer = open_vector_layer()
+    if layer is None:
+        return False
+    try:
+        layer.delete(fact_id)
+    except Exception:  # noqa: BLE001 - said, and owed to the trash's next pass
+        logger.warning("fact %s: this device's vector of it could not be dropped; owed to the trash's next pass",
+                       fact_id, exc_info=True)
+        return False
+    return True
+
+
+def _write_lock() -> Any:
+    """The facts' write lock (``dedup.write_lock``); a process without the memory store has none to take."""
+    try:
+        from . import dedup
+    except ImportError:
+        return nullcontext()
+    return dedup.write_lock()
+
+
+def _forgotten_here(source: str) -> bool:
+    """Whether ``source`` names a conversation this process forgot (the facts' marks, ``dedup.forgotten``)."""
+    try:
+        from . import dedup
+    except ImportError:
+        return False
+    drawn = dedup.drawn_from(source)
+    return drawn is not None and dedup.forgotten(drawn)
+
+
 class CanonicalMemoryStore:
     """SQLite-backed canonical store for memory facts (the source of truth)."""
 
@@ -324,6 +368,9 @@ class CanonicalMemoryStore:
         conn.row_factory = sqlite3.Row
         # WAL is set outside any transaction (right after connect).
         conn.execute("PRAGMA journal_mode=WAL")
+        # What any write frees -- an erased fact, the text an edit replaced -- is overwritten, never left in the
+        # file's free pages: the cipher's driver does not do it by default.
+        conn.execute("PRAGMA secure_delete = ON")
         return conn
 
     @contextmanager
@@ -357,6 +404,11 @@ class CanonicalMemoryStore:
                     ON memory_facts(active);
                 CREATE INDEX IF NOT EXISTS idx_memory_facts_user
                     ON memory_facts(user_id);
+                CREATE TABLE IF NOT EXISTS vectors_owed (
+                    fact_id TEXT PRIMARY KEY,
+                    act TEXT NOT NULL,
+                    since TEXT NOT NULL
+                );
                 """
             )
             # Endorsements arrived after the table: an older file gains the
@@ -487,6 +539,46 @@ class CanonicalMemoryStore:
         with self._lock, self._conn() as conn:
             row = conn.execute(sql, (uid,)).fetchone()
         return int(row["n"])
+
+    def held_under(self, sources: Iterable[str]) -> list[tuple[str, str]]:
+        """The id and the owner of every fact written under one of ``sources``, in service or in the trash, every
+        user's: what a conversation's deletion erases (``MemoryStore.forget_conversation``)."""
+        wanted = sorted({str(source) for source in sources})
+        if not wanted:
+            return []
+        # Only "?" placeholders are assembled; every source travels as a parameter.
+        marks = ", ".join("?" for _ in wanted)
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(f"SELECT id, user_id FROM memory_facts WHERE source IN ({marks})", wanted).fetchall()
+        return [(str(row["id"]), str(row["user_id"])) for row in rows]
+
+    def trashed_before(self, cutoff: str) -> list[tuple[str, str]]:
+        """The id and the owner of every fact in the trash whose last change is ``cutoff`` (ISO-8601 UTC, as
+        ``updated_at``) or older, every user's: what the trash erases (``memory.trash``)."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id, user_id FROM memory_facts WHERE active = 0 AND updated_at <= ?", (cutoff,)
+            ).fetchall()
+        return [(str(row["id"]), str(row["user_id"])) for row in rows]
+
+    def empty_log(self, what: str) -> None:
+        """Empty the write-ahead log after an erasure: while another connection keeps the log, its older frames
+        still hold the erased facts. Never waits: a read in progress keeps the log, said, until the next erasure or
+        the last connection's close removes it. ``what`` names the erasure in what is said."""
+        with self._lock:
+            conn = self._connect()
+            try:
+                conn.execute("PRAGMA busy_timeout = 0")
+                busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+                logger.warning("%s; the write-ahead log of the facts could not be emptied (%s: %s)",
+                               what, type(exc).__name__, exc)
+                return
+            finally:
+                conn.close()
+        if busy:
+            logger.warning("%s; a read in progress keeps the write-ahead log of the facts, whose older frames hold "
+                           "them until the next erasure or the last connection closes", what)
 
     # Update
 
@@ -677,6 +769,23 @@ class CanonicalMemoryStore:
                 )
             return deleted
 
+    def erase(self, fact_id: str, *, trashed_only: bool = False) -> bool:
+        """Delete a fact by its id whoever owns it, and tell the peers (a tombstone); whether it went.
+
+        The erasures the store makes on its own account -- a deleted conversation's facts, the trash past its days
+        -- act for no user: a fact a peer brought keeps the owner it came with, which this device's mode may not
+        resolve to. ``trashed_only`` erases the fact only while it is in the trash: one restored meanwhile stays.
+        """
+        # Two constant statements; the id travels as a parameter.
+        sql = "DELETE FROM memory_facts WHERE id = ? AND active = 0" if trashed_only else (
+            "DELETE FROM memory_facts WHERE id = ?")
+        with self._lock:
+            with self._conn() as conn:
+                deleted = conn.execute(sql, (fact_id,)).rowcount > 0
+            if deleted:
+                _sync_publish_memory_fact(fact_id, deleted=True, updated_at=_now())
+            return deleted
+
     def clear(self, *, user_id: str | None = None) -> int:
         """Remove all of the user's rows (tests, resets, the UD-03 user wipe).
 
@@ -735,7 +844,10 @@ class CanonicalMemoryStore:
         round-trips), written verbatim. Fact text is stored as-is into the
         SQLCipher store (no per-field layer, unlike conversation messages). A
         ``deleted`` record HARD-deletes the fact by id (the converged deletion;
-        a soft delete is the ``active`` flag, never a tombstone).
+        a soft delete is the ``active`` flag, never a tombstone). This
+        device's vector of a fact out of service or erased goes with it, or is
+        owed (``owed_vectors``); a fact drawn from a conversation this process
+        forgot is refused. All of it under the facts' write lock.
 
         Fail-secure: a malformed payload (not a dict, no nested ``fact``, no id,
         a non-string text, or a nested id that does not match the record key)
@@ -744,56 +856,113 @@ class CanonicalMemoryStore:
         state.
         """
         try:
-            if deleted:
-                with self._lock, self._conn() as conn:
-                    conn.execute(
-                        "DELETE FROM memory_facts WHERE id = ?", (record_id,)
-                    )
-                return True
-            if not isinstance(payload, dict):
-                return False
-            fact = payload.get("fact")
-            if not isinstance(fact, dict):
-                return False
-            fid = fact.get("id")
-            if not isinstance(fid, str) or not fid or fid != record_id:
-                return False
-            text = fact.get("text")
-            if not isinstance(text, str):
-                return False
-            uid = payload.get("user_id") or DEFAULT_LOCAL_USER
-            category = fact.get("category") or DEFAULT_CATEGORY
-            if category not in CATEGORIES:
-                category = DEFAULT_CATEGORY
-            source = fact.get("source") or ""
-            created_at = fact.get("created_at") or ""
-            upd = fact.get("updated_at") or updated_at or ""
-            active = 1 if fact.get("active", True) else 0
-            with self._lock, self._conn() as conn:
-                conn.execute(
-                    "INSERT INTO memory_facts "
-                    "(id, text, category, source, user_id, created_at, "
-                    "updated_at, active, use_count) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) "
-                    "ON CONFLICT(id) DO UPDATE SET "
-                    "text=excluded.text, category=excluded.category, "
-                    "source=excluded.source, user_id=excluded.user_id, "
-                    "created_at=excluded.created_at, "
-                    "updated_at=excluded.updated_at, active=excluded.active, "
-                    # A peer never brings an endorsement: this device's stays
-                    # only while the fact stays in service, its text and its
-                    # owner unchanged.
-                    "endorsed=CASE WHEN memory_facts.active = 1 AND excluded.active = 1 "
-                    "AND memory_facts.text = excluded.text AND memory_facts.user_id = excluded.user_id "
-                    "THEN memory_facts.endorsed ELSE NULL END",
-                    (fid, text, category, source, uid, created_at, upd, active),
-                )
-            return True
+            # Under the facts' write lock, as a write of this device's own: a
+            # forgetting that comes erases what lands, or refuses it after.
+            with _write_lock():
+                return self._apply_synced(record_id, payload, deleted=deleted, updated_at=updated_at)
         except Exception:
             logger.debug(
                 "memory-canonical apply failed for %s", record_id, exc_info=True
             )
             return False
+
+    def _apply_synced(self, record_id: str, payload: Any, *, deleted: bool, updated_at: str) -> bool:
+        """The apply, under the facts' write lock (``apply_synced_memory_canonical``).
+
+        The fact's row changes first. This device's vector of a fact out of
+        service or erased is dropped after it, and one back in service is
+        given back later (``owed_vectors``, settled by the trash's pass): a
+        record refused here would never come again, the round having moved
+        past it, so the vector layer never refuses one.
+        """
+        if deleted:
+            with self._lock, self._conn() as conn:
+                conn.execute(
+                    "DELETE FROM memory_facts WHERE id = ?", (record_id,)
+                )
+            if not _drop_vector(record_id):
+                self.owe_vector(record_id, "drop")
+            self.empty_log(f"a peer's erasure of fact {record_id} applied")
+            return True
+        if not isinstance(payload, dict):
+            return False
+        fact = payload.get("fact")
+        if not isinstance(fact, dict):
+            return False
+        fid = fact.get("id")
+        if not isinstance(fid, str) or not fid or fid != record_id:
+            return False
+        text = fact.get("text")
+        if not isinstance(text, str):
+            return False
+        uid = payload.get("user_id") or DEFAULT_LOCAL_USER
+        category = fact.get("category") or DEFAULT_CATEGORY
+        if category not in CATEGORIES:
+            category = DEFAULT_CATEGORY
+        source = fact.get("source") or ""
+        if _forgotten_here(source):
+            # Drawn from a conversation this process forgot: refused, as
+            # a write of this device's own would be.
+            return False
+        created_at = fact.get("created_at") or ""
+        upd = fact.get("updated_at") or updated_at or ""
+        active = 1 if fact.get("active", True) else 0
+        with self._lock, self._conn() as conn:
+            prior = conn.execute("SELECT active FROM memory_facts WHERE id = ?", (fid,)).fetchone()
+            conn.execute(
+                "INSERT INTO memory_facts "
+                "(id, text, category, source, user_id, created_at, "
+                "updated_at, active, use_count) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0) "
+                "ON CONFLICT(id) DO UPDATE SET "
+                "text=excluded.text, category=excluded.category, "
+                "source=excluded.source, user_id=excluded.user_id, "
+                "created_at=excluded.created_at, "
+                "updated_at=excluded.updated_at, active=excluded.active, "
+                # A peer never brings an endorsement: this device's stays
+                # only while the fact stays in service, its text and its
+                # owner unchanged.
+                "endorsed=CASE WHEN memory_facts.active = 1 AND excluded.active = 1 "
+                "AND memory_facts.text = excluded.text AND memory_facts.user_id = excluded.user_id "
+                "THEN memory_facts.endorsed ELSE NULL END",
+                (fid, text, category, source, uid, created_at, upd, active),
+            )
+        if not active:
+            # Out of service on the peer: this device's vector of it goes,
+            # as this device's own deletion drops it, or it is owed.
+            if not _drop_vector(fid):
+                self.owe_vector(fid, "drop")
+        elif prior is not None and not prior["active"]:
+            # Back in service on the peer: its vector comes back here.
+            self.owe_vector(fid, "add")
+        return True
+
+    def by_id(self, fact_id: str) -> MemoryRecord | None:
+        """A fact by its id, whoever owns it: what the vector layer owes is settled on the fact as it is now."""
+        with self._lock, self._conn() as conn:
+            row = conn.execute("SELECT * FROM memory_facts WHERE id = ?", (fact_id,)).fetchone()
+        return _row_to_record(row) if row is not None else None
+
+    def owed_vectors(self) -> list[tuple[str, str]]:
+        """What the vector layer owes the facts a peer changed: (fact id, ``drop`` or ``add``), oldest first."""
+        with self._lock, self._conn() as conn:
+            rows = conn.execute("SELECT fact_id, act FROM vectors_owed ORDER BY since").fetchall()
+        return [(str(row["fact_id"]), str(row["act"])) for row in rows]
+
+    def settle_vector(self, fact_id: str) -> None:
+        """What the vector layer owed a fact is done."""
+        with self._lock, self._conn() as conn:
+            conn.execute("DELETE FROM vectors_owed WHERE fact_id = ?", (fact_id,))
+
+    def owe_vector(self, fact_id: str, act: str) -> None:
+        """Owe a fact's vector a ``drop`` or an ``add``, for the trash's pass to settle
+        (``MemoryStore.settle_vectors``)."""
+        with self._lock, self._conn() as conn:
+            conn.execute(
+                "INSERT INTO vectors_owed (fact_id, act, since) VALUES (?, ?, ?) "
+                "ON CONFLICT(fact_id) DO UPDATE SET act = excluded.act, since = excluded.since",
+                (fact_id, act, _now()),
+            )
 
 
 # Module-level singleton with a reset for test isolation (lesson: never

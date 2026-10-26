@@ -732,6 +732,11 @@ def apply_write(store: str, action: str, arguments: dict, *, source: str, memory
                 return f"Memory merged into existing fact {_fact_line(record)}."
             return f"Memory added {_fact_line(record)}."
         if action == "update":
+            # Words of the user's act: a fact the model drew becomes theirs first, and stays when its conversation
+            # goes (``MemoryStore.claim``).
+            claim = getattr(target, "claim", None)
+            if callable(claim) and arguments.get("text") is not None:
+                claim(fact_id, source)
             record = target.update(fact_id, text=arguments.get("text"), category=arguments.get("category"))
             if record is not None and arguments.get("text") is not None:
                 _endorse_written(target, record, arguments["text"])

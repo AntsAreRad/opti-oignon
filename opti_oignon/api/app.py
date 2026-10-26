@@ -165,9 +165,10 @@ async def lifespan(app: FastAPI):
     # driver, not here.
     from opti_oignon.veilid.sync_service import arm_if_enabled
     arm_if_enabled()
-    # One-shot legacy -> store memory migration (M3a-startup). Idempotent and
-    # marker-guarded (a no-op after the first successful pass), and it never
-    # raises -- a migration problem must not break the boot.
+    # The legacy -> store memory move (M3a-startup): an old store never
+    # migrated moves, one migrated before is emptied, and an empty or absent
+    # one opens nothing. It never raises -- a migration problem must not
+    # break the boot.
     try:
         from ..memory.migration import run_boot_migration
         run_boot_migration()
@@ -192,6 +193,24 @@ async def lifespan(app: FastAPI):
         retention = asyncio.create_task(_journal_retention())
     except Exception:  # noqa: BLE001 - startup must not break on the run journal
         logger.warning("boot: the run journal could not be tended", exc_info=True)
+    # The facts' trash keeps no fact past its days, as the journal: those
+    # that passed them while the server was down are erased now, and every
+    # hour after. The pass runs off the event loop.
+    trash = None
+    try:
+        import asyncio
+
+        from opti_oignon.memory import trash as _trash
+        _trash.tend()
+
+        async def _trash_retention() -> None:
+            while True:
+                await asyncio.sleep(_trash.PRUNE_INTERVAL_S)
+                await asyncio.to_thread(_trash.tend)
+
+        trash = asyncio.create_task(_trash_retention())
+    except Exception:  # noqa: BLE001 - startup must not break on the trash
+        logger.warning("boot: the facts' trash could not be tended", exc_info=True)
     # The conversations' titles are tended now, the key loaded: those still on
     # the placeholder that hold a user turn are titled from their typed words,
     # and those still in plaintext are encrypted. Idempotent, and it never
@@ -223,6 +242,8 @@ async def lifespan(app: FastAPI):
     yield
     if retention is not None:
         retention.cancel()
+    if trash is not None:
+        trash.cancel()
     # Shutdown: stop the sync driver if it was armed (a no-op otherwise).
     from opti_oignon.veilid.sync_service import reset_sync_service
     reset_sync_service()

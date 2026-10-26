@@ -1,0 +1,7 @@
+# Memory: the facts the window reads (see opti_oignon/memory/).
+
+# Days a deleted fact stays in the trash -- out of the window, shown in the
+# memory panel, restorable -- counted from its deletion, before it is erased
+# for good: its row deleted and overwritten, and the paired devices told.
+# A whole number from 1 to 3650; any other value keeps the default below.
+trash_days: 30

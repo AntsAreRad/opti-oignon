@@ -26,6 +26,9 @@ Design:
   offers it the conversation as the mirror reads it, each turn with its
   origin; a read without origins gives nothing, and with nothing typed the
   extraction is not called.
+* ITS CONVERSATION SAID. A fact it writes keeps the conversation it was drawn
+  from (the source ``auto-capture:<id>``), and goes when that conversation is
+  deleted; a capture that lands after the deletion is refused by the store.
 
 The dispatch is injectable (``runner``) so the gate/throttle logic is unit
 tested without spawning a thread or loading the model.
@@ -173,15 +176,18 @@ def _default_runner(
     *,
     user_id: str | None = None,
     model: str | None = None,
+    conversation_id: str | None = None,
 ) -> None:
     """Run the extraction over the typed words in a daemon thread; swallow any failure.
 
     The extractor is imported lazily so importing this module stays light and
     free of the model/store import chain. With no typed word, nothing runs.
+    The facts are written under the source ``auto-capture:<conversation_id>``.
     """
     typed = typed_turns(messages)
     if not typed:
         return
+    source = f"auto-capture:{conversation_id}" if conversation_id else "auto-capture"
 
     def _job() -> None:
         try:
@@ -190,7 +196,7 @@ def _default_runner(
             # Typed words alone: a single turn of them is worth the model pass,
             # and the facts drawn from them are the user's own.
             extract_and_store(
-                typed, source="auto-capture", user_id=user_id, model=model, min_messages=1, endorsed=True
+                typed, source=source, user_id=user_id, model=model, min_messages=1, endorsed=True
             )
         except Exception:  # noqa: BLE001
             logger.debug("auto-capture extraction failed", exc_info=True)
@@ -226,9 +232,17 @@ def maybe_capture(
     # double-fire on the same growth.
     _capture_watermark[conversation_id] = count
 
-    run = runner if runner is not None else _default_runner
     try:
-        run(list(messages), user_id=user_id, model=model)
+        if runner is not None:
+            runner(list(messages), user_id=user_id, model=model)
+        else:
+            # The default runner writes under the conversation it draws from.
+            _default_runner(list(messages), user_id=user_id, model=model, conversation_id=conversation_id)
     except Exception:  # noqa: BLE001
         logger.debug("auto-capture dispatch failed", exc_info=True)
     return True
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Let go of a deleted conversation's watermark; 1 when there was one. Its facts are the store's to erase."""
+    return 1 if _capture_watermark.pop(str(conversation_id), None) is not None else 0

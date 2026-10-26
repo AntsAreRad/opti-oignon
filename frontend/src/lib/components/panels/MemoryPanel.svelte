@@ -8,11 +8,31 @@
 	import { activeConversationId } from '$lib/stores/conversations';
 	import { closePanel } from '$lib/stores/panels';
 	import { toastError, toastSuccess } from '$lib/stores/notifications';
-	import { listFacts, createFact, deleteFact, clearAllFacts, extractFacts } from '$lib/api/memory';
-	import type { MemoryFact } from '$lib/types';
+	import {
+		listFacts,
+		createFact,
+		deleteFact,
+		clearAllFacts,
+		extractFacts,
+		listTrash,
+		restoreFact,
+		eraseFact,
+		emptyTrash,
+	} from '$lib/api/memory';
+	import type { MemoryFact, MemoryTrashedFact } from '$lib/types';
+	import { Button, ConfirmDialog, TextButton } from '$lib/ds';
+	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
+	import { isPhone } from '$lib/stores/ui';
 	import PendingWritesReview from './PendingWritesReview.svelte';
 
 	let facts: MemoryFact[] = [];
+	// The trash: a deleted fact waits there, restorable, until it is erased for good after trashDays.
+	let trash: MemoryTrashedFact[] = [];
+	let trashDays = 30;
+	let showTrash = false;
+	// What the erase dialog asks about: one fact, or the whole trash (null: the dialog is closed).
+	let erasing: MemoryTrashedFact | 'all' | null = null;
+	let erasingBusy = false;
 	// The review section: the writes waiting for the user, reread after an extraction.
 	let review: PendingWritesReview | undefined;
 	let loading = false;
@@ -56,12 +76,23 @@
 		}
 	}
 
+	async function loadTrash() {
+		try {
+			const result = await listTrash();
+			trash = result.facts;
+			trashDays = result.days;
+		} catch {
+			trash = [];
+		}
+	}
+
 	async function handleDelete(factId: string) {
 		try {
 			await deleteFact(factId);
 			facts = facts.filter(f => f.id !== factId);
 			deleteConfirmId = null;
-			toastSuccess('Fact deleted');
+			toastSuccess(`Moved to the trash: erased for good in ${trashDays} days`);
+			await loadTrash();
 		} catch {
 			toastError('Failed to delete fact');
 		}
@@ -72,10 +103,49 @@
 			const result = await clearAllFacts();
 			facts = [];
 			clearConfirm = false;
-			toastSuccess(`Cleared ${result.count} facts`);
+			toastSuccess(`Moved ${result.count} facts to the trash: erased for good in ${trashDays} days`);
+			await loadTrash();
 		} catch {
 			toastError('Failed to clear facts');
 		}
+	}
+
+	async function handleRestore(factId: string) {
+		try {
+			await restoreFact(factId);
+			trash = trash.filter(f => f.id !== factId);
+			toastSuccess('Fact restored');
+			await loadFacts();
+		} catch {
+			toastError('Failed to restore fact');
+		}
+	}
+
+	async function handleErase() {
+		const target = erasing;
+		if (target === null) return;
+		erasingBusy = true;
+		try {
+			if (target === 'all') {
+				const result = await emptyTrash();
+				trash = [];
+				toastSuccess(`Erased ${result.erased} facts for good`);
+			} else {
+				await eraseFact(target.id);
+				trash = trash.filter(f => f.id !== target.id);
+				toastSuccess('Fact erased for good');
+			}
+			erasing = null;
+		} catch {
+			toastError(target === 'all' ? 'Failed to empty the trash' : 'Failed to erase fact');
+		} finally {
+			erasingBusy = false;
+		}
+	}
+
+	function eraseLabel(dateStr: string): string {
+		if (!dateStr) return 'erased soon';
+		return `erased on ${new Date(dateStr).toLocaleDateString()}`;
 	}
 
 	async function handleExtract() {
@@ -129,7 +199,10 @@
 		return `${days}d ago`;
 	}
 
-	onMount(loadFacts);
+	onMount(() => {
+		loadFacts();
+		loadTrash();
+	});
 </script>
 
 <div class="h-full flex flex-col bg-surface-900">
@@ -216,7 +289,7 @@
 				<div class="ml-auto">
 					{#if clearConfirm}
 						<span class="inline-flex items-center gap-1 text-[10px]">
-							<span class="text-[var(--oo-error)]">Clear all?</span>
+							<span class="text-[var(--oo-error)]">Move all to the trash?</span>
 							<button
 								on:click={handleClearAll}
 								class="text-[var(--oo-error)] hover:text-[var(--oo-error)] font-medium"
@@ -268,7 +341,7 @@
 									<button
 										on:click={() => handleDelete(fact.id)}
 										class="text-[10px] text-[var(--oo-error)] hover:text-[var(--oo-error)] font-medium"
-									>Del</button>
+									>Trash</button>
 									<button
 										on:click={() => (deleteConfirmId = null)}
 										class="text-[10px] text-surface-500 hover:text-surface-300"
@@ -279,7 +352,7 @@
 									on:click={() => (deleteConfirmId = fact.id)}
 									class="p-0.5 rounded text-surface-600 hover:text-[var(--oo-error)] transition-colors
 										opacity-0 group-hover:opacity-100"
-									title="Delete fact"
+									title="Move to the trash"
 								>
 									<svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
 										<path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -304,5 +377,56 @@
 				{/each}
 			</div>
 		{/if}
+
+		<!-- The trash: deleted facts, restorable until they are erased for good -->
+		{#if trash.length > 0}
+			<div class="mt-2 px-3 pb-3">
+				<div class="flex items-center justify-between gap-2">
+					<TextButton expanded={showTrash} controls="memory-trash" on:click={() => (showTrash = !showTrash)}>
+						{showTrash ? 'Hide' : 'Show'} the trash ({trash.length})
+					</TextButton>
+					{#if showTrash}
+						<Button variant="ghost" size="sm" on:click={() => (erasing = 'all')}>Empty the trash</Button>
+					{/if}
+				</div>
+				{#if showTrash}
+					<div id="memory-trash" class="mt-1 space-y-2">
+						<p class="text-xs text-surface-500">
+							A deleted fact is erased for good after {trashDays} days.
+						</p>
+						{#each trash as fact (fact.id)}
+							<div class="space-y-1">
+								<p class="text-xs text-surface-500 leading-relaxed">{fact.fact}</p>
+								<div class="flex items-center gap-2">
+									<span class="text-xs text-surface-600">{eraseLabel(fact.erase_at)}</span>
+									<span class="ml-auto inline-flex gap-1">
+										<Button variant="ghost" size="sm" on:click={() => handleRestore(fact.id)}>Restore</Button>
+										<Button variant="danger" size="sm" on:click={() => (erasing = fact)}>Erase</Button>
+									</span>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+			</div>
+		{/if}
 	</div>
 </div>
+
+<ConfirmDialog
+	open={erasing !== null}
+	title={erasing === 'all' ? 'Empty the trash?' : 'Erase this fact for good?'}
+	message={erasing === 'all'
+		? `The ${trash.length} facts in the trash are erased for good: they cannot be restored.`
+		: 'It is erased for good: it cannot be restored.'}
+	confirmLabel="Erase"
+	cancelLabel="Keep"
+	danger
+	busy={erasingBusy}
+	onConfirm={handleErase}
+	onCancel={() => (erasing = null)}
+>
+	<svelte:fragment slot="actions">
+		<StopAllButton placement="dialog-head" large={$isPhone} />
+	</svelte:fragment>
+</ConfirmDialog>

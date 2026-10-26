@@ -25,7 +25,6 @@ from .deps import (
     SEMANTIC_CACHE_AVAILABLE,
     conversation_manager,
     executor,
-    memory_manager,
     model_warmup,
     perf_benchmark_runner,
     response_cache,
@@ -68,10 +67,13 @@ def health_dashboard() -> dict:
         except Exception as e:
             logger.debug(f"Could not count conversations: {e}")
 
-    # Memory fact count
-    if MEMORY_AVAILABLE and memory_manager is not None:
+    # Memory fact count: the facts in service, in the store the window reads
+    # (the old store is emptied once its memories moved into it).
+    if MEMORY_AVAILABLE:
         try:
-            dashboard.memory_fact_count = memory_manager.count_facts()
+            from opti_oignon.memory.canonical_store import get_canonical_store
+
+            dashboard.memory_fact_count = get_canonical_store().count()
         except Exception as e:
             logger.debug(f"Could not count memory facts: {e}")
 
