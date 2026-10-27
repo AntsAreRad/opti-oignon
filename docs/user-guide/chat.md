@@ -180,6 +180,9 @@ which conversation it drew from -- where they came from is not known.
 The sandbox's audit is asked by the process that runs the sandbox, the
 server: a deletion from another process leaves it, and a session that
 ran for no conversation (an agent run's tools) keeps its commands whole.
+The files a conversation's code wrote (the code execution outputs) and
+those copied out of a sandbox (the sandbox's exports) are kept by no
+conversation: a deletion leaves them, and the account wipe names them.
 A conversation an older version deleted keeps what these stores drew
 from it, its words perhaps still in their free pages: nothing sweeps
 them yet.

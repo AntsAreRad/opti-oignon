@@ -307,6 +307,26 @@ class HumanizerFeedbackDB:
             logger.error("Failed to store rating: %s", e)
             return False
 
+    def empty(self) -> int:
+        """Delete every comparison and rating, overwritten; how many comparisons.
+
+        A file that is not there holds none, and is not created. One that is there and cannot be emptied raises:
+        never taken for an empty one.
+        """
+        if not Path(self._db_path).exists():
+            return 0
+        conn = _safe_connect(self._db_path, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA secure_delete = ON")
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            if "ratings" in tables:
+                conn.execute("DELETE FROM ratings")
+            gone = conn.execute("DELETE FROM comparisons").rowcount if "comparisons" in tables else 0
+            conn.commit()
+            return gone
+        finally:
+            conn.close()
+
     def get_stats(self) -> FeedbackStats:
         """Compute aggregated feedback statistics."""
         stats = FeedbackStats()
@@ -896,3 +916,13 @@ except Exception as _init_err:
     logger.error("Failed to initialize HumanizerEngine: %s", _init_err)
     humanizer_engine = None  # type: ignore[assignment]
     HUMANIZER_AVAILABLE = False
+
+
+def empty_feedback() -> int:
+    """Delete every comparison and rating, with the texts compared, from the engine's store, or the one the
+    configuration names when the engine did not start; how many comparisons. The account wipe asks it for a
+    single-user install's one user: the store is the install's."""
+    if humanizer_engine is not None:
+        return humanizer_engine._feedback_db.empty()
+    name = _load_config().get("feedback_db", "humanizer_feedback.db")
+    return HumanizerFeedbackDB(_DATA_DIR / name).empty()

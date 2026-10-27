@@ -1465,6 +1465,53 @@ def load_rag_config() -> dict[str, Any]:
 _store_instance: RAGVectorStore | None = None
 
 
+def _default_data_dir() -> Path:
+    """The knowledge base's folder when none is given, by the store's own rule (``RAGVectorStore.__init__``)."""
+    try:
+        from opti_oignon.config import DATA_DIR
+        return Path(DATA_DIR) / "rag"
+    except ImportError:
+        return Path.home() / ".opti-oignon" / "data" / "rag"
+
+
+def forget_every_query(data_dir: str | Path | None = None) -> int:
+    """Delete every search the knowledge base logged -- each query, word for word, with what it cited -- overwritten,
+    the log emptied; how many. The documents and the collections stay.
+
+    The folder is the store's, else the one given, else the default. A file that is not there holds none, and is not
+    created; one that is there and cannot be emptied raises: never taken for an empty one. The account wipe asks it
+    for a single-user install's one user: the log is the install's.
+    """
+    if data_dir is None:
+        data_dir = _store_instance.data_dir if _store_instance is not None else _default_data_dir()
+    path = Path(data_dir) / "rag_documents.db"
+    if not path.exists():
+        return 0
+    conn = _safe_connect(path)
+    try:
+        conn.execute("PRAGMA secure_delete = ON")
+        tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        gone = conn.execute("DELETE FROM citations").rowcount if "citations" in tables else 0
+        conn.commit()
+        conn.execute("PRAGMA busy_timeout = 0")
+        if conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+            logger.warning("the knowledge base's searches forgotten; a read in progress keeps the write-ahead log, "
+                           "whose older frames hold them until the last connection closes")
+        return gone
+    finally:
+        conn.close()
+
+
+def existing_rag_store() -> RAGVectorStore | None:
+    """The module's store when it is built, or built now when its tracking file is there in the default folder; None
+    otherwise: asking an install that has no knowledge base makes nothing."""
+    if _store_instance is not None:
+        return _store_instance
+    if not (_default_data_dir() / "rag_documents.db").exists():
+        return None
+    return get_rag_store()
+
+
 def get_rag_store(
     data_dir: str | Path | None = None,
     embedding_model: str = EMBEDDING_MODEL,

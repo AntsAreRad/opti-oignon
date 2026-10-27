@@ -546,6 +546,28 @@ class FeedbackStore:
         finally:
             conn.close()
 
+    def empty(self) -> int:
+        """Delete every feedback entry, those given outside any conversation included, overwritten, the log
+        emptied; how many.
+
+        A file that is not there holds none, and is not created. One that is there and cannot be emptied raises:
+        never taken for an empty one.
+        """
+        if not self._db_path.exists():
+            return 0
+        with _MARKS_LOCK:
+            conn = self._get_conn()
+            try:
+                gone = conn.execute("DELETE FROM feedback").rowcount
+                conn.commit()
+                conn.execute("PRAGMA busy_timeout = 0")
+                if conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+                    logger.warning("the feedback store emptied; a read in progress keeps the write-ahead log, whose "
+                                   "older frames hold the entries until the last connection closes")
+                return gone
+            finally:
+                conn.close()
+
     def clear(self) -> int:
         """Delete all feedback entries.
 
@@ -795,3 +817,11 @@ def forget_conversation(conversation_id: str) -> int:
 def unforget_conversation(conversation_id: str) -> None:
     """Take feedback about the conversation again: its deletion was refused, and it stays."""
     _FORGOTTEN.discard(conversation_id)
+
+
+def empty() -> int:
+    """Delete every feedback entry, overwritten; how many. The account wipe asks it for a single-user install's one
+    user: the store is the install's. A store that did not start cannot be looked into, and raises."""
+    if feedback_store is None:
+        raise RuntimeError("the feedback store did not start, so it cannot be emptied")
+    return feedback_store.empty()

@@ -89,6 +89,8 @@ class DeleteDataResponse(BaseModel):
     encryption_keys: bool = False
     # REV-2: identity-bound plugin reviews join the cascade.
     plugin_reviews: int = 0
+    # The user's proposals waiting for review, removed so none brings wiped words back.
+    pending_writes: int = 0
     # UD-03: stores the per-user wipe cannot cover today
     # (single-user / unscoped); never empty until the scoping cycle.
     not_covered: list[str] = []

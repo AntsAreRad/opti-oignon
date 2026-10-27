@@ -897,6 +897,27 @@ class UserPreferencesStore:
         except Exception as exc:
             logger.warning("Failed to record preference: %s", exc)
 
+    def empty(self) -> int:
+        """Delete every decision and the summary, overwritten; how many decisions.
+
+        A file that is not there holds none, and is not created. One that is there and cannot be emptied raises:
+        never taken for an empty one.
+        """
+        if not os.path.exists(self._db_path):
+            return 0
+        with self._lock:
+            conn = _safe_connect(self._db_path)
+            try:
+                conn.execute("PRAGMA secure_delete = ON")
+                tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+                gone = conn.execute("DELETE FROM preferences").rowcount if "preferences" in tables else 0
+                if "preference_summary" in tables:
+                    conn.execute("DELETE FROM preference_summary")
+                conn.commit()
+                return gone
+            finally:
+                conn.close()
+
     def get_ratios(self) -> dict[str, float]:
         """Get cumulative decision ratios.
 
@@ -1434,3 +1455,9 @@ except Exception as _exc:
     logger.warning("FingerprintManager init failed: %s", _exc)
     fingerprint_manager = None
     FINGERPRINT_AVAILABLE = False
+
+
+def empty_preferences() -> int:
+    """Delete every decision the coding agent recorded, with their context, from the store the configuration
+    names; how many. The account wipe asks it for a single-user install's one user: the store is the install's."""
+    return UserPreferencesStore(db_path=_anchor(fingerprint_config.sqlite_path)).empty()

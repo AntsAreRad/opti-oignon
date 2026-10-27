@@ -17,6 +17,7 @@ Author: Léon
 import hashlib
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -143,7 +144,8 @@ class HistoryManager:
     def __init__(self):
         """Initialize the manager."""
         self._history_dir = DATA_DIR / "history"
-        self._history_dir.mkdir(parents=True, exist_ok=True)
+        # The folder is made at the first entry, not here: this manager is built at module scope, so making it here
+        # made a folder on every import of the module, the account wipe's included.
         self._index_file = self._history_dir / "index.json"
         self._index: dict[str, str] = {}  # id -> filename
         self._load_index()
@@ -161,6 +163,7 @@ class HistoryManager:
     def _save_index(self) -> None:
         """Save the index."""
         try:
+            self._history_dir.mkdir(parents=True, exist_ok=True)
             with open(self._index_file, 'w', encoding='utf-8') as f:
                 json.dump(self._index, f, indent=2)
         except Exception as e:
@@ -247,6 +250,7 @@ class HistoryManager:
 
         entries.append(entry.to_dict())
 
+        self._history_dir.mkdir(parents=True, exist_ok=True)
         with open(daily_file, 'w', encoding='utf-8') as f:
             json.dump(entries, f, indent=2, ensure_ascii=False)
 
@@ -652,12 +656,61 @@ class HistoryManager:
 
         return deleted
 
+    def forget_every_entry(self) -> int:
+        """Remove every entry's file and the index, each overwritten first, and the folder when nothing else is
+        left in it; how many files. The entries are the questions asked at the command line and their answers, in
+        plain JSON. A folder that is not there holds none, and is not created; a file that cannot be overwritten
+        or removed raises, after the others went: never taken for an empty history."""
+        self._index = {}
+        if not self._history_dir.is_dir():
+            return 0
+        removed, failure = 0, None
+        for path in sorted(self._history_dir.iterdir()):
+            if path.name != "index.json" and not (path.name.startswith("history_") and path.suffix == ".json"):
+                continue
+            try:
+                removed += _overwrite_and_remove(path)
+            except OSError as exc:
+                failure = failure or exc
+        if failure is not None:
+            raise failure
+        try:
+            self._history_dir.rmdir()
+        except OSError:
+            pass  # a file that is not the history's keeps the folder
+        return removed
+
+
+def _overwrite_and_remove(path: Path) -> bool:
+    """Overwrite a file's bytes in place, then remove it; whether it was there. A filesystem that writes in place no
+    longer holds them; a copy-on-write filesystem, a snapshot or a backup may. A link is refused, never followed."""
+    try:
+        fd = os.open(path, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        return False
+    try:
+        left = os.fstat(fd).st_size
+        block = b"\0" * 65536
+        while left > 0:
+            left -= os.write(fd, block[:min(len(block), left)])
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.unlink(path)
+    return True
+
 
 # =============================================================================
 # GLOBAL INSTANCE
 # =============================================================================
 
 history = HistoryManager()
+
+
+def forget_every_entry() -> int:
+    """Remove the command line's whole history, overwritten; how many files. The account wipe asks it for a
+    single-user install's one user: the history is the install's."""
+    return history.forget_every_entry()
 
 
 def add_entry(**kwargs) -> str:

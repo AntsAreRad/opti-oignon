@@ -3480,6 +3480,49 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] The account wipe's answer names every store it leaves of an
+  inventory a census keeps complete, and in single-user mode the wipe
+  also empties the stores that only keep copies of the user's words. Its lists, said to be completed against
+  the full at-rest inventory, were written by hand and tied to nothing:
+  they missed the knowledge base -- which the wipe deleted in name only,
+  looking for collections named for the user that nothing creates --,
+  the coding agent's decision preferences, the command line's history,
+  the skills, the note attachments, the project files, the code
+  execution outputs and the sandbox's exports, among others; and three
+  labels were wrong: the learned routing store keeps the queries word
+  for word, the garden has no wipe of its own, and the "signed audit
+  logs (RAG injection)" kept by design do not exist -- the injection
+  audit is not signed, and keeps the flagged chunks' text. Every store
+  the package keeps is now classified in one inventory
+  (`store_inventory.py`): what it holds, and what the wipe does with
+  it. A census keeps it complete against what the code spells -- every
+  database name, in the package's modules and YAML files, and every name
+  joined to a data folder, read through the constants that spell them,
+  each from the modules its entry names; a join under a name built at
+  run time is held to an entry that says so, and a store whose path
+  comes only from a setting or an object's attribute is classified by
+  hand -- and the wipe's lists are held equal to it. In
+  single-user mode, asked for the install's one user, the wipe now also
+  empties the coding agent's decision preferences, the humanizer's
+  feedback, the learned router's queries and the model learned from
+  them (a training under way never puts it back), the command line's
+  history, the feedback store whole and the knowledge base's search
+  log, overwritten in each database's file and in a file's bytes before
+  it is removed (a database's journal is removed or emptied, not
+  overwritten; a copy-on-write filesystem, a snapshot or a backup may
+  keep older blocks); a store it cannot empty is named, and so, now, is
+  a store it removes for the user that could not be removed or even
+  opened, which no longer stops the steps after it. It no longer makes
+  the knowledge base it asks on an install that has none.
+  The content the user manages -- notes, projects, the knowledge base's
+  documents, the coding history, skills, the garden, the plugins' data
+  -- is named, not removed. The files a conversation's code wrote and
+  those copied out of a sandbox are kept by no conversation: a deletion
+  leaves them, named. The chat's knowledge-base search (with
+  `unified_retrieval` on) no longer logs its query as a citation, where
+  no deletion reached it, and importing the command line's history no
+  longer makes its folder.
+
 - [SECURITY] A conversation's deletion leaves no copy of its words in the
   stores it still missed, and the account wipe removes the conversations
   in single-user mode. The response cache kept the model's answers with no

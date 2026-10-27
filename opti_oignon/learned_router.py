@@ -23,7 +23,9 @@ import hashlib
 import hmac
 import importlib.util
 import logging
+import os
 import sqlite3
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -113,6 +115,50 @@ _MODEL_MAC_INFO = b"oo-learned-router-mac-v1"
 def _model_mac_path(model_path) -> Path:
     """Sidecar path holding the keyed MAC for a persisted model."""
     return Path(f"{model_path}.mac")
+
+
+def _overwrite_and_remove(path: Path) -> bool:
+    """Overwrite a file's bytes in place, then remove it; whether it was there. A filesystem that writes in place no
+    longer holds them; a copy-on-write filesystem, a snapshot or a backup may. A link is refused, never followed."""
+    try:
+        fd = os.open(path, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        return False
+    try:
+        left = os.fstat(fd).st_size
+        block = b"\0" * 65536
+        while left > 0:
+            left -= os.write(fd, block[:min(len(block), left)])
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.unlink(path)
+    return True
+
+
+def _forget_queries(db_path: Path, model_path: Path) -> int:
+    """Delete every training sample and routing decision, overwritten, the log emptied, then the model learned from
+    them and its MAC, overwritten; how many rows. A file that is not there holds none, and is not created; one that
+    is there and cannot be emptied raises."""
+    gone = 0
+    if Path(db_path).exists():
+        conn = _safe_connect(db_path, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA secure_delete = ON")
+            tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+            for table in ("training_samples", "routing_decisions"):
+                if table in tables:
+                    gone += conn.execute(f"DELETE FROM {table}").rowcount
+            conn.commit()
+            conn.execute("PRAGMA busy_timeout = 0")
+            if conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]:
+                logger.warning("LearnedRouter: queries forgotten; a read in progress keeps the write-ahead log, whose "
+                               "older frames hold them until the last connection closes")
+        finally:
+            conn.close()
+    for path in (Path(model_path), _model_mac_path(model_path)):
+        _overwrite_and_remove(path)
+    return gone
 
 
 def _router_master_key() -> bytes | None:
@@ -287,6 +333,10 @@ class LearnedRouter:
         self._pipeline: Any = None          # Fitted sklearn Pipeline
         self._last_training: TrainingResult | None = None
         self._samples_since_retrain: int = 0
+        # Held while a trained model is put in place and while the queries are forgotten: a training that read the
+        # samples before a forgetting never puts its model back after it, its generation gone.
+        self._forgetting = threading.Lock()
+        self._generation = 0
 
         self._load_config()
         # The schema is built at the first connection, not here. This store
@@ -568,6 +618,8 @@ class LearnedRouter:
             )
 
         threshold = min_samples or self._config.get("min_training_samples", 50)
+        with self._forgetting:
+            generation = self._generation
         texts, labels = self._load_training_data()
 
         if len(texts) < threshold:
@@ -591,35 +643,45 @@ class LearnedRouter:
 
             # Fit on full dataset
             pipe.fit(texts, labels)
-            self._pipeline = pipe
-            self._samples_since_retrain = 0
+            with self._forgetting:
+                if self._generation != generation:
+                    # The queries it learned from were forgotten while it trained: its model would bring them back.
+                    logger.info("LearnedRouter: the queries were forgotten during training; its model is dropped")
+                    return TrainingResult(
+                        success=False,
+                        n_samples=len(texts),
+                        error="the queries were forgotten during training",
+                        trained_at=time.time(),
+                    )
+                self._pipeline = pipe
+                self._samples_since_retrain = 0
 
-            # Persist model
-            self._model_path.parent.mkdir(parents=True, exist_ok=True)
-            _joblib().dump(pipe, str(self._model_path))
-            # Write a keyed MAC so the artifact is authenticated
-            # on load. Without a master key the model is persisted but cannot be
-            # reloaded (verify fails safe); warn so the operator knows.
-            if not write_model_mac(
-                self._model_path, _model_mac_path(self._model_path),
-                _router_master_key(),
-            ):
-                logger.warning(
-                    "LearnedRouter: no encryption key available; model persisted "
-                    "without an integrity MAC and will not be reloaded until "
-                    "retrained with a key available"
+                # Persist model
+                self._model_path.parent.mkdir(parents=True, exist_ok=True)
+                _joblib().dump(pipe, str(self._model_path))
+                # Write a keyed MAC so the artifact is authenticated
+                # on load. Without a master key the model is persisted but cannot be
+                # reloaded (verify fails safe); warn so the operator knows.
+                if not write_model_mac(
+                    self._model_path, _model_mac_path(self._model_path),
+                    _router_master_key(),
+                ):
+                    logger.warning(
+                        "LearnedRouter: no encryption key available; model persisted "
+                        "without an integrity MAC and will not be reloaded until "
+                        "retrained with a key available"
+                    )
+
+                result = TrainingResult(
+                    accuracy=accuracy,
+                    n_samples=len(texts),
+                    n_classes=n_classes,
+                    trained_at=time.time(),
+                    model_type=self._config.get("model_type", "logistic"),
+                    cv_folds=cv_folds,
+                    success=True,
                 )
-
-            result = TrainingResult(
-                accuracy=accuracy,
-                n_samples=len(texts),
-                n_classes=n_classes,
-                trained_at=time.time(),
-                model_type=self._config.get("model_type", "logistic"),
-                cv_folds=cv_folds,
-                success=True,
-            )
-            self._last_training = result
+                self._last_training = result
             logger.info(
                 "LearnedRouter trained: accuracy=%.3f, samples=%d, classes=%d",
                 accuracy, len(texts), n_classes,
@@ -799,6 +861,18 @@ class LearnedRouter:
     # -------------------------------------------------------------------------
     # Decision logging (for A/B metrics)
     # -------------------------------------------------------------------------
+
+    def forget_every_query(self) -> int:
+        """Forget every query this router kept: the model in memory dropped first -- routing falls back to the
+        YAML rules until it learns again -- then the samples, the decisions and the model learned from them, whose
+        vocabulary is their words, overwritten (``_forget_queries``); how many rows. A training under way when it
+        runs never puts its model back: its generation is gone."""
+        with self._forgetting:
+            self._generation += 1
+            self._pipeline = None
+            self._last_training = None
+            self._samples_since_retrain = 0
+            return _forget_queries(self._db_path, self._model_path)
 
     def log_routing_decision(
         self,
@@ -1064,3 +1138,12 @@ except Exception as _exc:
     logger.warning("LearnedRouter singleton failed to initialize: %s", _exc)
     learned_router = None  # type: ignore[assignment]
     LEARNED_ROUTER_AVAILABLE = False
+
+
+def empty() -> int:
+    """Forget every query the router kept, and the model learned from them, from the router's files, or the default
+    ones when it did not start; how many rows. The account wipe asks it for a single-user install's one user: the
+    store is the install's."""
+    if learned_router is not None:
+        return learned_router.forget_every_query()
+    return _forget_queries(_DEFAULT_DB_PATH, _DEFAULT_MODEL_PATH)

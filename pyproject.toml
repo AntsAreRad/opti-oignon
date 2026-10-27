@@ -448,6 +448,12 @@ fail_under = 0
 # say queued, and jw6 of tests/test_executor_onion_window_contracts.py asked
 # it to reach the queue; dl24 and dl25 keep their other assertions.
 #
+# b33 of tests/test_session_fingerprint_heuristics_seam_contracts.py froze
+# the decision preferences' SQL sites at six. The account wipe now empties
+# that store (block 189): four constant statements more, none bound. wi13
+# of tests/test_wipe_inventory_contracts.py takes the census over at ten,
+# its other assertions word for word.
+#
 # cq10 pinned, among its assertions, that the health monitor discovers an
 # empty model list when no backend is registered. Under the listing
 # doctrine no backend is nobody looking, so discovery answers unknown;
@@ -1702,4 +1708,5 @@ addopts = """
     --deselect=tests/test_tool_path_off_golden_contracts.py::test_jw33d_a_check_on_an_absent_golden_file_fails_by_name_and_creates_nothing
     --deselect=tests/test_executor_ledger_emission_contracts.py::test_e5_offline_enqueue_records_its_outcome_without_generation
     --deselect=tests/test_executor_onion_window_contracts.py::test_jw6_the_admission_stands_between_the_plan_and_the_composition_and_a_descent_is_composed_under_it
+    --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b33_every_storage_statement_is_a_constant_and_one_is_bound
 """

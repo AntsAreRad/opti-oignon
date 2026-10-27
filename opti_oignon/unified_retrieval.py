@@ -302,8 +302,10 @@ def _default_sources(
         from .rag_hybrid_search import get_hybrid_engine
 
         collection = f"project_{project_id}" if project_id else None
+        # No citation logged: the log keeps each query word for word, with no conversation, so a turn's words
+        # would outlive its deletion there. The knowledge base page's own searches still log theirs.
         response = get_hybrid_engine().search(
-            query, collection=collection, n_results=limit,
+            query, collection=collection, n_results=limit, track_citations=False,
         )
         items = []
         for r in response.results:

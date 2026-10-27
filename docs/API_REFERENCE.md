@@ -438,23 +438,49 @@ In single-user mode, asked for the install's one user (`local`, or its
 one account), where every conversation is that user's, it deletes every
 conversation through its deletion -- with the sync package, each
 deletion's tombstone deletes the conversation on every paired device,
-unless a paired device's later edit wins --, and empties the response cache, the semantic cache, the offline queue and
-the old memory store; asked for any other name, it removes nothing
-install-wide. `not_covered` names every store it leaves, and why one
-could not be removed.
+unless a paired device's later edit wins --, and empties the stores that
+only keep copies of the user's words: the response cache, the semantic
+cache, the offline queue, the old memory store, the coding agent's
+decision preferences, the humanizer's feedback, the learned router's
+queries and the model learned from them, the command line's history,
+the feedback store and the knowledge base's search log. What they held
+is overwritten in each database's file, and in a file's bytes before it
+is removed; a database's journal is removed or emptied, not overwritten,
+and a read in progress when the wipe runs keeps a store's write-ahead
+log, with older frames of what was deleted, until it ends (the server's
+log says so). A copy-on-write filesystem, a snapshot or a backup may
+keep older blocks. Asked for any other name, it removes nothing
+install-wide, and it makes no knowledge base an install does not have.
+The content the user manages -- notes, projects, the knowledge base's
+documents, the coding history, skills, the garden, the plugins' data --
+is not removed. `not_covered` names every store it leaves, and why one
+could not be emptied or removed -- a store that cannot even be opened
+included, which stops none of the steps after it; `retained_by_design`,
+the trails kept on purpose. Every store is classified in
+`opti_oignon/store_inventory.py`, and both lists come from it. A census
+keeps it complete against what the code spells: every database name,
+and every name joined to a data folder, read through the constants
+that spell them; a store whose path comes only from a setting or from
+an object's attribute is classified by hand. `rag_collections` counts the
+collections named for the user, which nothing creates: the knowledge
+base is named in `not_covered`.
 
 **Response (200):**
 
 ```json
 {
-  "user_id": "user_abc",
-  "deleted": true,
-  "items_removed": {
-    "conversations": 15,
-    "rag_collections": 3,
-    "plugin_configs": 2,
-    "feedback": 48
-  }
+  "user_id": "local",
+  "deleted_at": 1793000000.0,
+  "conversations": 15,
+  "memories": 42,
+  "rag_collections": 0,
+  "plugin_configs": 2,
+  "settings": true,
+  "encryption_keys": true,
+  "plugin_reviews": 1,
+  "pending_writes": 0,
+  "not_covered": ["notes and their updates", "..."],
+  "retained_by_design": ["sandbox audit: the record of what ran, without its words", "..."]
 }
 ```
 
