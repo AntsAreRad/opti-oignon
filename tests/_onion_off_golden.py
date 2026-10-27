@@ -65,7 +65,7 @@ sys.path.insert(0, str(TESTS))
 from _isolation import REPO, isolate, source  # noqa: E402
 from _registry_bridge import ScriptedBackend, StubRegistry  # noqa: E402
 
-FIXTURE = TESTS / "executor_golden" / "v1" / "onion_off.json"
+FIXTURE = TESTS / "executor_golden" / "v2" / "onion_off.json"
 SEEDS = ("0", "1")
 FORMAT = 1
 
@@ -806,6 +806,12 @@ def _absent(kind):
     return (f"{kind} never reached", lambda record: _kinds_in(record, kind) == 0)
 
 
+def _ended_offline():
+    """The offline trigger: each turn ends there, said by the executor, and nothing keeps it for later."""
+    return ("every turn ended offline, said by the executor",
+            lambda record: all(turn["window"].get("offline_queued") for turn in record["turns"]))
+
+
 def _seams(*kinds):
     """The seams a plain case reaches, and no other: what the cases built on it add shows as a difference."""
     return (f"the seams reached are exactly {sorted(kinds)}",
@@ -910,7 +916,7 @@ CASES = (
     _case("cache-hit", "isolated", _turns(("conv-1", FIRST, {}), ("conv-2", FIRST, {})), groups=_SEATED,
           hit=True, checks=[_no_stream_on(1), _fact("second_turn_hit", True)]),
     _case("offline", "isolated", groups=("caches", "ledger"), offline=True,
-          checks=[_fired("network.enqueue", 2), _no_stream_on(0)]),
+          checks=[_ended_offline(), _absent("network.enqueue"), _no_stream_on(0)]),
     _case("think", "isolated", _THINK, groups=_SEATED, thinking=_THINKING, checks=[_thought()]),
     # A stop on the second turn, raised where each check of the hub stands: during the cache lookup, during the
     # admission, at the start of the stream's thread (where its ticket is taken), during the refinement.
@@ -973,7 +979,8 @@ CASES = (
           checks=[_fired("admit", 2), _no_stream_on(0), _no_stream_on(1)]),
     _case("cache-hit", "integrated", _turns(("conv-1", FIRST, {}), ("conv-2", FIRST, {})), hit=True,
           checks=[_no_stream_on(1), _fact("second_turn_hit", True)]),
-    _case("offline", "integrated", offline=True, checks=[_fired("network.enqueue", 2), _no_stream_on(0)]),
+    _case("offline", "integrated", offline=True,
+          checks=[_ended_offline(), _absent("network.enqueue"), _no_stream_on(0)]),
     # The engine named llama-server, with the prompt cache reused and the slot named: the off bytes carry the
     # switch and the slot, and no length cap.
     _case("named-llama-server", "integrated", llama_server=True, stable_prefix=True, slot_affinity=True,

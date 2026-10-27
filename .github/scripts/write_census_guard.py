@@ -496,7 +496,8 @@ STORES = {
         writes=("put", "warm"), keys=("explicit_key",), place="db_path",
         aside={
             "get": "a read that counts its hit and its last use",
-            "invalidate": _PURGE, "invalidate_model": _PURGE, "clear": _PURGE,
+            "invalidate": _PURGE, "invalidate_model": _PURGE, "clear": _PURGE, "empty": _PURGE,
+            "forget_conversation": _PURGE,
         },
         reason="answers replayed for the same request",
     ),
@@ -509,7 +510,7 @@ STORES = {
             "update_config": "the cache's own settings; no content",
             "invalidate": _PURGE, "expire_stale": _PURGE, "remove_embedding": _PURGE,
             "remove_embeddings_for_model": _PURGE, "clear": _PURGE, "cleanup_orphans": _PURGE,
-            "forget_conversation": _PURGE,
+            "forget_conversation": _PURGE, "empty": _PURGE,
         },
         reason="answers replayed for a similar request under the same context",
     ),
@@ -723,6 +724,7 @@ EXEMPT = {
     ("opti_oignon/user_data_manager.py", "documents"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "facts_canonical"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "facts_vectors"): ("quiet", "the user's own erasure"),
+    ("opti_oignon/user_data_manager.py", "legacy"): ("quiet", "the user's own erasure"),
 }
 
 # The sites each exemption argued in prose covers, by function and method. No

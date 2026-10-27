@@ -360,7 +360,13 @@ def _apply_batch(
     local = (
         list(local_records) if local_records is not None else feed.current_records()
     )
-    merged = reconcile(local, parsed.records)
+    incoming = parsed.records
+    floor_of = getattr(feed, "clock_floor", None)
+    if callable(floor_of):
+        # A record this device deleted keeps, until its tombstone lands, the highest clock it erased: an incoming
+        # version at or below it is the deleted one coming back, and loses.
+        incoming = [r for r in incoming if r.clock > floor_of(r.kind, r.record_id)]
+    merged = reconcile(local, incoming)
     local_by_key = {key_of(r): r for r in local}
     applied = 0
     for winner in merged.records:

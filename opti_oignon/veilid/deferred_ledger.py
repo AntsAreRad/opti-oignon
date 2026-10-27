@@ -266,6 +266,8 @@ class DeferredLedger:
             )
             # WAL is set outside any transaction, right after connect.
             conn.execute("PRAGMA journal_mode=WAL")
+            # An entry removed -- approved, refused, superseded -- is overwritten, never left in free pages.
+            conn.execute("PRAGMA secure_delete = ON")
             conn.execute(_CREATE_TABLE)
             conn.commit()
             self._connection = conn

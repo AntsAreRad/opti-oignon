@@ -434,6 +434,14 @@ export their own data; admins can export any user's data.
 
 Cascade delete all data for a user (GDPR right to erasure).
 Users can delete their own data; admins can delete any user's data.
+In single-user mode, asked for the install's one user (`local`, or its
+one account), where every conversation is that user's, it deletes every
+conversation through its deletion -- with the sync package, each
+deletion's tombstone deletes the conversation on every paired device,
+unless a paired device's later edit wins --, and empties the response cache, the semantic cache, the offline queue and
+the old memory store; asked for any other name, it removes nothing
+install-wide. `not_covered` names every store it leaves, and why one
+could not be removed.
 
 **Response (200):**
 

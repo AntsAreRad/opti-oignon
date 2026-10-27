@@ -3480,6 +3480,57 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] A conversation's deletion leaves no copy of its words in the
+  stores it still missed, and the account wipe removes the conversations
+  in single-user mode. The response cache kept the model's answers with no
+  conversation, so no deletion reached them, and a new conversation
+  repeating a deleted one's first turn within the hour was served the
+  deleted answer: each answer now keeps the conversation it was given in
+  (an older cache's entries, of an origin not known, go at the first
+  deletion), the deletion forgets them, and a turn that outlives it is
+  never cached. The sync change feed kept every version of every
+  conversation and fact for ever, a deletion only adding a tombstone: each
+  append now erases its record's earlier versions, so a tombstone erases
+  every version of what it deletes and empties the feed's write-ahead log,
+  and the versions an older build left are erased at start-up. The
+  sandbox's audit kept every command whole and never forgot one: each row
+  now keeps the conversation its session ran for, and the deletion
+  replaces the commands' words, their block reasons and the copy-out
+  details, keeping the record of what ran (time, outcome, sizes, backend);
+  older rows of a chat coding session are reached through its id. A
+  conversation's code sandbox is destroyed and its workspace released.
+  The offline queue kept each turn asked while the engine was unreachable,
+  and the turn was told it would be processed when the engine came back,
+  yet nothing ever sent it again: the turn is now told it was not sent,
+  is kept nowhere, and what an older version queued is erased at
+  start-up. In single-user mode, where every conversation is the one
+  user's, the user data wipe (`DELETE /api/users/{id}/data`) now deletes
+  every conversation through its deletion, stopping at a refusal and
+  saying how many are left, empties the response cache, the semantic
+  cache, the offline queue and the memory store of earlier versions, and
+  forgets the sandbox audit's words; in multi-user mode it leaves the
+  install-wide stores, named. Its answer now also names the stores it
+  never covered: the notes, the garden, the sync stores, the context
+  ledger, the knowledge base's ingest jobs, the agent's evaluation stores,
+  the account itself. The wipe takes the install-wide stores only when
+  asked for the install's one user (`local`, or its one account), and,
+  with the sync package, each conversation's tombstone deletes it on every
+  paired device too, unless a paired device's later edit wins. A deletion
+  now erases its conversation's versions in the sync feed before its
+  commit, and a fact's erasure its fact's, so the words leave this device
+  even when the tombstone that tells the paired devices cannot be written
+  -- they are then not told; a feed that cannot be written refuses the
+  deletion by name, or keeps the fact. The highest clock erased stays as
+  the record's floor until its tombstone lands: the tombstone out-clocks
+  every version a paired device holds, and a copy of the deleted record
+  coming back from one loses. The
+  semantic cache's emptying raises instead of reading as empty when it
+  cannot empty. Every connection of these stores, and of the deferred
+  ledger, overwrites what it frees. A process that does not run the
+  sandbox leaves its audit to the server's, and a session that ran for no
+  conversation keeps its commands; a conversation an older version
+  deleted keeps what these stores held of it.
+
 - [SECURITY] A fact deleted from memory no longer comes back, and a
   conversation's deletion forgets the facts the model drew from it. The
   memory store of earlier versions (`memories.db`) was never emptied after

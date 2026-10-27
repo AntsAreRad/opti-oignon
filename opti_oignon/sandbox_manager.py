@@ -61,7 +61,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field, replace
-from typing import Any
+from typing import Any, Callable
 
 from opti_oignon.db_utils import safe_connect
 
@@ -795,6 +795,9 @@ class SandboxSession:
     label: str = ""
     owner_user_id: str = "local"
     bound_conversation_id: str | None = None
+    # The conversation the session runs for, given by whoever made it for one (a chat coding session, a
+    # conversation's code sandbox): the audit keeps it on each row, which the conversation's deletion forgets.
+    conversation_id: str | None = None
     network_enabled: bool = False
     last_activity: float = field(default_factory=time.time)
     timeout_override: int | None = None
@@ -835,11 +838,33 @@ class CommandResult:
 # Audit log (SQLite)
 # ---------------------------------------------------------------------------
 
-class AuditLog:
-    """SQLite-backed audit log for sandbox command history."""
+# What a forgotten command becomes.
+_FORGOTTEN_WORDS = "[forgotten with its conversation]"
+# A chat coding session's id: this prefix, the conversation's first characters, a dash.
+_CODING_PREFIX = "cc-"
+_CODING_SPAN = 12
+# The conversations a deletion forgot in this process (``forget_conversation``): a command of one is recorded
+# without its words, until a refused deletion hands it back.
+_FORGOTTEN: set[str] = set()
+# Held while a mark is checked and a row written, and while a deletion marks and replaces.
+_MARKS_LOCK = threading.Lock()
 
-    def __init__(self, db_path: str):
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    """The columns ``table`` has in the file, asked of the table itself; empty when it has no such table."""
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+class AuditLog:
+    """SQLite-backed audit log for sandbox command history.
+
+    ``conversation_of`` maps a session id to the conversation the session runs
+    for (the manager's sessions); without it every row is of no conversation.
+    """
+
+    def __init__(self, db_path: str, conversation_of: Callable[[str], str | None] | None = None):
         self._db_path = db_path
+        self._conversation_of = conversation_of
         self._lock = threading.Lock()
         # The schema is built at the first connection, not here. This log is
         # constructed at module scope, so building it here opened a database
@@ -852,6 +877,8 @@ class AuditLog:
         Audit fix: routes through get_encrypted_connection().
         """
         conn = safe_connect(self._db_path)
+        # What a write frees -- a deletion's words, a clear -- is overwritten, never left in free pages.
+        conn.execute("PRAGMA secure_delete = ON")
         if not self._schema_ready:
             # Built on the connection just opened, without taking the lock:
             # every caller of this helper already holds it.
@@ -890,14 +917,32 @@ class AuditLog:
                 timed_out INTEGER DEFAULT 0,
                 stdout_len INTEGER DEFAULT 0,
                 stderr_len INTEGER DEFAULT 0,
-                isolation_backend TEXT DEFAULT ''
+                isolation_backend TEXT DEFAULT '',
+                conversation_id TEXT NOT NULL DEFAULT ''
             )
         """)
+        # An older file's rows did not keep their conversation: they are of none, and only a chat coding session's
+        # id still names one. The table is asked, never a duplicate caught: the cipher's driver raises its own classes.
+        if "conversation_id" not in _columns(conn, "sandbox_audit"):
+            conn.execute("ALTER TABLE sandbox_audit ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''")
         conn.execute("""
             CREATE INDEX IF NOT EXISTS idx_audit_session
             ON sandbox_audit(session_id)
         """)
         conn.commit()
+
+    def _conversation(self, session_id: str) -> str:
+        """The conversation ``session_id`` runs for, ``''`` for none; a lookup that fails is said, and the row is of
+        none."""
+        resolve = self._conversation_of
+        if resolve is None:
+            return ""
+        try:
+            return resolve(session_id) or ""
+        except Exception as exc:  # noqa: BLE001 - a row is never lost to the lookup
+            logger.warning("sandbox audit: the conversation of session %s could not be read (%s); its row is of none",
+                           session_id, type(exc).__name__)
+            return ""
 
     def log_command(
         self,
@@ -905,8 +950,11 @@ class AuditLog:
         command: str,
         result: CommandResult,
     ) -> None:
-        """Record a command execution in the audit log."""
-        with self._lock:
+        """Record a command execution in the audit log; a command of a conversation this process forgot is recorded
+        without its words."""
+        conversation = self._conversation(session_id)
+        with self._lock, _MARKS_LOCK:
+            forgotten = bool(conversation) and conversation in _FORGOTTEN
             conn = self._get_conn()
             try:
                 conn.execute(
@@ -914,20 +962,22 @@ class AuditLog:
                     INSERT INTO sandbox_audit
                         (session_id, timestamp, command, return_code,
                          blocked, block_reason, timed_out,
-                         stdout_len, stderr_len, isolation_backend)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                         stdout_len, stderr_len, isolation_backend,
+                         conversation_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         session_id,
                         time.time(),
-                        command,
+                        _FORGOTTEN_WORDS if forgotten else command,
                         result.return_code,
                         1 if result.blocked else 0,
-                        result.block_reason,
+                        "" if forgotten else result.block_reason,
                         1 if result.timed_out else 0,
                         len(result.stdout),
                         len(result.stderr),
                         result.isolation_backend,
+                        conversation,
                     ),
                 )
                 conn.commit()
@@ -969,11 +1019,9 @@ class AuditLog:
             conn = self._get_conn()
             try:
                 conn.execute("DELETE FROM sandbox_audit")
-                # Clear approval audit if table exists
-                try:
+                # The approval audit, if its table exists yet: asked of the file, never caught from a driver.
+                if _columns(conn, "sandbox_approval_audit"):
                     conn.execute("DELETE FROM sandbox_approval_audit")
-                except sqlite3.OperationalError:
-                    pass  # Table may not exist yet
                 conn.commit()
             finally:
                 conn.close()
@@ -991,9 +1039,13 @@ class AuditLog:
                         action TEXT NOT NULL,
                         paths TEXT DEFAULT '',
                         dest_dir TEXT DEFAULT '',
-                        detail TEXT DEFAULT ''
+                        detail TEXT DEFAULT '',
+                        conversation_id TEXT NOT NULL DEFAULT ''
                     )
                 """)
+                if "conversation_id" not in _columns(conn, "sandbox_approval_audit"):
+                    conn.execute(
+                        "ALTER TABLE sandbox_approval_audit ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''")
                 conn.execute("""
                     CREATE INDEX IF NOT EXISTS idx_approval_session
                     ON sandbox_approval_audit(session_id)
@@ -1010,24 +1062,88 @@ class AuditLog:
         dest_dir: str = "",
         detail: str = "",
     ) -> None:
-        """Record an approval/rejection/copy-out event."""
+        """Record an approval/rejection/copy-out event; one of a conversation this process forgot is recorded without
+        its words."""
         self._ensure_approval_table()
         import json
-        paths_json = json.dumps(paths or [])
-        with self._lock:
+        conversation = self._conversation(session_id)
+        with self._lock, _MARKS_LOCK:
+            forgotten = bool(conversation) and conversation in _FORGOTTEN
+            paths_json = json.dumps([] if forgotten else (paths or []))
             conn = self._get_conn()
             try:
                 conn.execute(
                     """
                     INSERT INTO sandbox_approval_audit
-                        (session_id, timestamp, action, paths, dest_dir, detail)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (session_id, timestamp, action, paths, dest_dir, detail, conversation_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
                     """,
-                    (session_id, time.time(), action, paths_json, dest_dir, detail),
+                    (session_id, time.time(), action, paths_json, "" if forgotten else dest_dir,
+                     "" if forgotten else detail, conversation),
                 )
                 conn.commit()
             finally:
                 conn.close()
+
+    def forget_conversation(self, conversation_id: str) -> int:
+        """Forget the words a deleted conversation's sessions left, and keep the record of what ran; how many rows
+        lost words.
+
+        In both tables, a command and its block reason, an event's paths, destination and detail are replaced; the
+        time, the outcome, the sizes and the backend stay. Rows an older version wrote, which did not keep their
+        conversation, are reached through a chat coding session's id (``cc-`` and the conversation's first twelve
+        characters); the other sessions' older rows cannot be. A log that cannot be opened raises: a deletion that
+        asks must never take it for one with nothing to forget. A file that is not there holds nothing, and is not
+        created; the schema is never changed here. What is replaced is overwritten. From then on, a command of the
+        conversation is recorded without its words in this process, unless the forgetting fails.
+        """
+        try:
+            with _MARKS_LOCK:
+                # Marked under the writes' lock: a row written first loses its words below, one written after is
+                # written without them.
+                _FORGOTTEN.add(conversation_id)
+                return self._forget_rows(conversation_id)
+        except BaseException:
+            _FORGOTTEN.discard(conversation_id)
+            raise
+
+    def _forget_rows(self, conversation_id: str | None) -> int:
+        """Replace the words of the conversation's rows -- every row's when ``conversation_id`` is None -- in both
+        tables; how many rows lost words."""
+        if not os.path.exists(self._db_path):
+            return 0
+        conn = safe_connect(self._db_path)
+        try:
+            conn.execute("PRAGMA secure_delete = ON")
+            forgotten = 0
+            for table, words, kept, values in (
+                ("sandbox_audit", "command = ?, block_reason = ''", "command != ?", (_FORGOTTEN_WORDS,)),
+                ("sandbox_approval_audit", "paths = '[]', dest_dir = '', detail = ''",
+                 "(paths != '[]' OR dest_dir != '' OR detail != '')", ()),
+            ):
+                columns = _columns(conn, table)
+                if not columns:
+                    continue
+                reach, asked = "1", ()
+                if conversation_id is not None:
+                    # A row an older version wrote names its conversation only through a chat coding session's id.
+                    prefix = f"{_CODING_PREFIX}{conversation_id[:_CODING_SPAN]}-"
+                    reach, asked = "substr(session_id, 1, ?) = ?", (len(prefix), prefix)
+                    if "conversation_id" in columns:
+                        reach = f"conversation_id = ? OR (conversation_id = '' AND {reach})"
+                        asked = (conversation_id, *asked)
+                forgotten += conn.execute(f"UPDATE {table} SET {words} WHERE ({reach}) AND {kept}",
+                                          (*values, *asked, *values)).rowcount
+            conn.commit()
+            return forgotten
+        finally:
+            conn.close()
+
+    def forget_every_word(self) -> int:
+        """The user's wipe: every row loses its words, the record of what ran kept; how many rows lost words. A log
+        that cannot be opened raises; a file that is not there holds nothing, and is not created."""
+        with _MARKS_LOCK:
+            return self._forget_rows(None)
 
     def get_approval_log(self, session_id: str) -> list[dict[str, Any]]:
         """Retrieve all approval audit entries for a session."""
@@ -1669,7 +1785,7 @@ class SandboxManager:
         audit_path = os.path.join(
             self._config.workspace_base, self._config.audit_db_path
         )
-        self._audit = AuditLog(audit_path)
+        self._audit = AuditLog(audit_path, conversation_of=self._conversation_of)
 
         # Log isolation status
         if self._isolation_backend == IsolationBackend.BWRAP:
@@ -2088,6 +2204,20 @@ class SandboxManager:
         )
         logger.info("Workspace command stopped: session=%s", session_id)
         return True
+
+    def set_conversation(self, session_id: str, conversation_id: str | None) -> None:
+        """The conversation a session runs for, set by whoever made it for one: its audit rows keep it."""
+        with self._lock:
+            session = self._sessions.get(session_id)
+            if session is not None:
+                session.conversation_id = conversation_id
+
+    def _conversation_of(self, session_id: str) -> str | None:
+        """The conversation a session's audit rows keep: the one it runs for, else its workspace's bound one."""
+        session = self._sessions.get(session_id)
+        if session is None:
+            return None
+        return session.conversation_id or session.bound_conversation_id
 
     def set_binding(self, session_id: str, conversation_id: str | None) -> None:
         """Write-through mirror of the conversation binding.
@@ -3889,6 +4019,32 @@ class SandboxManager:
 # ---------------------------------------------------------------------------
 # Module-level singleton
 # ---------------------------------------------------------------------------
+
+def forget_conversation(conversation_id: str) -> int:
+    """Forget the words a deleted conversation's sandbox sessions left in this process's audit log, the record of
+    what ran kept (``AuditLog.forget_conversation``); how many rows. With the sandbox off, the log its settings name,
+    if one is there."""
+    audit = sandbox_manager.audit if sandbox_manager is not None else None
+    if audit is None:
+        config = _load_config()
+        audit = AuditLog(os.path.join(config.workspace_base, config.audit_db_path))
+    return audit.forget_conversation(conversation_id)
+
+
+def forget_every_word() -> int:
+    """The user's wipe: every row of this process's audit log loses its words, the record of what ran kept; with
+    the sandbox off, the log its settings name, if one is there."""
+    audit = sandbox_manager.audit if sandbox_manager is not None else None
+    if audit is None:
+        config = _load_config()
+        audit = AuditLog(os.path.join(config.workspace_base, config.audit_db_path))
+    return audit.forget_every_word()
+
+
+def unforget_conversation(conversation_id: str) -> None:
+    """Record the conversation's commands whole again: its deletion was refused, and it stays."""
+    _FORGOTTEN.discard(conversation_id)
+
 
 SANDBOX_AVAILABLE = True
 sandbox_manager: SandboxManager | None = None

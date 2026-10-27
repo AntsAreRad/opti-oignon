@@ -262,6 +262,10 @@ class CodeExecutor:
             if session_id is not None and manager.get_workspace_path(session_id):
                 return session_id
             session = manager.create_sandbox(None, label="code execution")
+            # The audit keeps the conversation on each row, which its deletion forgets.
+            attribute = getattr(manager, "set_conversation", None)
+            if callable(attribute):
+                attribute(session.session_id, conv_id)
             self._persistent_sessions[conv_id] = session.session_id
             logger.info(f"Created persistent sandbox for {conv_id[:8]}")
             return session.session_id
@@ -766,6 +770,13 @@ class CodeExecutor:
 
 # Module-level singleton
 code_executor = CodeExecutor()
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Destroy a deleted conversation's code sandbox, its scripts and files with it; 1 when it had one. A sandbox that
+    could not be destroyed is said (``_destroy``)."""
+    return 1 if code_executor.reset_persistent_dir(conversation_id) else 0
+
 
 # Convenience exports
 execute_code = code_executor.execute

@@ -858,6 +858,12 @@ def _forget_semantic_cache(conv_id: str) -> int:
     return forget_conversation(conv_id)
 
 
+def _forget_response_cache(conv_id: str) -> int:
+    from opti_oignon.response_cache import forget_conversation
+
+    return forget_conversation(conv_id)
+
+
 def _forget_facts(conv_id: str) -> int:
     from opti_oignon.memory.dedup import forget_conversation
 
@@ -891,6 +897,29 @@ def _forget_coding_session(conv_id: str) -> int:
     return held.forget_conversation(conv_id) if held is not None else 0
 
 
+def _forget_sync_feed(conv_id: str) -> int:
+    from opti_oignon.veilid.change_feed import forget_conversation
+
+    return forget_conversation(conv_id)
+
+
+def _forget_sandbox_audit(conv_id: str) -> int:
+    # Asked of the process that runs the sandbox, which writes its audit: loading the manager to ask would reap
+    # every workspace it does not track, another process's included.
+    held = _in_memory("opti_oignon.sandbox_manager")
+    return held.forget_conversation(conv_id) if held is not None else 0
+
+
+def _forget_code_sandbox(conv_id: str) -> int:
+    held = _in_memory("opti_oignon.code_executor")
+    return held.forget_conversation(conv_id) if held is not None else 0
+
+
+def _forget_workspace_binding(conv_id: str) -> int:
+    held = _in_memory("opti_oignon.sandbox_workspace")
+    return held.forget_conversation(conv_id) if held is not None else 0
+
+
 def _forget_capture_mark(conv_id: str) -> int:
     held = _in_memory("opti_oignon.memory.auto_capture")
     return held.forget_conversation(conv_id) if held is not None else 0
@@ -907,11 +936,16 @@ _FORGETTERS = (
     ("proposed facts", "opti_oignon.pending_writes", _forget_proposals, True),
     ("feedback", "opti_oignon.feedback", _forget_feedback, True),
     ("semantic cache", "opti_oignon.semantic_cache", _forget_semantic_cache, True),
+    ("response cache", "opti_oignon.response_cache", _forget_response_cache, True),
     ("facts", "opti_oignon.memory.dedup", _forget_facts, True),
+    ("sandbox audit", "opti_oignon.sandbox_manager", _forget_sandbox_audit, True),
+    ("sync change feed", "opti_oignon.veilid.change_feed", _forget_sync_feed, True),
     ("project links", "opti_oignon.projects", _forget_project_links, False),
     ("artifact cache", "opti_oignon.artifacts", _forget_artifacts, False),
     ("tool history", "opti_oignon.agentic_executor", _forget_tool_history, False),
     ("coding session", "opti_oignon.chat_coding_agent", _forget_coding_session, False),
+    ("code sandbox", "opti_oignon.code_executor", _forget_code_sandbox, False),
+    ("workspace binding", "opti_oignon.sandbox_workspace", _forget_workspace_binding, False),
     ("capture mark", "opti_oignon.memory.auto_capture", _forget_capture_mark, False),
 )
 # A store whose module this tree does not have: it holds nothing of the conversation.

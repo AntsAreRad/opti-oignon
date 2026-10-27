@@ -112,7 +112,7 @@ from _onion_off_golden import (  # noqa: E402
 )
 from _registry_bridge import StubRegistry  # noqa: E402
 
-FIXTURE = TESTS / "executor_golden" / "v1" / "tool_path_off.json"
+FIXTURE = TESTS / "executor_golden" / "v2" / "tool_path_off.json"
 SEEDS = ("0", "1")
 FORMAT = 1
 

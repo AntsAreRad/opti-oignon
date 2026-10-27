@@ -1,0 +1,3825 @@
+{
+ "cases": {
+  "integrated/archive": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",120,"d14b0111e7bf9fd4"],["assistant",120,"682cd3599fe925db"],["user",120,"857ae731571e895f"],["assistant",120,"b30e9b608dbf5958"],["user",1343,"9a93032f2905630f"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"7b0ebf50d9adf663d64c6d4be18995ddb7ee12a8e6d9a6b13d4c507c292fed61","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["archive.trigger",{"fields":"4104cfa5b085fdfa"}],
+      ["archive.retrieve",{"fields":"ab4f73de8a0900fa"}],
+      ["cache.key",{"fields":"394a80321be016dd"}],
+      ["cache.get",{"fields":"65db05f0a8b6a9e0","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"7b0ebf50d9adf663"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"bd2eb8edbeef8132"}],
+      ["cache.put",{"fields":"89cf260ece7e28bf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 4,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",120,"d14b0111e7bf9fd4"],["assistant",120,"682cd3599fe925db"],["user",120,"857ae731571e895f"],["assistant",120,"b30e9b608dbf5958"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",1358,"635a5418526024e7"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"7734af1f13ad72893f7b35fb5efb02292668e8a2c1f8ef59817f7c6dc1e35d9d","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["archive.trigger",{"fields":"4351528fc3c349b6"}],
+      ["archive.retrieve",{"fields":"17497e8ccb2d463f"}],
+      ["cache.key",{"fields":"7167fdf17e6a03ee"}],
+      ["cache.get",{"fields":"6572184e61b9e1e6","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"7734af1f13ad7289"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"ec7c41e793df9dc2"}],
+      ["cache.put",{"fields":"73f377cc6c43cb68"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 6,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/cache-hit": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a639c85bfb7af9eb","hit":true}],
+      ["store.add",{"fields":"5d43ab48a4bc6655","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"c9d7170ce575fc64","origin":"assistant","role":"assistant"}],
+      ["ledger",{"outcome":"cache_hit"}]
+     ],
+     "window": {
+      "cache_hit": true,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello world"
+     ]
+    }
+   ]
+  },
+  "integrated/compressor": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",981,"53278a286a65f352"],["assistant",300,"9e052cce86a301f1"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"2eb161e04da04dcdd61e3e11a5abba70d7de3fce0ddc7cc415f44c0a1b07421e","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["archive.trigger",{"fields":"4104cfa5b085fdfa"}],
+      ["compress",{"fields":"e19ef6eb88152400"}],
+      ["cache.key",{"fields":"d6eee8c7242be64f"}],
+      ["cache.get",{"fields":"9058765215bb374f","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"2eb161e04da04dcd"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"4315e080f1b201b3"}],
+      ["cache.put",{"fields":"175271e3a5c9b50f"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 3,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",697,"8546b416585528eb"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"6b51d58fca865ab0141b775bfa50a6a58be0eaec0f1efdc6a967de09efa98a62","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["archive.trigger",{"fields":"4351528fc3c349b6"}],
+      ["compress",{"fields":"84dd2cee74c1a04e"}],
+      ["cache.key",{"fields":"3be2010c7f9a9650"}],
+      ["cache.get",{"fields":"443715c0e2239310","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"6b51d58fca865ab0"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"2c695bce2c3b666a"}],
+      ["cache.put",{"fields":"71f9b0886adde440"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 3,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/documents": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",785,"4d354d76005ca82b"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"39c8cfb73a179aec241bb147b73ff6d69351be88a13932d9350cc2ea1bd8b2eb","think":false}
+     ],
+     "results": {
+      "context_label": [["document","memory"],[[73,"f0bea54a1cae5a6d"],[73,"63fd55c4b1aca570"],"memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["context.check",{"fields":"70897a8b9c5a13e0"}],
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"f55f6eb52e7075dd"}],
+      ["cache.get",{"fields":"d98ab545e6211062","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"39c8cfb73a179aec"}],
+      ["store.add",{"fields":"963ef486c8c6f0c4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"097d9f43ce59c6e5","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"535cf536ff6f677b"}],
+      ["cache.put",{"fields":"38e5c82c1a9b52ea"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",163,"841925827b5de3ab"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"d50aabe71464e8536fed07cf0062f252bb65cb0b02424efcccabec41ad1c546c","think":false}
+     ],
+     "results": {
+      "context_label": [["document","memory"],[[73,"f0bea54a1cae5a6d"],[73,"63fd55c4b1aca570"],"memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"4be00cf44b2504d3"}],
+      ["cache.get",{"fields":"1cdbf63ede800d1a","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"d50aabe71464e853"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"097d9f43ce59c6e5","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"4000a2b1b724839c"}],
+      ["cache.put",{"fields":"605b1a10be92f925"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/every-tail-part": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",120,"d14b0111e7bf9fd4"],["assistant",120,"682cd3599fe925db"],["user",120,"857ae731571e895f"],["assistant",120,"b30e9b608dbf5958"],["user",2865,"c56bb57bfa9e7ea2"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"adf41410915ea44a0af0118494d554239631f3e1724c72c356986b95774b7076","think":false}
+     ],
+     "results": {
+      "context_label": [["file","legacy","memory","web"],[[69,"dbc86b037e8bd7a6"],"memory:fact-1","memory:fact-2",[68,"270ba7c8d0df33e2"],[68,"d51a94671d6efa49"]]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["project.lookup",{"fields":"c66cd7b94e664297"}],
+      ["template.get",{"fields":"60735d3fc38a138d"}],
+      ["budget",{"fields":"a7af0ea76227be50"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["project.lookup",{"fields":"c66cd7b94e664297"}],
+      ["project.detect",{"fields":"58583ace3397f804"}],
+      ["project.build",{"fields":"9a324e55a2ebd202"}],
+      ["provenance.check",{"fields":"9c97ce2d951c4bf7"}],
+      ["web.search",{"fields":"cdfa9d6ddc24a073"}],
+      ["archive.trigger",{"fields":"4104cfa5b085fdfa"}],
+      ["archive.retrieve",{"fields":"ab4f73de8a0900fa"}],
+      ["cache.key",{"fields":"fd254d37e9f2efea"}],
+      ["cache.get",{"fields":"c76c391fbe3fb2a2","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"adf41410915ea44a"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"ad913e77851f6bd8","origin":"assistant+web","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"7111b6b607f1312e"}],
+      ["cache.put",{"fields":"64585859d8d8ecf4"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 4,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",120,"d14b0111e7bf9fd4"],["assistant",120,"682cd3599fe925db"],["user",120,"857ae731571e895f"],["assistant",120,"b30e9b608dbf5958"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",2880,"c3b4f0a794fac7d2"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"cb570733f8d61178a6fe25ba662559c23e7a65201e3d761de3c4bd36c71e0861","think":false}
+     ],
+     "results": {
+      "context_label": [["file","legacy","memory","web"],[[69,"dbc86b037e8bd7a6"],"memory:fact-1","memory:fact-2",[68,"270ba7c8d0df33e2"],[68,"d51a94671d6efa49"]]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["project.lookup",{"fields":"c66cd7b94e664297"}],
+      ["template.get",{"fields":"60735d3fc38a138d"}],
+      ["budget",{"fields":"a7af0ea76227be50"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["project.lookup",{"fields":"c66cd7b94e664297"}],
+      ["project.detect",{"fields":"d153a75247ae308f"}],
+      ["project.build",{"fields":"0e1e8fe72c8c41ff"}],
+      ["provenance.check",{"fields":"a0ce59da21bd6310"}],
+      ["web.search",{"fields":"a0a8f9b1a95ef0a2"}],
+      ["archive.trigger",{"fields":"4351528fc3c349b6"}],
+      ["archive.retrieve",{"fields":"17497e8ccb2d463f"}],
+      ["cache.key",{"fields":"28cd185444934616"}],
+      ["cache.get",{"fields":"c2e6ac387a73a161","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"cb570733f8d61178"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"ad913e77851f6bd8","origin":"assistant+web","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"dc70a98ce6aed6cd"}],
+      ["cache.put",{"fields":"3dd123229bc8a7b1"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 6,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/governor-admits": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"50284dbd73230ae3e2b0b1566d788fdeb37d2d32583f507a31ffab92ec4b2d81","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"90ea7cd36f20e415","requested_ctx":4334}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"50284dbd73230ae3"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"f9cc4cdefd0870e1f9a016d17e4ace339df81f8d2da3cf9dde01eb9bf38bbd02","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"0efaef9acd7c82f0","requested_ctx":4347}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"f9cc4cdefd0870e1"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/governor-refuses": {
+   "turns": [
+    {
+     "requests": [],
+     "results": {
+      "admission_refused": "refused: not enough memory",
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "[ERR] refused: not enough memory"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"90ea7cd36f20e415","requested_ctx":4334}],
+      ["ledger",{"outcome":"governor_refused"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "[ERR] refused: not enough memory"
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "admission_refused": "refused: not enough memory",
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "[ERR] refused: not enough memory"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"5ce139e478799cfd"}],
+      ["cache.get",{"fields":"0203a28fead9cf28","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"2b1dfb3e70ba6294","requested_ctx":4339}],
+      ["ledger",{"outcome":"governor_refused"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "[ERR] refused: not enough memory"
+     ]
+    }
+   ]
+  },
+  "integrated/governor-steps-down": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"num_ctx":4096,"temperature":0.2},"sha256":"788f11cc22f951455b6e81c8bbdd2ccb14ea82a7b4df30acfbea23fdf11cc99f","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"90ea7cd36f20e415","requested_ctx":4334}],
+      ["ticket.set",{"action":"downsize"}],
+      ["stream",{"request":"788f11cc22f95145"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"num_ctx":4096,"temperature":0.2},"sha256":"591e2f80366829ef314dbe8aca287b8fcb18d99242d6f411e4e582e5770c13ec","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"0efaef9acd7c82f0","requested_ctx":4347}],
+      ["ticket.set",{"action":"downsize"}],
+      ["stream",{"request":"591e2f80366829ef"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/hard-truncation": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",400,"6d70ece1351734ba"],["assistant",400,"0d51d5f661fddb6e"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"8d25c31fcf8070955fb41c57b32b28188faae4ba540b296d57172461476cc62d","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["summarize",{"fields":"efa70651c7884b9b"}],
+      ["store.metadata",{"fields":"24c998aad463ca5e"}],
+      ["cache.key",{"fields":"99f2f248bd5230cd"}],
+      ["cache.get",{"fields":"febda39a6ad74b26","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"8d25c31fcf807095"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"36187204e497c8e0"}],
+      ["cache.put",{"fields":"39e95b41fb9e39a9"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["summarize",{"fields":"efa70651c7884b9b"}],
+      ["store.metadata",{"fields":"24c998aad463ca5e"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"e52c8402bdec8bfe"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/librarian-blocked": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/librarian-counting-off": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/librarian-real-off": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/librarian-three-names-off": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/librarian-three-names-on": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["curate",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["curate",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/manifest": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/manual": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/named-llama-server": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"cache_prompt":true,"id_slot":1,"temperature":0.2},"sha256":"e3a1a946643abc97a02cf68d56c29bbb0b75f653ece8d1915e29bb5c3e42acb4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["slot.choose",{"fields":"83586324e5da39b5"}],
+      ["stream",{"request":"e3a1a946643abc97"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"cache_prompt":true,"id_slot":1,"temperature":0.2},"sha256":"06f68227fd76e9ec4f671cbaf7103e7b2de4cd770d62f358716cbf5576ea50fa","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["slot.choose",{"fields":"83586324e5da39b5"}],
+      ["stream",{"request":"06f68227fd76e9ec"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/named-llama-server-admitted": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"cache_prompt":true,"id_slot":1,"num_ctx":16384,"temperature":0.2},"sha256":"8bab01f4ee35aca3352dce781de75da9a41c03b4af64c515edaa9b7eb6e17427","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"90ea7cd36f20e415","requested_ctx":4334}],
+      ["ticket.set",{"action":"admit"}],
+      ["slot.choose",{"fields":"83586324e5da39b5"}],
+      ["stream",{"request":"8bab01f4ee35aca3"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"cache_prompt":true,"id_slot":1,"num_ctx":16384,"temperature":0.2},"sha256":"bcd17aedd8b2662c6fa08d3c96f82642083f5c8e5b53274ca530efcd7468a263","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"0efaef9acd7c82f0","requested_ctx":4347}],
+      ["ticket.set",{"action":"admit"}],
+      ["slot.choose",{"fields":"83586324e5da39b5"}],
+      ["stream",{"request":"bcd17aedd8b2662c"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/offline": {
+   "turns": [
+    {
+     "requests": [],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      [103,"c8be786e78c1a2cc"]
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":false}],
+      ["ledger",{"outcome":"offline_queued"}]
+     ],
+     "window": {
+      "offline_queued": true,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      [103,"c8be786e78c1a2cc"]
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      [103,"c8be786e78c1a2cc"]
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"5ce139e478799cfd"}],
+      ["cache.get",{"fields":"0203a28fead9cf28","hit":false}],
+      ["network.online",{"online":false}],
+      ["ledger",{"outcome":"offline_queued"}]
+     ],
+     "window": {
+      "offline_queued": true,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      [103,"c8be786e78c1a2cc"]
+     ]
+    }
+   ]
+  },
+  "integrated/optimizer": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["budget",{"fields":"098d28ae9164c4a3"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "optimizer",
+      "zones": {"history":"empty","project":"none","reserve":"reserved","system":"fixed","user":"fixed"}
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["budget",{"fields":"098d28ae9164c4a3"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "kept": 2,
+      "strategy": "optimizer",
+      "zones": {"history":"none","project":"none","reserve":"reserved","system":"fixed","user":"fixed"}
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/optimizer-mechanisms": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",1500,"aca74cd2c84815bb"],["assistant",1500,"c6ca65a5b38e3249"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"bf944e60b0347409fc06f8c5364ab2592f107d1c560b81f6a729a7a751855997","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["archive.trigger",{"fields":"4104cfa5b085fdfa"}],
+      ["budget",{"fields":"098d28ae9164c4a3"}],
+      ["compress",{"fields":"c293faf46e1c78fe"}],
+      ["slide",{"fields":"34bab271eec12dc5"}],
+      ["cache.key",{"fields":"5e897f85afa4449b"}],
+      ["cache.get",{"fields":"90f20715c1ee102c","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"bf944e60b0347409"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"1ff7cf51e3920ca8"}],
+      ["cache.put",{"fields":"72410316190cac10"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "dropped": 11000,
+      "kept": 2,
+      "strategy": "optimizer",
+      "zones": {"history":"compressed:rule+sliding_window+emergency","project":"none","reserve":"reserved","system":"fixed","user":"fixed"}
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["archive.trigger",{"fields":"4351528fc3c349b6"}],
+      ["budget",{"fields":"098d28ae9164c4a3"}],
+      ["compress",{"fields":"640c9d17c898c2ed"}],
+      ["slide",{"fields":"0e8daa4382115fc1"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"9bd31cf0383c2ad4"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "dropped": 12000,
+      "kept": 2,
+      "strategy": "optimizer",
+      "zones": {"history":"compressed:rule+sliding_window","project":"none","reserve":"reserved","system":"fixed","user":"fixed"}
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/optimizer-raises": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["budget.raises",{"fields":"098d28ae9164c4a3"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["budget.raises",{"fields":"098d28ae9164c4a3"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/project-optimizer-manifest": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["system",12,"dc498fe2510792cc"],["user",1278,"66a9a4f206d2e177"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"fafeadc7ca2cffb986bb1cab4628909c91aeb3dfb1c3bcd613a6c6a27cbb368c","think":false}
+     ],
+     "results": {
+      "context_label": [["file","memory"],[[69,"dbc86b037e8bd7a6"],"memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["project.lookup",{"fields":"c66cd7b94e664297"}],
+      ["template.get",{"fields":"60735d3fc38a138d"}],
+      ["budget",{"fields":"a7af0ea76227be50"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["budget",{"fields":"944420d53a1c863b"}],
+      ["project.build",{"fields":"dc36ef7cae4db51b"}],
+      ["cache.key",{"fields":"1b7a1fc83c523472"}],
+      ["cache.get",{"fields":"324eb41321245b07","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"fafeadc7ca2cffb9"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"4be4c36737bd62f3","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"f877696f2ac8f869"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "kept": 1,
+      "strategy": "optimizer",
+      "zones": {"history":"empty","manifest":"pinned","project":"rag","reserve":"reserved","system":"fixed","user":"fixed"}
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["system",12,"dc498fe2510792cc"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",1293,"4504f19b182f5723"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1b3a00ec4ba15747e02363727a0f41b50e22834e0285e2d10210151889a56a7","think":false}
+     ],
+     "results": {
+      "context_label": [["file","memory"],[[69,"dbc86b037e8bd7a6"],"memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["project.lookup",{"fields":"c66cd7b94e664297"}],
+      ["template.get",{"fields":"60735d3fc38a138d"}],
+      ["budget",{"fields":"a7af0ea76227be50"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["budget",{"fields":"944420d53a1c863b"}],
+      ["project.build",{"fields":"a09ec13487a0bc55"}],
+      ["cache.key",{"fields":"a0f0f3c52be23ef9"}],
+      ["cache.get",{"fields":"579f43e3fa7dbed3","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"b1b3a00ec4ba1574"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"4be4c36737bd62f3","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"5fb3782aec1ccf30"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "kept": 3,
+      "strategy": "optimizer",
+      "zones": {"history":"none","manifest":"pinned","project":"rag","reserve":"reserved","system":"fixed","user":"fixed"}
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/refine": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"generate","extra":[],"images":null,"keep_alive":"12m","messages":[["system",36,"9e62fc45918caa0f"],["user",596,"f86f93daa379e971"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"9f03d7dbb6eea8b0368f6597976e479efabbab3c3c9f67f5c55213dcea3a4894","think":false},
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",79,"ea3e139eccd8ad56"],["user",633,"56db6d897af42bce"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"801e892004cd7108d37d6dc9b2e8170040e26c18a1b8915325ecff51910553f8","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "Hello world",
+      "Hello world"
+     ],
+     "trace": [
+      ["admit",{"caller":"chat","fields":"2d24a69622038aaf","requested_ctx":null}],
+      ["ticket.set",{"action":"admit"}],
+      ["generate",{"request":"9f03d7dbb6eea8b0"}],
+      ["ticket.clear"],
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"f6d59bce6c29e601"}],
+      ["cache.key",{"fields":"952cdaf297e908a7"}],
+      ["cache.get",{"fields":"c451e9d7db9873d3","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"5efce853a5fa0952","requested_ctx":4332}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"801e892004cd7108"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"bbcd6dc75717ae2c","origin":"refined","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"f16fc5fe1343ff1b"}],
+      ["cache.put",{"fields":"93750347e85f940f"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"generate","extra":[],"images":null,"keep_alive":"12m","messages":[["system",36,"9e62fc45918caa0f"],["user",611,"6db868e85684110b"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"3c4a810f3905df757eb3232701e69258c71e581cf5464d5282a248871c1d2aba","think":false},
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",79,"ea3e139eccd8ad56"],["user",11,"64ec88ca00b268e5"],["assistant",11,"64ec88ca00b268e5"],["user",633,"56db6d897af42bce"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"dddad5fbae811aeb3e0ec9706bbf6ca5e4178abc4198fb80a7329128d64c13c9","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "Hello world",
+      "Hello world"
+     ],
+     "trace": [
+      ["admit",{"caller":"chat","fields":"2d24a69622038aaf","requested_ctx":null}],
+      ["ticket.set",{"action":"admit"}],
+      ["generate",{"request":"3c4a810f3905df75"}],
+      ["ticket.clear"],
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"f6d59bce6c29e601"}],
+      ["cache.key",{"fields":"f2edeefdc3f592da"}],
+      ["cache.get",{"fields":"e3b264bb28a265ad","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"b89532ac638a87ab","requested_ctx":4338}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"dddad5fbae811aeb"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"bbcd6dc75717ae2c","origin":"refined","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"f2ad50f4379c7c4f"}],
+      ["cache.put",{"fields":"027e8a93c20bee54"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/single-turn": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["semantic.get",{"fields":"33a02da4f2611cc1"}],
+      ["cache.key",{"fields":"6bca97a6c150a74e"}],
+      ["cache.get",{"fields":"ded74044a42e96a7","hit":false}],
+      ["semantic.fallback",{"fields":"c7de8039e825e706"}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["cache.put",{"fields":"24e962d1e4147d62"}],
+      ["semantic.embed",{"fields":"948a158ba8b0bbb2"}],
+      ["semantic.put",{"fields":"d5513ba2bcc58ece"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {},
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"a376231e3db8e4dc7861ceb77d22609295ae97dbc902fdf7ac96362a6dca2338","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["semantic.get",{"fields":"901cad1b90ffd568"}],
+      ["cache.key",{"fields":"2e718c72a36151d7"}],
+      ["cache.get",{"fields":"a8cb936e05314dda","hit":false}],
+      ["semantic.fallback",{"fields":"37649515abcbb941"}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"a376231e3db8e4dc"}],
+      ["cache.put",{"fields":"29507604081ceb14"}],
+      ["semantic.embed",{"fields":"4b60b9360b9fb0c2"}],
+      ["semantic.put",{"fields":"1d24569124985cba"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {},
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/sliding-window": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",400,"2e845d7fb1e62e1f"],["assistant",400,"36485b5bf3a27f9a"],["user",400,"6d70ece1351734ba"],["assistant",400,"0d51d5f661fddb6e"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"697bf16afafd460c6f328ae42b4c766dbebd633a8d43feb79213b85ca120deb5","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["slide",{"fields":"e77012a63013d913"}],
+      ["cache.key",{"fields":"e0d18634b6b6fe3a"}],
+      ["cache.get",{"fields":"c9a4a002a141779b","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"697bf16afafd460c"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"36187204e497c8e0"}],
+      ["cache.put",{"fields":"740a7f52a3bd7170"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "dropped": 20,
+      "history_count": 4,
+      "kept": 4,
+      "strategy": "importance"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",400,"6d70ece1351734ba"],["assistant",400,"0d51d5f661fddb6e"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"250a7a8c7614966f8216504bad627f50b0c1ea3accc4600539ee671b52c0968f","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["slide",{"fields":"58f3a3c94da8aa1a"}],
+      ["cache.key",{"fields":"53220a13fc9f1ff7"}],
+      ["cache.get",{"fields":"ba096ed04e440aba","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"250a7a8c7614966f"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"e52c8402bdec8bfe"}],
+      ["cache.put",{"fields":"be6a5e775d7e6c4c"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "dropped": 22,
+      "history_count": 4,
+      "kept": 4,
+      "strategy": "importance"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/stop-in-cache-lookup": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"80cc6f13c2f2099629f6db573c4c6010d336ffc56c108f1f9835baabd98b80b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"80cc6f13c2f20996"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "cancelled": true,
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "[Cancelled]"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["stop"],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["ledger",{"outcome":"cancelled"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "[Cancelled]"
+     ]
+    }
+   ]
+  },
+  "integrated/summary": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",1072,"0b4872cfc2e3390a"],["assistant",400,"f79437d594fd2932"],["user",400,"9eb08f7a15dd0a50"],["assistant",400,"c09da177623fab93"],["user",400,"2e845d7fb1e62e1f"],["assistant",400,"36485b5bf3a27f9a"],["user",400,"6d70ece1351734ba"],["assistant",400,"0d51d5f661fddb6e"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"a6c1a84a39584cd27c944ef74d70368c20707349ae7498fad41c57ff9b6a96d2","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["summarize",{"fields":"efa70651c7884b9b"}],
+      ["store.metadata",{"fields":"8183c4d1ccb76275"}],
+      ["cache.key",{"fields":"a0e8c3aead08b058"}],
+      ["cache.get",{"fields":"530ed8de71e0d6b9","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"a6c1a84a39584cd2"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"36187204e497c8e0"}],
+      ["cache.put",{"fields":"bd1f858c38a532d6"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 9,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",1072,"0b4872cfc2e3390a"],["assistant",400,"f79437d594fd2932"],["user",400,"9eb08f7a15dd0a50"],["assistant",400,"c09da177623fab93"],["user",400,"2e845d7fb1e62e1f"],["assistant",400,"36485b5bf3a27f9a"],["user",400,"6d70ece1351734ba"],["assistant",400,"0d51d5f661fddb6e"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"761185d1649978335298b3172388b33dd6d6ab7a5c957dcffbdea00da32eb97b","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["summarize",{"fields":"efa70651c7884b9b"}],
+      ["store.metadata",{"fields":"8183c4d1ccb76275"}],
+      ["cache.key",{"fields":"a022f03115d460cf"}],
+      ["cache.get",{"fields":"02932ff4b26b53a6","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"761185d164997833"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"e52c8402bdec8bfe"}],
+      ["cache.put",{"fields":"3e1a247426a6f08b"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 11,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/summary-tiers": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",1151,"314a6931a02d50e0"],["assistant",400,"36485b5bf3a27f9a"],["user",400,"6d70ece1351734ba"],["assistant",400,"0d51d5f661fddb6e"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"6666b5ef2dd2532d804bb3895d239b1424b361b5e491bcf30b7ef81f58b5086d","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["summarize",{"fields":"9708a6b938675a62"}],
+      ["summarize",{"fields":"3c8e1a2ee2e28742"}],
+      ["store.metadata",{"fields":"04c58ed167c66168"}],
+      ["cache.key",{"fields":"ba2df3124ee6d00d"}],
+      ["cache.get",{"fields":"619fd111af940890","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"6666b5ef2dd2532d"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"36187204e497c8e0"}],
+      ["cache.put",{"fields":"580a00a97c6e9987"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 5,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",1151,"314a6931a02d50e0"],["assistant",400,"36485b5bf3a27f9a"],["user",400,"6d70ece1351734ba"],["assistant",400,"0d51d5f661fddb6e"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"400de65476df46ad0888f4f24a6268d523edc49d5a16feae30c948e3b8dc2963","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["store.metadata",{"fields":"04c58ed167c66168"}],
+      ["cache.key",{"fields":"5ae501d61a136445"}],
+      ["cache.get",{"fields":"05562dd244130221","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"400de65476df46ad"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a2cd2d887202447e","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"e52c8402bdec8bfe"}],
+      ["cache.put",{"fields":"0e79c66c3a180283"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 7,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/think": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"e84fe989b5388b09441432c3d7869f41d34e3217aae4886ef4e1ec8a0a5757d5","think":true}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"d8649b82d8469c2a"}],
+      ["cache.get",{"fields":"a4666d9a7456626d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"e84fe989b5388b09"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"31f9f48485b4e58e"}],
+      ["cache.put",{"fields":"d19db61104a25277"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      ["thinking","Weighing the beds first."],
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"79ffa8b48cb82d4664b997ea53c5dda95f1dfb26d0769e4a701446a39b38d2bb","think":true}
+     ],
+     "results": {
+      "context_label": [["memory"],["memory:fact-1","memory:fact-2"]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"79ffa8b48cb82d46"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"682fc721dc1cc152","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"adbb345d4d7170b8"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      ["thinking","Weighing the beds first."],
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "integrated/web": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",1520,"3ea2bb6508b8e5e4"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"f777186d32be5fcfc75cc04161b3853c5c86358a22d39201860c13e1b101d4b4","think":false}
+     ],
+     "results": {
+      "context_label": [["memory","web"],["memory:fact-1","memory:fact-2",[68,"270ba7c8d0df33e2"],[68,"d51a94671d6efa49"]]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"268e0acd775fb3a2"}],
+      ["provenance.check",{"fields":"9c97ce2d951c4bf7"}],
+      ["web.search",{"fields":"cdfa9d6ddc24a073"}],
+      ["cache.key",{"fields":"52b0c10fa32b621a"}],
+      ["cache.get",{"fields":"ea974331fa8c2843","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"f777186d32be5fcf"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"6139c4086c153691","origin":"assistant+web","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"7005637e00553087"}],
+      ["cache.put",{"fields":"545ac7bbc60781b5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"45m","messages":[["system",79,"ea3e139eccd8ad56"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"993eb7fa765675ae25f833b88a1062b8f487382499edd94840599064d62c2039","think":false}
+     ],
+     "results": {
+      "context_label": [["memory","web"],["memory:fact-1","memory:fact-2",[68,"270ba7c8d0df33e2"],[68,"d51a94671d6efa49"]]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["template.get",{"fields":"58d889f9368832cc"}],
+      ["budget",{"fields":"f71a03f3277b695e"}],
+      ["memory.compose",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"d74de1d4be783e40"}],
+      ["cache.get",{"fields":"32213f8d7e26647d","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"993eb7fa765675ae"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9ab07ec188e94858","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["capture",{"fields":"ae5d1bbafb72cd28"}],
+      ["cache.put",{"fields":"44144f083c2c23c5"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/base": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"40a829082f6a7a6295d931acb55e3334dbe72087c0fdb73a73b2278ae63cedd3","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["stream",{"request":"40a829082f6a7a62"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/cache-hit": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"482b5fb07b3749cf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"1edca139144f44a8","hit":true}],
+      ["store.add",{"fields":"5d43ab48a4bc6655","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"244324ab2f651c74","origin":"assistant","role":"assistant"}],
+      ["ledger",{"outcome":"cache_hit"}]
+     ],
+     "window": {
+      "cache_hit": true,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello world"
+     ]
+    }
+   ]
+  },
+  "isolated/documents": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",785,"4d354d76005ca82b"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"675285d64caa97aa14fa07113e82af2b58c724cfece108918f9dd6ead4278385","think":false}
+     ],
+     "results": {
+      "context_label": [["document","memory"],[[73,"f0bea54a1cae5a6d"],[73,"63fd55c4b1aca570"]]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"19b283c2ef62e625"}],
+      ["cache.get",{"fields":"b290bd28f31465ea","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"675285d64caa97aa"}],
+      ["store.add",{"fields":"963ef486c8c6f0c4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"13cfd169c4640ceb","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"120b35bec335f63e"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",163,"841925827b5de3ab"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"8239ec601bae9d5550bfe7e35df4e3bb5d39517d3abbfee10d327ce0d76ece64","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"50e02f5a374d52cb"}],
+      ["cache.get",{"fields":"5b180ac950369637","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"8239ec601bae9d55"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"c1c55dd50eb9a7b8"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/drop-legacy": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",4500,"f15849f8b0d9b11a"],["assistant",4500,"094b88568de58dd4"],["user",4500,"9ea375158c016343"],["assistant",4500,"098d738fd2e2bbd2"],["user",4500,"9e554997295ee982"],["assistant",4500,"dd9fb16e957b0f67"],["user",4500,"a92fd5bc2d95dacf"],["assistant",4500,"2a9fe0f511285970"],["user",4500,"672487cc7688ad99"],["assistant",4500,"0a7edc2c08c5053d"],["user",4500,"f2ab587788c96cf1"],["assistant",4500,"00419cefe6350c9d"],["user",4500,"d3cdd80815410fe2"],["assistant",4500,"5436588811817751"],["user",4500,"69e6e8bb7b223f2a"],["assistant",4500,"2abbbbfb4b4128a6"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"7ba7c656a9839f3ebb3272ed5fbde5872e8b16231ea3196b3f0cc4bd53315a8c","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"59d1af682d86c89c"}],
+      ["cache.get",{"fields":"ffce55ef9c18bdb5","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"7ba7c656a9839f3e"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"1eb93166ce972050"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "fallback_legacy": true,
+      "history_count": 16,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",4500,"f15849f8b0d9b11a"],["assistant",4500,"094b88568de58dd4"],["user",4500,"9ea375158c016343"],["assistant",4500,"098d738fd2e2bbd2"],["user",4500,"9e554997295ee982"],["assistant",4500,"dd9fb16e957b0f67"],["user",4500,"a92fd5bc2d95dacf"],["assistant",4500,"2a9fe0f511285970"],["user",4500,"672487cc7688ad99"],["assistant",4500,"0a7edc2c08c5053d"],["user",4500,"f2ab587788c96cf1"],["assistant",4500,"00419cefe6350c9d"],["user",4500,"d3cdd80815410fe2"],["assistant",4500,"5436588811817751"],["user",4500,"69e6e8bb7b223f2a"],["assistant",4500,"2abbbbfb4b4128a6"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"fda470869997a6547a6c3291e71fbbef7484c1e09de9789f51d6cdf2650ae407","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"656de2316aa1320f"}],
+      ["cache.get",{"fields":"c1c6800a87ed7818","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"fda470869997a654"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"f3f08db631ebe003"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "fallback_legacy": true,
+      "history_count": 18,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/governor-admits": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"e871a1e884fd88d6b0e8e9f19d9e22141fd0f237dcb699b79b491782acd3ffac","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"f906ecc4345148fb","requested_ctx":4317}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"e871a1e884fd88d6"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"482b5fb07b3749cf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"fbbbe5f3054286182d8c5e3c2455f70c6881f81749c1671b187428a411161ce4","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"dac9ce4aae1fa67b"}],
+      ["cache.get",{"fields":"d57011e87896fa24","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"f4afa6e911b534f0","requested_ctx":4326}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"fbbbe5f305428618"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"9fdc46264a01ab4e"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/governor-refuses": {
+   "turns": [
+    {
+     "requests": [],
+     "results": {
+      "admission_refused": "refused: not enough memory",
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "[ERR] refused: not enough memory"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"f906ecc4345148fb","requested_ctx":4317}],
+      ["ledger",{"outcome":"governor_refused"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "[ERR] refused: not enough memory"
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "admission_refused": "refused: not enough memory",
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "[ERR] refused: not enough memory"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"48b6cc86295fe614"}],
+      ["cache.get",{"fields":"934bc7b7d2988284","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"e0ac214986950c7f","requested_ctx":4320}],
+      ["ledger",{"outcome":"governor_refused"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "[ERR] refused: not enough memory"
+     ]
+    }
+   ]
+  },
+  "isolated/governor-steps-down": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"num_ctx":4096,"temperature":0.2},"sha256":"d437abe0e43c60f2e369cc542b1dd0808aba4769e1cd9d4b98411e770f017c5c","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"f906ecc4345148fb","requested_ctx":4317}],
+      ["ticket.set",{"action":"downsize"}],
+      ["stream",{"request":"d437abe0e43c60f2"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"482b5fb07b3749cf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"num_ctx":4096,"temperature":0.2},"sha256":"5472bf50f7e43ca5b24332712c7c151cd1dfdd6bf78a8c5134e3719769cb4119","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"dac9ce4aae1fa67b"}],
+      ["cache.get",{"fields":"d57011e87896fa24","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"f4afa6e911b534f0","requested_ctx":4326}],
+      ["ticket.set",{"action":"downsize"}],
+      ["stream",{"request":"5472bf50f7e43ca5"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"9fdc46264a01ab4e"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/librarian-blocked": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"40a829082f6a7a6295d931acb55e3334dbe72087c0fdb73a73b2278ae63cedd3","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["stream",{"request":"40a829082f6a7a62"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/librarian-real-off": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"40a829082f6a7a6295d931acb55e3334dbe72087c0fdb73a73b2278ae63cedd3","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["stream",{"request":"40a829082f6a7a62"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/librarian-three-names-off": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"40a829082f6a7a6295d931acb55e3334dbe72087c0fdb73a73b2278ae63cedd3","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["stream",{"request":"40a829082f6a7a62"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/librarian-three-names-on": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["curate",{"fields":"31f9f48485b4e58e"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"40a829082f6a7a6295d931acb55e3334dbe72087c0fdb73a73b2278ae63cedd3","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["stream",{"request":"40a829082f6a7a62"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["curate",{"fields":"adbb345d4d7170b8"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/manifest": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"482b5fb07b3749cf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"40a829082f6a7a6295d931acb55e3334dbe72087c0fdb73a73b2278ae63cedd3","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"dac9ce4aae1fa67b"}],
+      ["cache.get",{"fields":"d57011e87896fa24","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"40a829082f6a7a62"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"9fdc46264a01ab4e"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/manual": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"482b5fb07b3749cf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"40a829082f6a7a6295d931acb55e3334dbe72087c0fdb73a73b2278ae63cedd3","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"dac9ce4aae1fa67b"}],
+      ["cache.get",{"fields":"d57011e87896fa24","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"40a829082f6a7a62"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"9fdc46264a01ab4e"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/offline": {
+   "turns": [
+    {
+     "requests": [],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      [103,"c8be786e78c1a2cc"]
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":false}],
+      ["ledger",{"outcome":"offline_queued"}]
+     ],
+     "window": {
+      "offline_queued": true,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      [103,"c8be786e78c1a2cc"]
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      [103,"c8be786e78c1a2cc"]
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"48b6cc86295fe614"}],
+      ["cache.get",{"fields":"934bc7b7d2988284","hit":false}],
+      ["network.online",{"online":false}],
+      ["ledger",{"outcome":"offline_queued"}]
+     ],
+     "window": {
+      "offline_queued": true,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      [103,"c8be786e78c1a2cc"]
+     ]
+    }
+   ]
+  },
+  "isolated/project-manual": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",1278,"66a9a4f206d2e177"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"eb3a5f37662d9cfda2d1d9597c29796f58d384e1e870479addda3b3264a86162","think":false}
+     ],
+     "results": {
+      "context_label": [["file","memory"],[[69,"dbc86b037e8bd7a6"]]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["project.lookup",{"fields":"c66cd7b94e664297"}],
+      ["project.detect",{"fields":"58583ace3397f804"}],
+      ["project.build",{"fields":"9a324e55a2ebd202"}],
+      ["cache.key",{"fields":"4e4a22f27d34b1cc"}],
+      ["cache.get",{"fields":"7ef7d0f99f3ff52c","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"eb3a5f37662d9cfd"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"af4d1d849f20f684","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"4702149f13eba725"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",1293,"4504f19b182f5723"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"5cf3e4db5a2673ab011f5fb018efa69b6b5b46d320f455bf3faf0decc29d6ad2","think":false}
+     ],
+     "results": {
+      "context_label": [["file","legacy","memory"],[[69,"dbc86b037e8bd7a6"]]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["project.lookup",{"fields":"c66cd7b94e664297"}],
+      ["project.detect",{"fields":"d153a75247ae308f"}],
+      ["project.build",{"fields":"0e1e8fe72c8c41ff"}],
+      ["cache.key",{"fields":"a07e8955a7de5f5a"}],
+      ["cache.get",{"fields":"1cf3093f2b80f93e","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"5cf3e4db5a2673ab"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"7f29eb18d504d7a0","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"17d13b08850d4182"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/refine": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"generate","extra":[],"images":null,"keep_alive":"12m","messages":[["system",36,"9e62fc45918caa0f"],["user",596,"f86f93daa379e971"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"9f03d7dbb6eea8b0368f6597976e479efabbab3c3c9f67f5c55213dcea3a4894","think":false},
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",250,"4736872bb9d45fa3"],["user",633,"56db6d897af42bce"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"184204405fd18b2f17b216dd380f43a6428372a8e2eabf8845e2aaff22e920a6","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "Hello world",
+      "Hello world"
+     ],
+     "trace": [
+      ["admit",{"caller":"chat","fields":"2d24a69622038aaf","requested_ctx":null}],
+      ["ticket.set",{"action":"admit"}],
+      ["generate",{"request":"9f03d7dbb6eea8b0"}],
+      ["ticket.clear"],
+      ["memory.build",{"fields":"f6d59bce6c29e601"}],
+      ["cache.key",{"fields":"faa4aa31bfbaecb5"}],
+      ["cache.get",{"fields":"fbaedf6b078e0ad6","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"8fa4f3a3f5919899","requested_ctx":4315}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"184204405fd18b2f"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"bbcd6dc75717ae2c","origin":"refined","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"ab3c20809bee72dc"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"generate","extra":[],"images":null,"keep_alive":"12m","messages":[["system",36,"9e62fc45918caa0f"],["user",611,"6db868e85684110b"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"3c4a810f3905df757eb3232701e69258c71e581cf5464d5282a248871c1d2aba","think":false},
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",250,"4736872bb9d45fa3"],["user",11,"64ec88ca00b268e5"],["assistant",11,"64ec88ca00b268e5"],["user",633,"56db6d897af42bce"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"92e11785cfbc37ea029f8ec61c29a60dda9f88c2f1918ecaff9a3ab548ab9fed","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "Hello world",
+      "Hello world"
+     ],
+     "trace": [
+      ["admit",{"caller":"chat","fields":"2d24a69622038aaf","requested_ctx":null}],
+      ["ticket.set",{"action":"admit"}],
+      ["generate",{"request":"3c4a810f3905df75"}],
+      ["ticket.clear"],
+      ["memory.build",{"fields":"f6d59bce6c29e601"}],
+      ["cache.key",{"fields":"bc9b74de1eff00f9"}],
+      ["cache.get",{"fields":"dde9978a8c903af6","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"3bbff8057b78b388","requested_ctx":4319}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"92e11785cfbc37ea"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"bbcd6dc75717ae2c","origin":"refined","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"7640a6f391e7604e"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/single-turn": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["semantic.get",{"fields":"ebd9dbe3a746c894"}],
+      ["cache.key",{"fields":"d1bb02825f86aa10"}],
+      ["cache.get",{"fields":"c0ad98b9965ac544","hit":false}],
+      ["semantic.fallback",{"fields":"e66874d578e93dd8"}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["cache.put",{"fields":"db23987dcc55f965"}],
+      ["semantic.embed",{"fields":"fc409e2a3e75eab4"}],
+      ["semantic.put",{"fields":"3c4125da6a68c68f"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {},
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"58d45b4804ef7a776489f08437a8bbc8f9c92c582fb792262feba0e12528d442","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["semantic.get",{"fields":"1eb07742b370f317"}],
+      ["cache.key",{"fields":"d496b121666919da"}],
+      ["cache.get",{"fields":"5235283ab0eb3e1a","hit":false}],
+      ["semantic.fallback",{"fields":"f3e5bd8e1d609ead"}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"58d45b4804ef7a77"}],
+      ["cache.put",{"fields":"da048372c9d22573"}],
+      ["semantic.embed",{"fields":"756da91f8c53312e"}],
+      ["semantic.put",{"fields":"535b8bbcc0403b58"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {},
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/stop-at-thread-start": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"e871a1e884fd88d6b0e8e9f19d9e22141fd0f237dcb699b79b491782acd3ffac","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"f906ecc4345148fb","requested_ctx":4317}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"e871a1e884fd88d6"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"482b5fb07b3749cf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "cancelled": true,
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "\n\n[Generation cancelled]"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"dac9ce4aae1fa67b"}],
+      ["cache.get",{"fields":"d57011e87896fa24","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"f4afa6e911b534f0","requested_ctx":4326}],
+      ["ticket.set",{"action":"admit"}],
+      ["stop"],
+      ["ticket.clear"],
+      ["ledger",{"outcome":"cancelled"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "\n\n[Generation cancelled]"
+     ]
+    }
+   ]
+  },
+  "isolated/stop-in-admission": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"e871a1e884fd88d6b0e8e9f19d9e22141fd0f237dcb699b79b491782acd3ffac","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"f906ecc4345148fb","requested_ctx":4317}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"e871a1e884fd88d6"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"482b5fb07b3749cf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "cancelled": true,
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "[Cancelled]"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"dac9ce4aae1fa67b"}],
+      ["cache.get",{"fields":"d57011e87896fa24","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"f4afa6e911b534f0","requested_ctx":4326}],
+      ["stop"],
+      ["ledger",{"outcome":"cancelled"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "[Cancelled]"
+     ]
+    }
+   ]
+  },
+  "isolated/stop-in-cache-lookup": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"b1c94807f60ce3160b6f41a811b23d01d8170e223e15e60fb3f343710cc3f4ce","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"b1c94807f60ce316"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"482b5fb07b3749cf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [],
+     "results": {
+      "cancelled": true,
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "[Cancelled]"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"dac9ce4aae1fa67b"}],
+      ["stop"],
+      ["cache.get",{"fields":"d57011e87896fa24","hit":false}],
+      ["ledger",{"outcome":"cancelled"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "[Cancelled]"
+     ]
+    }
+   ]
+  },
+  "isolated/stop-in-refinement": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"generate","extra":[],"images":null,"keep_alive":"12m","messages":[["system",36,"9e62fc45918caa0f"],["user",596,"f86f93daa379e971"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"9f03d7dbb6eea8b0368f6597976e479efabbab3c3c9f67f5c55213dcea3a4894","think":false},
+      {"call":"stream","extra":[],"images":null,"keep_alive":"12m","messages":[["system",250,"4736872bb9d45fa3"],["user",633,"56db6d897af42bce"]],"model":"test-model:1b","options":{"num_ctx":16384,"temperature":0.2},"sha256":"184204405fd18b2f17b216dd380f43a6428372a8e2eabf8845e2aaff22e920a6","think":false}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "Hello world",
+      "Hello world"
+     ],
+     "trace": [
+      ["admit",{"caller":"chat","fields":"2d24a69622038aaf","requested_ctx":null}],
+      ["ticket.set",{"action":"admit"}],
+      ["generate",{"request":"9f03d7dbb6eea8b0"}],
+      ["ticket.clear"],
+      ["memory.build",{"fields":"f6d59bce6c29e601"}],
+      ["cache.key",{"fields":"faa4aa31bfbaecb5"}],
+      ["cache.get",{"fields":"fbaedf6b078e0ad6","hit":false}],
+      ["network.online",{"online":true}],
+      ["admit",{"caller":"chat","fields":"8fa4f3a3f5919899","requested_ctx":4315}],
+      ["ticket.set",{"action":"admit"}],
+      ["stream",{"request":"184204405fd18b2f"}],
+      ["ticket.clear"],
+      ["store.add",{"fields":"bbcd6dc75717ae2c","origin":"refined","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"ab3c20809bee72dc"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"generate","extra":[],"images":null,"keep_alive":"12m","messages":[["system",36,"9e62fc45918caa0f"],["user",611,"6db868e85684110b"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"3c4a810f3905df757eb3232701e69258c71e581cf5464d5282a248871c1d2aba","think":false}
+     ],
+     "results": {
+      "cancelled": true
+     },
+     "returned": [
+      "Hello world",
+      "[Cancelled]"
+     ],
+     "trace": [
+      ["admit",{"caller":"chat","fields":"2d24a69622038aaf","requested_ctx":null}],
+      ["ticket.set",{"action":"admit"}],
+      ["generate",{"request":"3c4a810f3905df75"}],
+      ["stop"],
+      ["ticket.clear"],
+      ["ledger",{"outcome":"cancelled"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "[Cancelled]"
+     ]
+    }
+   ]
+  },
+  "isolated/think": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",638,"22284993b73abf52"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"d3346407e02549ecea1fd0fb38bd7ef32954b298710f3255eeb533c5af6360fe","think":true}
+     ],
+     "results": {
+      "context_label": [["memory"],[]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["cache.key",{"fields":"49e9726cd1e86190"}],
+      ["cache.get",{"fields":"287c8790966d4842","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"d3346407e02549ec"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84e0a23b98aad303","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"482b5fb07b3749cf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      ["thinking","Weighing the beds first."],
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"e1d85866047a2fc3dafe2300183678fb7189e1fa6127033480972af452bb6d9e","think":true}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"dac9ce4aae1fa67b"}],
+      ["cache.get",{"fields":"d57011e87896fa24","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"e1d85866047a2fc3"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"9fdc46264a01ab4e"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      ["thinking","Weighing the beds first."],
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  },
+  "isolated/web": {
+   "turns": [
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",1520,"3ea2bb6508b8e5e4"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"324833504c1a2f03abb0d5b8eadeaf452a8bc5ad5fdc7e21a967ebc5aebf5d19","think":false}
+     ],
+     "results": {
+      "context_label": [["memory","web"],[[68,"270ba7c8d0df33e2"],[68,"d51a94671d6efa49"]]]
+     },
+     "returned": [
+      "What is my name?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"268e0acd775fb3a2"}],
+      ["web.search",{"fields":"cdfa9d6ddc24a073"}],
+      ["cache.key",{"fields":"0f27817e1f48c597"}],
+      ["cache.get",{"fields":"c451c25f191683af","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"324833504c1a2f03"}],
+      ["store.add",{"fields":"4e0e0f48f8e65cf4","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"5af34a19335e113d","origin":"assistant+web","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"009edcea59c2a4bf"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    },
+    {
+     "requests": [
+      {"call":"stream","extra":[],"images":null,"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",16,"8fb3dfe77573774c"],["assistant",11,"64ec88ca00b268e5"],["user",653,"a8fd24184a75715e"]],"model":"test-model:1b","options":{"temperature":0.2},"sha256":"40a829082f6a7a6295d931acb55e3334dbe72087c0fdb73a73b2278ae63cedd3","think":false}
+     ],
+     "results": {
+      "context_label": [["legacy","memory"],[]]
+     },
+     "returned": [
+      "And where does the garden grow?",
+      "Hello world"
+     ],
+     "trace": [
+      ["memory.build",{"fields":"e13507e235efd291"}],
+      ["cache.key",{"fields":"dac9ce4aae1fa67b"}],
+      ["cache.get",{"fields":"d57011e87896fa24","hit":false}],
+      ["network.online",{"online":true}],
+      ["stream",{"request":"40a829082f6a7a62"}],
+      ["store.add",{"fields":"6cb520432a4b3778","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"9036c4f44eb3c220","origin":"assistant","role":"assistant"}],
+      ["store.metadata",{"fields":"1ab0578c83986ab5"}],
+      ["cache.put",{"fields":"9fdc46264a01ab4e"}],
+      ["ledger",{"outcome":"completed"}]
+     ],
+     "window": {
+      "history_count": 2,
+      "strategy": "keep_all"
+     },
+     "yields": [
+      "Hello",
+      " world"
+     ]
+    }
+   ]
+  }
+ },
+ "format": 1
+}

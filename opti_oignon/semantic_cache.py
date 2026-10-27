@@ -1656,6 +1656,7 @@ class SemanticCache:
         task_type: str = "",
         ttl: int | None = None,
         explicit_key: str | None = None,
+        conversation_id: str | None = None,
     ) -> tuple[str, bool]:
         """Store in response cache + generate embedding.
 
@@ -1668,6 +1669,9 @@ class SemanticCache:
             task_type: Task type string.
             ttl: Optional TTL override.
             explicit_key: Pre-computed cache key.
+            conversation_id: The conversation the response was given in, which the response cache keeps and its
+                deletion forgets; None outside any. The embeddings table holds only requests made outside any
+                conversation, so a request of one gets no embedding.
 
         Returns:
             Tuple of (cache_key, embedding_stored).
@@ -1680,10 +1684,11 @@ class SemanticCache:
             task_type=task_type,
             ttl=ttl,
             explicit_key=explicit_key,
+            conversation_id=conversation_id,
         )
 
-        if not cache_key:
-            return "", False
+        if not cache_key or conversation_id:
+            return cache_key or "", False
 
         embedded = self.store_embedding(
             cache_key=cache_key,
@@ -1771,6 +1776,27 @@ class SemanticCache:
         except (sqlite3.Error, RuntimeError, OSError) as exc:
             self._note_layer_failure(exc)
             return 0
+        finally:
+            conn.close()
+
+    def empty(self) -> int:
+        """Erase every entry and embedding, overwritten; how many entries. Unlike ``clear``, which degrades to 0, a
+        cache whose file is there and cannot be opened or written raises: the user's wipe must never take it for an
+        empty one. A file that is not there holds none, and is not created; the schema is never changed here."""
+        if not Path(self._db_path).exists():
+            return 0
+        if _safe_connect is None:
+            raise RuntimeError("the semantic cache's storage layer is not available, so it cannot be emptied")
+        conn = _safe_connect(self._db_path, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA secure_delete = ON")
+            gone = 0
+            if _columns(conn, "cache_entries"):
+                gone = int(conn.execute("DELETE FROM cache_entries").rowcount or 0)
+            if _columns(conn, "semantic_embeddings"):
+                conn.execute("DELETE FROM semantic_embeddings")
+            conn.commit()
+            return gone
         finally:
             conn.close()
 

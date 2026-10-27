@@ -26,7 +26,7 @@ export const WORDS: Record<string, string> = {
 	project_passages: 'Project context: {n} passages',
 	fitting: 'Fitting the history into the context',
 	cache: 'Found in the cache',
-	queued: 'Queued: Ollama is offline',
+	offline: 'Ollama is offline: not sent',
 	own_context: 'The {engine} builds its own context',
 	vision: 'Reading the image with {model}',
 	self_correct: 'Correcting the reply',
@@ -130,7 +130,7 @@ const STATUSES: readonly [RegExp, string, ((match: RegExpMatchArray) => Values)?
 	[/^\[OK\] Project context injected: (\d+) chunks/, 'project_passages', (m) => ({ n: Number(m[1]) })],
 	[/^\[>\] (?:Archive retrieval|Optimizer|Multi-turn):/, 'fitting'],
 	[/^\[(?:CACHE|SEMANTIC|CACHE-X)\]/, 'cache'],
-	[/^\[!\] Ollama offline -- request queued/, 'queued'],
+	[/^\[!\] Ollama offline -- request not sent/, 'offline'],
 	[
 		/^\[!\] The (reasoning engine|consensus engine|self-correction pass) builds its own context/,
 		'own_context',

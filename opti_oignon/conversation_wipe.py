@@ -479,32 +479,14 @@ class ConversationWipeManager:
         mgr = self._get_conversation_manager()
         if mgr is None:
             return set()
-        purged: set[str] = set()
         try:
-            batch = 500
-            while True:
-                convs = mgr.list_conversations(limit=batch, offset=0)
-                if not convs:
-                    break
-                progressed = False
-                for c in convs:
-                    cid = getattr(c, "id", None)
-                    if not cid:
-                        continue
-                    try:
-                        gone = mgr.delete_conversation(cid)
-                    except Exception as exc:
-                        left = len(mgr.list_conversations(limit=batch, offset=0))
-                        logger.warning("conversation_wipe: the purge stopped, %d conversation(s) left: a deletion "
-                                       "was refused (%s)", left, getattr(exc, "reason", type(exc).__name__))
-                        return purged
-                    if gone:
-                        purged.add(cid)
-                        progressed = True
-                if not progressed:
-                    break
+            purged, left, refused = purge_every_conversation(mgr)
         except Exception as exc:
             logger.warning("conversation_wipe: bulk disk purge error: %s", exc)
+            return set()
+        if refused is not None:
+            logger.warning("conversation_wipe: the purge stopped, %d conversation(s) left: a deletion "
+                           "was refused (%s)", left, refused)
         return purged
 
     def on_conversation_close(self, conversation_id: str) -> WipeResult | None:
@@ -604,5 +586,37 @@ wipe_conversation = conversation_wipe_manager.wipe
 wipe_all_conversations = conversation_wipe_manager.wipe_all
 on_conversation_close = conversation_wipe_manager.on_conversation_close
 on_bulbe_response = conversation_wipe_manager.on_bulbe_response
+
+
+def purge_every_conversation(mgr: Any, batch: int = 500) -> tuple[set[str], int, str | None]:
+    """Delete every persisted conversation through its deletion, which forgets what every store drew from it: the ids
+    deleted, how many are left, and why the purge stopped (None when nothing stopped it).
+
+    Paginates through the conversation store deleting as it goes; a batch from which nothing could be deleted stops
+    it rather than loop. A deletion refused -- a store of the conversation's words that could not forget, which
+    answers so for every conversation, held past its wait or not opened -- stops the purge at once: asking again
+    would wait as long for each. How many are left is counted from one more page, so at most ``batch``.
+    """
+    purged: set[str] = set()
+    while True:
+        convs = mgr.list_conversations(limit=batch, offset=0)
+        if not convs:
+            return purged, 0, None
+        progressed = False
+        for c in convs:
+            cid = getattr(c, "id", None)
+            if not cid:
+                continue
+            try:
+                gone = mgr.delete_conversation(cid)
+            except Exception as exc:  # noqa: BLE001 - a refusal is named, never passed over
+                left = len(mgr.list_conversations(limit=batch, offset=0))
+                return purged, left, str(getattr(exc, "reason", type(exc).__name__))
+            if gone:
+                purged.add(cid)
+                progressed = True
+        if not progressed:
+            return purged, len(mgr.list_conversations(limit=batch, offset=0)), "no conversation of a page went"
+
 
 CONVERSATION_WIPE_AVAILABLE = True

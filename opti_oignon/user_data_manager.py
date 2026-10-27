@@ -17,7 +17,9 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -119,6 +121,62 @@ def _get_admin_audit() -> Any:
         return None
 
 
+def _get_response_cache() -> Any:
+    """The response cache: answers kept for a repeated request."""
+    try:
+        from opti_oignon.response_cache import response_cache
+        return response_cache
+    except ImportError:
+        return None
+
+
+def _get_semantic_cache() -> Any:
+    """The semantic cache: answers kept for a similar request."""
+    try:
+        from opti_oignon.semantic_cache import semantic_cache
+        return semantic_cache
+    except ImportError:
+        return None
+
+
+def _get_offline_queue() -> Any:
+    """The offline queue: what an older version queued while the engine was unreachable."""
+    try:
+        from opti_oignon.sync_queue import sync_queue
+        return sync_queue
+    except ImportError:
+        return None
+
+
+def _single_user() -> bool:
+    """Whether the install runs for one user, by the auth manager's own rule -- multi-user when it cannot be read.
+    Then every install-wide store is that one user's, and the wipe removes it."""
+    try:
+        from opti_oignon.auth import auth_manager
+    except ImportError:
+        return False
+    try:
+        return auth_manager is not None and auth_manager.single_user_mode is True
+    except Exception:  # noqa: BLE001 - unsure is multi-user, which removes nothing install-wide
+        return False
+
+
+def _the_one_user(user_id: str) -> bool:
+    """Whether ``user_id`` names a single-user install's one user: the local user, or its one account. A wipe asked
+    for any other name removes nothing install-wide: the install's stores are not that name's."""
+    if user_id == "local":
+        return True
+    try:
+        from opti_oignon.auth import auth_manager
+    except ImportError:
+        return False
+    try:
+        return (auth_manager is not None and auth_manager.count_users() == 1
+                and auth_manager.get_user(user_id) is not None)
+    except Exception:  # noqa: BLE001 - unsure is not the one user, which removes nothing install-wide
+        return False
+
+
 def _get_run_journal() -> Any:
     """The run journal: the opt-in record of the user's agent runs."""
     try:
@@ -159,6 +217,32 @@ WIPE_NOT_COVERED = (
     "conversation branches store (single-user)",
     "learned routing store (usage-derived)",
     "plugin-owned data stores (plugin-local DBs)",
+    "the onion's store (keyed by conversation)",
+    "offline queue (single-user)",
+    "old memory store (single-user, emptied at boot once migrated)",
+    "sandbox audit's words (single-user; the record of what ran is retained)",
+    "notes and their updates",
+    "sync: paired devices, skills a peer offered, and every record's latest version in the change feed",
+    "the garden (allium: its own wipe)",
+    "knowledge-base ingest jobs",
+    "context ledger (what each window held, counted)",
+    "agent evaluation stores",
+    "the account itself and its second factor (deleting it is its own act)",
+)
+
+# The stores above the wipe removes in single-user mode, where every install-wide store is the one user's: every
+# conversation deleted through its deletion -- which forgets its branches, artifacts, the onion's copy, its cached
+# answers, its sandbox audit's words, its versions in the change feed -- and the stores of the user's requests
+# emptied. Named as not covered otherwise.
+WIPE_SINGLE_USER = (
+    "conversations (store not user-scoped)",
+    "artifacts (stored in conversation metadata)",
+    "response/semantic caches (conversation-scoped)",
+    "conversation branches store (single-user)",
+    "the onion's store (keyed by conversation)",
+    "offline queue (single-user)",
+    "old memory store (single-user, emptied at boot once migrated)",
+    "sandbox audit's words (single-user; the record of what ran is retained)",
 )
 
 # Stores the export leaves out though the wipe covers them. The run journal
@@ -176,7 +260,8 @@ EXPORT_NOT_COVERED = (
 WIPE_RETAINED_BY_DESIGN = (
     "admin audit log (accountability trail)",
     "audit chain (tamper-evident security trail)",
-    "signed audit logs (sandbox, RAG injection)",
+    "signed audit logs (RAG injection)",
+    "sandbox audit: the record of what ran, without its words",
 )
 
 
@@ -452,11 +537,13 @@ class UserDataDeleter:
         Returns:
             Dict summarizing what was deleted.
         """
+        single = _single_user() and _the_one_user(user_id)
         journal = self._delete_run_journal()
+        conversations, left = self._delete_conversations(user_id, single=single)
         results: dict[str, Any] = {
             "user_id": user_id,
             "deleted_at": time.time(),
-            "conversations": self._delete_conversations(user_id),
+            "conversations": conversations,
             "memories": self._delete_memories(user_id),
             "rag_collections": self._delete_rag(user_id),
             "plugin_configs": self._delete_plugin_configs(user_id),
@@ -474,6 +561,15 @@ class UserDataDeleter:
         # read: the route's response keeps not_covered, not this key.
         if not journal.get("wiped"):
             results["not_covered"].append(f"run journal (not wiped: {journal.get('reason')})")
+        if single:
+            # Single-user mode: the install-wide stores are the one user's, and those the wipe removed leave the
+            # list; each that could not be is named with why.
+            failed = [*left, *self._empty_requests(), *self._forget_sandbox_words()]
+            old = _empty_old_store()
+            if old is not None:
+                failed.append(old)
+            results["not_covered"] = [label for label in results["not_covered"]
+                                      if label not in WIPE_SINGLE_USER] + failed
 
         # Log to admin audit
         audit_fn = _get_admin_audit()
@@ -511,13 +607,33 @@ class UserDataDeleter:
             logger.warning("Run journal wipe failed: %s", e)
             return {"wiped": False, "reason": type(e).__name__}
 
-    def _delete_conversations(self, user_id: str) -> int:
-        """Delete user conversations. Returns count of deleted items.
+    def _delete_conversations(self, user_id: str, *, single: bool = False) -> tuple[int, list[str]]:
+        """Delete user conversations: how many, and what stayed, said.
 
-        The conversation store is single-user today; the
-        unscoped case is an explicit, logged skip instead of a swallowed
-        TypeError (forward-compatible with a future user_id parameter).
+        The conversation store is single-user today. In single-user mode its
+        conversations are the one user's: every one is deleted through its
+        deletion, which forgets what every store drew from it; a refusal stops
+        and says how many are left. Otherwise the unscoped case is an
+        explicit, logged skip instead of a swallowed TypeError
+        (forward-compatible with a future user_id parameter).
         """
+        mgr = _get_conversation_manager()
+        if mgr is None:
+            return 0, (["conversations (the conversation store is not available)"] if single else [])
+        if single:
+            try:
+                from opti_oignon.conversation_wipe import purge_every_conversation
+
+                purged, left, refused = purge_every_conversation(mgr)
+            except Exception as e:  # noqa: BLE001 - what stays is said
+                logger.warning("Failed to delete conversations for %s: %s", user_id, e)
+                return 0, [f"conversations (not deleted: {type(e).__name__})"]
+            return len(purged), ([f"conversations ({left} left: a deletion was refused, {refused})"]
+                                 if refused is not None else [])
+        return self._delete_scoped_conversations(user_id), []
+
+    def _delete_scoped_conversations(self, user_id: str) -> int:
+        """Delete the conversations of a user-scoped store; 0 when the store is not user-scoped."""
         mgr = _get_conversation_manager()
         if mgr is None:
             return 0
@@ -550,13 +666,17 @@ class UserDataDeleter:
         """Delete user memories.
 
         Clears the two-tier stores (canonical SQLite +
-        vector layer), both user-scoped. The legacy facade probes (whose
-        API never matched) remain as a fallback only.
+        vector layer), both user-scoped, the facts' log emptied after. The
+        legacy facade probes (whose API never matched) remain as a fallback
+        only.
         """
         canonical = _get_canonical_memory_store()
         if canonical is not None:
             try:
                 count = canonical.clear(user_id=user_id)
+                empty_log = getattr(canonical, "empty_log", None)
+                if callable(empty_log):
+                    empty_log("the user's facts wiped")
                 vec = _get_vector_memory_store()
                 if vec is not None:
                     try:
@@ -603,6 +723,39 @@ class UserDataDeleter:
         except Exception as e:
             logger.warning("Failed to delete RAG for %s: %s", user_id, e)
             return 0
+
+    @staticmethod
+    def _empty_requests() -> list[str]:
+        """Single-user mode: the stores of the user's requests emptied whole, overwritten -- the response cache, the
+        semantic cache, the offline queue; each that could not be, named. A store whose file is not there holds none,
+        and is not created."""
+        failed = []
+        for label, held in (("response cache", _get_response_cache), ("semantic cache", _get_semantic_cache),
+                            ("offline queue", _get_offline_queue)):
+            try:
+                cache = held()
+                if cache is not None:
+                    # Each raises when its file is there and cannot be emptied: never taken for an empty one.
+                    cache.empty()
+            except Exception as e:  # noqa: BLE001 - what stays is said
+                logger.warning("The %s could not be emptied: %s", label, e)
+                failed.append(f"{label} (not emptied: {type(e).__name__})")
+        return failed
+
+    @staticmethod
+    def _forget_sandbox_words() -> list[str]:
+        """Single-user mode: the words of every row of the sandbox audit forgotten, the record of what ran kept, by
+        a process that loaded the sandbox manager (its log, or the one its settings name with the sandbox off). A
+        process that did not is never made to load it: its construction reaps every workspace it does not track."""
+        held = sys.modules.get("opti_oignon.sandbox_manager")
+        if held is None:
+            return ["sandbox audit's words (this process did not load the sandbox)"]
+        try:
+            held.forget_every_word()
+        except Exception as e:  # noqa: BLE001 - what stays is said
+            logger.warning("The sandbox audit's words could not be forgotten: %s", e)
+            return [f"sandbox audit's words (not forgotten: {type(e).__name__})"]
+        return []
 
     def _delete_plugin_configs(self, user_id: str) -> int:
         """Delete user plugin configurations."""
@@ -657,6 +810,30 @@ class UserDataDeleter:
         except Exception as e:
             logger.warning("Failed to delete encryption keys for %s: %s", user_id, e)
             return False
+
+
+def _empty_old_store() -> str | None:
+    """Single-user mode: the old memory store emptied whole, overwritten, its log emptied -- its memories were moved
+    into the facts, and what an older version left there is the one user's. None when it is empty, else why not. A
+    tree without it holds none."""
+    try:
+        from opti_oignon.memory.legacy import memory_manager
+    except ImportError:
+        return None
+    path = getattr(memory_manager, "db_path", None)
+    if memory_manager is None or path is None or not Path(path).exists():
+        return None
+    try:
+        if memory_manager.held():
+            memory_manager.clear_all()
+            left = len(memory_manager.held())
+            if left:
+                return f"old memory store ({left} row(s) not deleted)"
+        memory_manager.empty_log()
+    except Exception as e:  # noqa: BLE001 - what stays is said
+        logger.warning("The old memory store could not be emptied: %s", e)
+        return f"old memory store (not emptied: {type(e).__name__})"
+    return None
 
 
 # ---------------------------------------------------------------------------

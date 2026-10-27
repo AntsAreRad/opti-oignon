@@ -256,7 +256,7 @@ planned with the schemas, its rounds inside it -- never reading the
 conversation's last rows nor replaying an earlier call. The tool phase's
 answer is held until its loop ends and shown, as off the journal, only
 when a tool ran. A first pass that ends by name -- a window or an admission
-refused, a stream that failed, the turn queued offline -- ends the turn
+refused, a stream that failed, the engine offline -- ends the turn
 there, said as the chat executor said it, and nothing is saved. A tool
 phase that ends so, or whose chat-executor call raised, is said after a
 blank line and joins nothing: the first pass is saved alone, flagged
@@ -289,7 +289,8 @@ runs an engine of its own and keeps the runner's admission, its only one.
 
 A chat-executor call whose stream fails, before or after its first words,
 says so to its run (`stream_failed`), with the onion off or on, and so does
-one queued offline (`offline_queued`). A pipeline that drafts through it
+one the engine could not answer, offline (`offline_queued`), which nothing
+keeps for later. A pipeline that drafts through it
 keeps no answer from it: think and tools runs no tool phase and saves
 nothing; self-correct corrects nothing and saves nothing, ends its first
 step failed and its second not run, and says so in fixed words; on the

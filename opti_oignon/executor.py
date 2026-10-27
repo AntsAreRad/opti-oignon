@@ -898,13 +898,13 @@ except ImportError:
     NETWORK_MANAGER_AVAILABLE = False
     _network_manager = None
 
-# Sync queue (v1.7.3)
-try:
-    from .sync_queue import sync_queue as _sync_queue
-    SYNC_QUEUE_AVAILABLE = True
-except ImportError:
-    SYNC_QUEUE_AVAILABLE = False
-    _sync_queue = None
+# What a turn is told when the engine cannot be reached. The offline queue is
+# never given the turn: nothing sends a queued turn again, and its words would
+# stay there for nothing.
+_OFFLINE_NOTICE = (
+    "[Offline] Ollama is currently unreachable: this request was not sent. "
+    "Please ask again once it is back."
+)
 
 # Performance monitor (v1.7.4)
 try:
@@ -2465,25 +2465,9 @@ class Executor:
         return window, slot_context, bound_read, engine_context
 
     def _offline_notice(self, user_content: str, routing: RoutingResult) -> str:
-        """The turn queued for when the engine answers again, and the words that say so."""
-        offline_msg = "[Offline] Ollama is currently unreachable. "
-        if SYNC_QUEUE_AVAILABLE and _sync_queue is not None:
-            entry = _sync_queue.enqueue(
-                query=user_content,
-                task_type=routing.task_type,
-                model=routing.model,
-            )
-            if entry is not None:
-                offline_msg += (
-                    "Your request has been queued and will be "
-                    "processed when connectivity returns."
-                )
-                logger.info("Request queued offline (id=%s)", entry.id)
-            else:
-                offline_msg += "The offline queue is full. Please try again later."
-        else:
-            offline_msg += "Please check your Ollama connection."
-        return offline_msg
+        """The words that tell a turn the engine did not answer. The turn is not kept anywhere for later: nothing
+        would send it again, so the offline queue is never given its words."""
+        return _OFFLINE_NOTICE
 
     def _onion_window(
         self,
@@ -3677,7 +3661,7 @@ class Executor:
                 yield "[Cancelled]"
                 return refined_question, "[Cancelled]"
             if _onion.leaves == "offline":
-                status("[!] Ollama offline -- request queued")
+                status("[!] Ollama offline -- request not sent")
                 self._last_offline_queued = True
                 yield _onion.message
                 self._current_task = None
@@ -4094,35 +4078,18 @@ class Executor:
             yield "[Cancelled]"
             return refined_question, "[Cancelled]"
 
-        # Offline check -- if Ollama is unreachable, enqueue for later. The
-        # journal read the network before its admission.
+        # Offline check -- if Ollama is unreachable, the turn ends here, said;
+        # nothing keeps it for later. The journal read the network before its
+        # admission.
         if (
             not _journal
             and NETWORK_MANAGER_AVAILABLE
             and _network_manager is not None
             and not _network_manager.is_online
         ):
-            offline_msg = (
-                "[Offline] Ollama is currently unreachable. "
-            )
-            if SYNC_QUEUE_AVAILABLE and _sync_queue is not None:
-                entry = _sync_queue.enqueue(
-                    query=user_content,
-                    task_type=routing.task_type,
-                    model=routing.model,
-                )
-                if entry is not None:
-                    offline_msg += (
-                        "Your request has been queued and will be "
-                        "processed when connectivity returns."
-                    )
-                    logger.info("Request queued offline (id=%s)", entry.id)
-                else:
-                    offline_msg += "The offline queue is full. Please try again later."
-            else:
-                offline_msg += "Please check your Ollama connection."
+            offline_msg = _OFFLINE_NOTICE
 
-            status("[!] Ollama offline -- request queued")
+            status("[!] Ollama offline -- request not sent")
             self._last_offline_queued = True
             yield offline_msg
             self._current_task = None
@@ -4619,6 +4586,7 @@ class Executor:
             and _response_cache.enabled
         ):
             try:
+                # The entry keeps its conversation, which its deletion forgets.
                 _response_cache.put(
                     model=routing.model,
                     system_prompt=system_prompt,
@@ -4626,6 +4594,7 @@ class Executor:
                     response=full_response,
                     task_type=routing.task_type,
                     explicit_key=cache_key,
+                    conversation_id=conversation_id,
                 )
                 logger.debug(f"Response cached: {cache_key[:12]}...")
 

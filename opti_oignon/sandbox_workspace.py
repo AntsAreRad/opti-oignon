@@ -294,6 +294,22 @@ def reset_workspace_bindings() -> None:
         _BINDINGS = None
 
 
+def forget_conversation(conversation_id: str) -> int:
+    """Release a deleted conversation's workspace, which stays its owner's; 1 when one was bound to it. A store this
+    process never made holds no binding, and is not made to be asked."""
+    with _BINDINGS_LOCK:
+        bindings = _BINDINGS
+    if bindings is None:
+        return 0
+    with bindings._lock:
+        sid = bindings._drop_locked(conversation_id)
+    if sid is None:
+        return 0
+    if _default_sandbox_manager is not None:
+        _default_sandbox_manager.set_binding(sid, None)
+    return 1
+
+
 # ---------------------------------------------------------------------------
 # Baseline manifest (the section 6.1 seam the apply writer consumes)
 # ---------------------------------------------------------------------------

@@ -422,6 +422,32 @@ fail_under = 0
 # and q49 in the same file, word for word with the two new schemas. They
 # stay in the tree word for word.
 #
+# ft13 of tests/test_facts_forgotten_contracts.py named the sync change feed
+# and the deferred ledger as owed to the next block. The feed now keeps one
+# version of each record, a deletion's tombstone erasing every version of its
+# conversation, and the ledger is named for the skills it alone holds; the
+# response cache and the sandbox audit keep the conversation, which forgets
+# them (block 188). dl17 of tests/test_deletion_leaves_nothing_contracts.py
+# keeps the census whole with the two reasons said.
+#
+# The status half of ld8 of tests/test_chat_loader_contracts.py held the
+# loader's words for an offline turn as "Queued: Ollama is offline": nothing
+# ever sent a queued turn again, and the executor no longer queues one
+# (block 188). dl18 of tests/test_deletion_leaves_nothing_contracts.py keeps
+# that half's assertions with the words the loader now says, "not sent".
+#
+# The executor's goldens move to v2 (tests/executor_golden/v2, block 188):
+# every put of the response cache now carries its conversation, and an
+# offline turn is told it was not sent and reaches no queue; nothing else
+# differs from v1, which stays in the tree. jw13a, jw13b and jw13e of
+# tests/test_executor_onion_off_golden_contracts.py and jw33a and jw33d of
+# tests/test_tool_path_off_golden_contracts.py pinned the v1 files; dl19 to
+# dl23 of tests/test_deletion_leaves_nothing_contracts.py pin v2, dl19 to
+# dl22 running the contracts they keep word for word. e5 of
+# tests/test_executor_ledger_emission_contracts.py asked an offline turn to
+# say queued, and jw6 of tests/test_executor_onion_window_contracts.py asked
+# it to reach the queue; dl24 and dl25 keep their other assertions.
+#
 # cq10 pinned, among its assertions, that the health monitor discovers an
 # empty model list when no backend is registered. Under the listing
 # doctrine no backend is nobody looking, so discovery answers unknown;
@@ -1667,4 +1693,13 @@ addopts = """
     --deselect=tests/test_conversation_forgets_everything_contracts.py::test_fe12_every_table_keyed_by_a_conversation_is_forgotten_or_named
     --deselect=tests/test_api_schemas_contracts.py::test_q46_window_holds_and_the_module_is_import_pure_at_344_models
     --deselect=tests/test_api_schemas_contracts.py::test_q47_required_field_census_matches_the_snapshot_with_the_conversation_title
+    --deselect=tests/test_facts_forgotten_contracts.py::test_ft13_every_table_keyed_by_a_conversation_is_forgotten_or_named
+    --deselect=tests/test_chat_loader_contracts.py::test_ld8_every_loader_word_passes_the_nets_and_says_no_code_and_no_drawing[status]
+    --deselect=tests/test_executor_onion_off_golden_contracts.py::test_jw13a_the_isolated_window_sends_the_golden_requests_and_the_wiring_contracts_own
+    --deselect=tests/test_executor_onion_off_golden_contracts.py::test_jw13b_the_integrated_window_sends_the_golden_requests_and_reaches_its_seams_as_it_did
+    --deselect=tests/test_executor_onion_off_golden_contracts.py::test_jw13e_the_golden_options_leave_the_llama_server_heads_with_no_max_tokens
+    --deselect=tests/test_tool_path_off_golden_contracts.py::test_jw33a_every_case_sends_admits_asks_saves_and_yields_what_the_golden_holds
+    --deselect=tests/test_tool_path_off_golden_contracts.py::test_jw33d_a_check_on_an_absent_golden_file_fails_by_name_and_creates_nothing
+    --deselect=tests/test_executor_ledger_emission_contracts.py::test_e5_offline_enqueue_records_its_outcome_without_generation
+    --deselect=tests/test_executor_onion_window_contracts.py::test_jw6_the_admission_stands_between_the_plan_and_the_composition_and_a_descent_is_composed_under_it
 """

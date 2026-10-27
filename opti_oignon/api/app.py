@@ -211,6 +211,25 @@ async def lifespan(app: FastAPI):
         trash = asyncio.create_task(_trash_retention())
     except Exception:  # noqa: BLE001 - startup must not break on the trash
         logger.warning("boot: the facts' trash could not be tended", exc_info=True)
+    # The sync change feed keeps one version of each record, each append
+    # erasing the ones before: the versions an older build left are erased
+    # now, overwritten. A feed whose file is not there is not created.
+    try:
+        from opti_oignon.veilid import change_feed as _feed
+        _superseded = _feed.tend()
+        if _superseded:
+            logger.info("boot: %d superseded sync record version(s) erased", _superseded)
+    except Exception:  # noqa: BLE001 - startup must not break on the sync feed
+        logger.warning("boot: the sync change feed could not be tended", exc_info=True)
+    # The offline queue is given no turn -- nothing ever sent one again --
+    # so what an older version queued is erased now, overwritten.
+    try:
+        from opti_oignon.sync_queue import sync_queue as _offline
+        _emptied = _offline.empty() if _offline is not None else 0
+        if _emptied:
+            logger.info("boot: %d offline request(s) an older version queued erased", _emptied)
+    except Exception:  # noqa: BLE001 - startup must not break on the offline queue
+        logger.warning("boot: the offline queue could not be emptied", exc_info=True)
     # The conversations' titles are tended now, the key loaded: those still on
     # the placeholder that hold a user turn are titled from their typed words,
     # and those still in plaintext are encrypted. Idempotent, and it never

@@ -693,6 +693,10 @@ class ChatCodingSession:
         if self._mgr is None:
             raise RuntimeError("Sandbox manager not available")
         self._sandbox_session = self._mgr.create_sandbox(self._session_id)
+        # The audit keeps the conversation on each row, which its deletion forgets.
+        attribute = getattr(self._mgr, "set_conversation", None)
+        if callable(attribute):
+            attribute(self._session_id, self._conversation_id)
         logger.info(
             "Chat coding sandbox created: %s (conv=%s)",
             self._session_id, self._conversation_id[:8],

@@ -312,6 +312,18 @@ def open_vector_layer() -> Any:
     return getattr(module, "_vector_store", None) if module is not None else None
 
 
+def _forget_in_feed(fact_id: str) -> None:
+    """Erase every version of a fact in this device's sync change feed, before its row's commit. A tree without the
+    sync package keeps no feed; a feed that cannot be written raises."""
+    try:
+        from opti_oignon.veilid.change_feed import forget_record
+    except ModuleNotFoundError as exc:
+        if exc.name in ("opti_oignon.veilid", "opti_oignon.veilid.change_feed"):
+            return
+        raise
+    forget_record("memory_canonical", fact_id)
+
+
 def _drop_vector(fact_id: str) -> bool:
     """Drop this device's vector of a fact a peer put out of service or erased: the vector layer keeps its text.
     False when the layer is not open in this process, or fails: the drop is then owed."""
@@ -761,6 +773,9 @@ class CanonicalMemoryStore:
                     (fact_id, uid),
                 )
                 deleted = cur.rowcount > 0
+                if deleted:
+                    # As ``erase``: its versions in the feed go before the row's commit.
+                    _forget_in_feed(fact_id)
             if deleted:
                 # Only a hard delete is the converged deletion --
                 # a tombstone (empty payload, deleted=True).
@@ -782,6 +797,10 @@ class CanonicalMemoryStore:
         with self._lock:
             with self._conn() as conn:
                 deleted = conn.execute(sql, (fact_id,)).rowcount > 0
+                if deleted:
+                    # Its versions in this device's sync feed go before the row's commit: its text leaves here even
+                    # when the tombstone below cannot be appended. A feed that cannot be written keeps the fact.
+                    _forget_in_feed(fact_id)
             if deleted:
                 _sync_publish_memory_fact(fact_id, deleted=True, updated_at=_now())
             return deleted
@@ -810,6 +829,10 @@ class CanonicalMemoryStore:
                     "DELETE FROM memory_facts WHERE user_id = ?", (uid,)
                 )
                 count = int(cur.rowcount)
+                # As ``erase``: each fact's versions in the feed go before the rows' commit (the ids are read only
+                # when sync is wanted; a feed left from before, sync gone since, keeps them -- said).
+                for fid in sync_ids:
+                    _forget_in_feed(fid)
             for fid in sync_ids:
                 _sync_publish_memory_fact(fid, deleted=True, updated_at=ts)
             return count

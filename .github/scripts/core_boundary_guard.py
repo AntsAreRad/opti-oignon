@@ -72,7 +72,7 @@ CORE = frozenset({
 # at module scope as the debt was enumerated. MAY ONLY SHRINK. A paid leak
 # comes off; a new leak is refused before it is written here.
 LEDGER = {
-    # The chat hub: twenty-eight outside modules at module scope, most of them
+    # The chat hub: twenty-seven outside modules at module scope, most of them
     # guarded imports that decide a feature flag. The hub's diet is a block of
     # its own; the debt is written down here so it can only go down.
     "opti_oignon.executor": frozenset({
@@ -100,7 +100,6 @@ LEDGER = {
         "opti_oignon.semantic_cache",
         "opti_oignon.slot_affinity",
         "opti_oignon.speculative",
-        "opti_oignon.sync_queue",
         "opti_oignon.token_counter",
         "opti_oignon.verification",
         "opti_oignon.vision_pipeline",

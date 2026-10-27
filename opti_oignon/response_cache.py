@@ -3,21 +3,24 @@
 RESPONSE CACHE - OPTI-OIGNON v1.4.0 (Session 18)
 ===================================================
 
-Cache pour les reponses LLM, permettant de servir instantanement
-des reponses deja generees pour des requetes identiques.
+A cache of LLM responses: a response already generated for an identical
+request is served at once.
 
 Features:
     - SHA-256 key based on: model + system_prompt + user content
-    - Expiration TTL configurable (defaut: 1 heure)
+    - Configurable expiration TTL (default: 1 hour)
     - Partitioning by model
-    - Statistiques (hits, misses, taille)
+    - Statistics (hits, misses, size)
     - Thread-safe via SQLite
-    - Nettoyage automatique des entrees expirees
+    - Expired entries cleaned up automatically
+    - Each entry keeps the conversation it was given in: a deletion forgets
+      its answers (forget_conversation), and every deleted entry is
+      overwritten
 
 Architecture:
-    - SQLite pour la persistance (meme pattern que conversation.py)
-    - Singleton module-level: response_cache
-    - Import conditionnel dans executor.py
+    - SQLite persistence (the same pattern as conversation.py)
+    - Module-level singleton: response_cache
+    - Conditional import in executor.py
 
 Author: Leon
 """
@@ -58,6 +61,19 @@ DEFAULT_MAX_ENTRIES = 500
 
 # Nettoyage automatique tous les N appels
 CLEANUP_INTERVAL = 50
+
+# The conversation an entry an older version cached came from, which it did not keep: not known.
+_ORIGIN_UNKNOWN = "?"
+# The conversations this process forgot: none is cached again, so a turn that outlived its deletion lands nowhere,
+# until a refused deletion hands it back (``unforget_conversation``).
+_FORGOTTEN: set[str] = set()
+# Held while a mark is checked and an entry written, and while a forgetting marks and deletes.
+_MARKS_LOCK = threading.Lock()
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    """The columns ``table`` has in the file; empty when it has no such table."""
+    return {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
 
 
 # =============================================================================
@@ -185,9 +201,19 @@ class ResponseCache:
                     created_at REAL NOT NULL,
                     last_accessed REAL NOT NULL,
                     hit_count INTEGER DEFAULT 0,
-                    ttl INTEGER NOT NULL
+                    ttl INTEGER NOT NULL,
+                    conversation_id TEXT NOT NULL DEFAULT '?'
                 )
             """)
+            # The conversation each entry came from, '' for a request made outside any: a deletion reaches its
+            # answers by it. Every entry an older file holds says its origin is not known (_ORIGIN_UNKNOWN), and
+            # the first forgetting drops them. The table is asked, never a duplicate caught: the cipher's driver
+            # raises its own classes.
+            if "conversation_id" not in _columns(conn, "response_cache"):
+                conn.execute(
+                    "ALTER TABLE response_cache ADD COLUMN conversation_id TEXT NOT NULL "
+                    f"DEFAULT '{_ORIGIN_UNKNOWN}'"
+                )
             # Index for cleanup and search by model
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_cache_model
@@ -206,6 +232,8 @@ class ResponseCache:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
         conn = _safe_connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        # What any write frees -- an expiry, an eviction, a forgetting -- is overwritten, never left in free pages.
+        conn.execute("PRAGMA secure_delete = ON")
         if not self._schema_ready:
             self._schema_ready = True
             self._init_db()
@@ -391,6 +419,7 @@ class ResponseCache:
         task_type: str = "",
         ttl: int | None = None,
         explicit_key: str | None = None,
+        conversation_id: str | None = None,
     ) -> str:
         """Store a response in the cache.
 
@@ -406,6 +435,9 @@ class ResponseCache:
             task_type: Optional task type for stats
             ttl: Optional TTL override (uses default if None)
             explicit_key: Optional pre-computed cache key
+            conversation_id: The conversation the response was given in, None for a request made outside any; the
+                entry keeps it, the last to put it, so that the conversation's deletion forgets it. A conversation
+                this process forgot is never cached again: nothing is stored, and "" is returned.
 
         Returns:
             The cache key for the stored entry
@@ -419,42 +451,92 @@ class ResponseCache:
         query_hash = self._hash_text(user_content)
         now = time.time()
         entry_ttl = ttl if ttl is not None else self._default_ttl
+        origin = conversation_id or ""
 
-        conn = self._get_connection()
+        # The mark is checked under the lock its forgetting takes, at the write: a put that took it first is
+        # deleted by the forgetting, one that takes it after is refused.
+        with _MARKS_LOCK:
+            if origin and origin in _FORGOTTEN:
+                return ""
+            conn = self._get_connection()
+            try:
+                # Evict the least recently used when the cache is full
+                count = conn.execute(
+                    "SELECT COUNT(*) as cnt FROM response_cache"
+                ).fetchone()["cnt"]
+
+                if count >= self._max_entries:
+                    self._evict_lru(conn, count - self._max_entries + 1)
+
+                # Insert, or update the entry already under this key (UPSERT)
+                conn.execute(
+                    """INSERT INTO response_cache
+                       (cache_key, model, prompt_hash, query_hash, response,
+                        task_type, created_at, last_accessed, hit_count, ttl,
+                        conversation_id)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+                       ON CONFLICT(cache_key) DO UPDATE SET
+                           response = excluded.response,
+                           created_at = excluded.created_at,
+                           last_accessed = excluded.last_accessed,
+                           hit_count = 0,
+                           ttl = excluded.ttl,
+                           conversation_id = excluded.conversation_id
+                    """,
+                    (cache_key, model, prompt_hash, query_hash, response,
+                     task_type, now, now, entry_ttl, origin)
+                )
+                conn.commit()
+
+                logger.debug(
+                    f"Cache PUT: {cache_key[:12]}... "
+                    f"(model={model}, ttl={entry_ttl}s, "
+                    f"response_len={len(response)})"
+                )
+                return cache_key
+
+            finally:
+                conn.close()
+
+    def forget_conversation(self, conversation_id: str) -> int:
+        """Delete every answer cached in a deleted conversation; how many.
+
+        Unlike a lookup, a store that cannot be opened raises: a deletion that asks must never take it for one with
+        nothing to forget. A file that is not there holds nothing, and is not created; the schema is never changed
+        here. The entries an older version cached, which did not keep their conversation -- one of them may be this
+        one's -- go with the first forgetting (an entry dropped is only asked again): marked of an origin not known,
+        or, in a file still without the column, every entry. What is deleted is overwritten (``secure_delete``).
+        From then on, the conversation is never cached again in this process (``_FORGOTTEN``), unless the
+        forgetting fails.
+        """
         try:
-            # Eviction si le cache est plein
-            count = conn.execute(
-                "SELECT COUNT(*) as cnt FROM response_cache"
-            ).fetchone()["cnt"]
+            with _MARKS_LOCK:
+                # Marked under the puts' lock: a put that took it first is deleted below, one that takes it after
+                # is refused.
+                _FORGOTTEN.add(conversation_id)
+                return self._forget_entries(conversation_id)
+        except BaseException:
+            _FORGOTTEN.discard(conversation_id)
+            raise
 
-            if count >= self._max_entries:
-                self._evict_lru(conn, count - self._max_entries + 1)
-
-            # Insertion ou mise a jour (UPSERT)
-            conn.execute(
-                """INSERT INTO response_cache
-                   (cache_key, model, prompt_hash, query_hash, response,
-                    task_type, created_at, last_accessed, hit_count, ttl)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-                   ON CONFLICT(cache_key) DO UPDATE SET
-                       response = excluded.response,
-                       created_at = excluded.created_at,
-                       last_accessed = excluded.last_accessed,
-                       hit_count = 0,
-                       ttl = excluded.ttl
-                """,
-                (cache_key, model, prompt_hash, query_hash, response,
-                 task_type, now, now, entry_ttl)
-            )
+    def _forget_entries(self, conversation_id: str) -> int:
+        if not Path(self._db_path).exists():
+            return 0
+        conn = _safe_connect(self._db_path, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA secure_delete = ON")
+            columns = _columns(conn, "response_cache")
+            if not columns:
+                return 0
+            if "conversation_id" in columns:
+                gone = conn.execute(
+                    "DELETE FROM response_cache WHERE conversation_id IN (?, ?)",
+                    (conversation_id, _ORIGIN_UNKNOWN)).rowcount
+            else:
+                # A file its schema step could not give the column: every entry it holds is of an origin not known.
+                gone = conn.execute("DELETE FROM response_cache").rowcount
             conn.commit()
-
-            logger.debug(
-                f"Cache PUT: {cache_key[:12]}... "
-                f"(model={model}, ttl={entry_ttl}s, "
-                f"response_len={len(response)})"
-            )
-            return cache_key
-
+            return gone
         finally:
             conn.close()
 
@@ -522,6 +604,12 @@ class ResponseCache:
             return count
         finally:
             conn.close()
+
+    def empty(self) -> int:
+        """Erase every entry, overwritten; how many. A file that is not there holds none, and is not created."""
+        if not Path(self._db_path).exists():
+            return 0
+        return self.clear()
 
     # -------------------------------------------------------------------------
     # Statistiques
@@ -843,3 +931,13 @@ class ResponseCache:
 # =============================================================================
 
 response_cache = ResponseCache()
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """Forget what the response cache holds of a deleted conversation; how many entries."""
+    return response_cache.forget_conversation(conversation_id)
+
+
+def unforget_conversation(conversation_id: str) -> None:
+    """Cache the conversation again: its deletion was refused, and it stays."""
+    _FORGOTTEN.discard(conversation_id)

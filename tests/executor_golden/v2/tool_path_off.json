@@ -1,0 +1,1602 @@
+{
+ "cases": {
+  "consensus/save": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [],
+     "requests": [],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": {"individual_responses":[{"model":"qwen3:8b","response":"The west bed.","success":true},{"model":"gemma3:4b","response":"The west bed, by the wall.","success":true}],"metadata":{},"selected_response":"The west bed, by the wall.","strategy":"majority_vote"},
+      "correction_result": null,
+      "pipeline": "consensus",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["consensus",{"fields":"3b4d14d0a9f7820b"}],
+      ["step",{"fields":"bbc59af7d3735d93","state":"pending"}],
+      ["step",{"fields":"8c10e660f766be95","state":"pending"}],
+      ["step",{"fields":"799df15545606895","state":"running"}],
+      ["step",{"fields":"b5efc4f0470cdd09","state":"running"}],
+      ["hook.consensus_model",{"fields":"3170e64ae9749e35"}],
+      ["step",{"fields":"daa456dc61605f7a","state":"running"}],
+      ["hook.consensus_model",{"fields":"ab0e3a02a4f4a012"}],
+      ["step",{"fields":"f9184dc97585bf87","state":"running"}],
+      ["step",{"fields":"b953cf116feab8b0","state":"done"}],
+      ["step",{"fields":"31f593d68cc4e2d2","state":"running"}],
+      ["step",{"fields":"99b7112d3a57cf0b","state":"done"}],
+      ["yield",{"chunk":["consensus_model_done",{"model":"qwen3:8b","response":"The west bed.","success":true}]}],
+      ["yield",{"chunk":["consensus_model_done",{"model":"gemma3:4b","response":"The west bed, by the wall.","success":true}]}],
+      ["yield",{"chunk":["consensus_done",{"individual_responses":[{"model":"qwen3:8b","response":"The west bed.","success":true},{"model":"gemma3:4b","response":"The west bed, by the wall.","success":true}],"metadata":{},"selected_response":"The west bed, by the wall.","strategy":"majority_vote"}]}],
+      ["yield",{"chunk":"The west bed, by the wall."}],
+      ["store.add",{"fields":"c71bcbc8425dafd2","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"f161907eadff3215","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"Which bed suits the shallots best?","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":"The west bed, by the wall.","context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      ["consensus_model_done",{"model":"qwen3:8b","response":"The west bed.","success":true}],
+      ["consensus_model_done",{"model":"gemma3:4b","response":"The west bed, by the wall.","success":true}],
+      ["consensus_done",{"individual_responses":[{"model":"qwen3:8b","response":"The west bed.","success":true},{"model":"gemma3:4b","response":"The west bed, by the wall.","success":true}],"metadata":{},"selected_response":"The west bed, by the wall.","strategy":"majority_vote"}],
+      "The west bed, by the wall."
+     ]
+    }
+   ]
+  },
+  "exec-pipeline/one-step": {
+   "turns": [
+    {
+     "admissions": [
+      {"admitted":true,"caller":"pipeline","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null}
+     ],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"fd33db3b235b8b4b","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",55,"9c0e21fb88b7636f"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"8cdf065ed40ccca264d88f63f168ee10abae27c1889e71a1523247615a0efff2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"aca290332a5de133","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",394,"ea142128b0908ee0"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"ae2a2d419b7987007fda75e8829f8a6959a3c6c90b78f03399731e37d37a3a35","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"f81399a94c623754","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",391,"a71eba9f7a1238b6"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"c55bf8c0c6cd26ffe3b929af3035ba1b7f1e72c30d3a3d37fb96c6108838634e","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["step",{"fields":"9aff1f7241207fc7","state":"pending"}],
+      ["yield",{"chunk":["pipeline_step_start",0,{"condition":null,"label":"Read the notes","model_override":null,"parameters":{},"pass_previous_output":true,"step_type":"tools"}]}],
+      ["status",{"message":"Step 1/1: Read the notes"}],
+      ["admit",{"admitted":true,"caller":"pipeline","fields":"c0dea95559e48891","requested_ctx":null}],
+      ["step",{"fields":"0f871a9d9f560e02","state":"running"}],
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"8cdf065ed40ccca2","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"ae2a2d419b798700","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["stream",{"request":"c55bf8c0c6cd26ff","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"491f7f1c5a38975c","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"3723f0b1e4a879c0","origin":"assistant+tool","role":"assistant"}],
+      ["step",{"fields":"5615fc4e5fe9cbcd","state":"done"}],
+      ["yield",{"chunk":["pipeline_step_end",0,[82,"3ead356dac86f5bb"]]}]
+     ],
+     "writes": [
+      {"content":[55,"9c0e21fb88b7636f"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      ["pipeline_step_start",0,{"condition":null,"label":"Read the notes","model_override":null,"parameters":{},"pass_previous_output":true,"step_type":"tools"}],
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall.",
+      ["pipeline_step_end",0,[82,"3ead356dac86f5bb"]]
+     ]
+    }
+   ]
+  },
+  "governor/admits-every-call": {
+   "turns": [
+    {
+     "admissions": [
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null}
+     ],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"fd33db3b235b8b4b","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",55,"9c0e21fb88b7636f"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"8cdf065ed40ccca264d88f63f168ee10abae27c1889e71a1523247615a0efff2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"aca290332a5de133","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",394,"ea142128b0908ee0"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"ae2a2d419b7987007fda75e8829f8a6959a3c6c90b78f03399731e37d37a3a35","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"f81399a94c623754","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",391,"a71eba9f7a1238b6"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"c55bf8c0c6cd26ffe3b929af3035ba1b7f1e72c30d3a3d37fb96c6108838634e","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"8cdf065ed40ccca2","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"ae2a2d419b798700","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["stream",{"request":"c55bf8c0c6cd26ff","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"491f7f1c5a38975c","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"3723f0b1e4a879c0","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[55,"9c0e21fb88b7636f"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall."
+     ]
+    }
+   ]
+  },
+  "governor/refuses-mid-loop": {
+   "turns": [
+    {
+     "admissions": [
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":false,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":false,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":false,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":false,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null}
+     ],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"fd33db3b235b8b4b","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",55,"9c0e21fb88b7636f"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"8cdf065ed40ccca264d88f63f168ee10abae27c1889e71a1523247615a0efff2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":null,"given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",394,"ea142128b0908ee0"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"ae2a2d419b7987007fda75e8829f8a6959a3c6c90b78f03399731e37d37a3a35","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":null,"given":["think"],"keep_alive":null,"messages":[["system",2232,"0a2cdb1aabb7631f"],["user",420,"3d57e1f464c2f18e"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":[328,"b21b0bb3fc5a81eb"],"sha256":"e49866e57a51463cb14ac68b916bc73a8f437e8a89a2a297fc596df65cd16b59","think":false,"tools":null},
+      {"call":"stream","engine":null,"given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",391,"a71eba9f7a1238b6"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"c55bf8c0c6cd26ffe3b929af3035ba1b7f1e72c30d3a3d37fb96c6108838634e","think":null,"tools":null},
+      {"call":"generate","engine":null,"given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",391,"a71eba9f7a1238b6"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"2b9d7186b97dc3208878b0b92116460c8365d19e6533965f7195504036f26f4b","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"8cdf065ed40ccca2","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"ae2a2d419b798700","think":null}],
+      ["admit",{"admitted":false,"caller":"direct","fields":"cc00ac1869a715ea","requested_ctx":null}],
+      ["generate",{"request":"e49866e57a51463c","think":false}],
+      ["admit",{"admitted":false,"caller":"direct","fields":"cc00ac1869a715ea","requested_ctx":null}],
+      ["stream",{"request":"c55bf8c0c6cd26ff","think":null}],
+      ["admit",{"admitted":false,"caller":"direct","fields":"cc00ac1869a715ea","requested_ctx":null}],
+      ["generate",{"request":"2b9d7186b97dc320","think":null}],
+      ["admit",{"admitted":false,"caller":"direct","fields":"cc00ac1869a715ea","requested_ctx":null}],
+      ["yield",{"chunk":[146,"748330377db22d7d"]}],
+      ["store.add",{"fields":"491f7f1c5a38975c","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"f13382d4e77bdf88","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[55,"9c0e21fb88b7636f"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[146,"748330377db22d7d"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      [146,"748330377db22d7d"]
+     ]
+    }
+   ]
+  },
+  "no-backend": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [],
+     "requests": [],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["yield",{"chunk":[61,"96a79d1a3f5d6161"]}],
+      ["store.add",{"fields":"491f7f1c5a38975c","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"07ec631871308c13","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[55,"9c0e21fb88b7636f"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[61,"96a79d1a3f5d6161"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      [61,"96a79d1a3f5d6161"]
+     ]
+    }
+   ]
+  },
+  "reasoning/save": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [],
+     "requests": [],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "reasoning",
+      "reasoning_result": {"final_answer":[64,"dbddb03ccbc9947a"],"metadata":{},"steps":[{"content":"There are three beds.","index":0,"label":"Count the beds"},{"content":"Onions take the east beds.","index":1,"label":"Match each crop"}],"strategy":"decompose"},
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["reasoning",{"fields":"df60c5050b41d697"}],
+      ["step",{"fields":"6ef88abc201d30a9","state":"pending"}],
+      ["step",{"fields":"4331b8a5bdd055a2","state":"pending"}],
+      ["step",{"fields":"a70bed148d6053d4","state":"running"}],
+      ["hook.reasoning_step",{"fields":"6c55e7ba86abbf85"}],
+      ["step",{"fields":"00e00e2609626e97","state":"done"}],
+      ["step",{"fields":"694209d5735c4ddd","state":"running"}],
+      ["hook.reasoning_step",{"fields":"e941559589fe615c"}],
+      ["step",{"fields":"9478271f463e9f02","state":"done"}],
+      ["yield",{"chunk":["reasoning_step",{"content":"There are three beds.","index":0,"label":"Count the beds"}]}],
+      ["yield",{"chunk":["reasoning_step",{"content":"Onions take the east beds.","index":1,"label":"Match each crop"}]}],
+      ["yield",{"chunk":["reasoning_done",{"final_answer":[64,"dbddb03ccbc9947a"],"metadata":{},"steps":[{"content":"There are three beds.","index":0,"label":"Count the beds"},{"content":"Onions take the east beds.","index":1,"label":"Match each crop"}],"strategy":"decompose"}]}],
+      ["yield",{"chunk":[64,"dbddb03ccbc9947a"]}],
+      ["store.add",{"fields":"14ad5952961f7aaf","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"75d975ab9e15b55b","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[72,"b90ed647f8af0b14"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[64,"dbddb03ccbc9947a"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      ["reasoning_step",{"content":"There are three beds.","index":0,"label":"Count the beds"}],
+      ["reasoning_step",{"content":"Onions take the east beds.","index":1,"label":"Match each crop"}],
+      ["reasoning_done",{"final_answer":[64,"dbddb03ccbc9947a"],"metadata":{},"steps":[{"content":"There are three beds.","index":0,"label":"Count the beds"},{"content":"Onions take the east beds.","index":1,"label":"Match each crop"}],"strategy":"decompose"}],
+      [64,"dbddb03ccbc9947a"]
+     ]
+    }
+   ]
+  },
+  "self-correct/save": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [],
+     "requests": [
+      {"call":"stream","engine":"c18edbd9d04ee9d9","given":["images","keep_alive","think"],"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",656,"6d5f7c53753f3c4f"]],"model":"qwen3:8b","options":{"temperature":0.2},"schema":null,"sha256":"9c30510342395fa75a072aa3d0bf2637b650d6872164294687552d8983339bb7","think":false,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "context_label": [["memory"],[]],
+      "correction_result": {"corrected_response":[94,"f33c20e035a55973"],"iterations":1},
+      "pipeline": "self_correct",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["step",{"fields":"ad3aff06350a565c","state":"pending"}],
+      ["step",{"fields":"29f9bcef5c8d14ec","state":"pending"}],
+      ["status",{"message":"Generating initial response..."}],
+      ["step",{"fields":"e39c2b4809173116","state":"running"}],
+      ["call.executor.execute",{"keys":["conversation_id","document","on_status","persist","question","refine","routing","run","think","web_search"],"positional":0}],
+      ["memory.build",{"fields":"e2e18c16d4f2e1f9"}],
+      ["status",{"message":"[>] Multi-turn: 0 previous messages, ~225 tokens"}],
+      ["cache.key",{"fields":"a732b594c0519f81"}],
+      ["cache.get",{"fields":"a5c66a7f73a9a8d9","hit":false}],
+      ["network.online",{"online":true}],
+      ["status",{"message":"[>] Generating with qwen3:8b (temp=0.2)..."}],
+      ["stream",{"request":"9c30510342395fa7","think":false}],
+      ["engine.show",{"fields":"43ab2b0753d67e4c"}],
+      ["status",{"message":"[OK] Completed in 0.0s"}],
+      ["cache.put",{"fields":"4561d817a0918853"}],
+      ["ledger",{"caller":"chat","fields":"cebcac2ab60c6881","outcome":"completed"}],
+      ["step",{"fields":"ff1525033cb98f02","state":"done"}],
+      ["status",{"message":"Running self-correction..."}],
+      ["step",{"fields":"24e23982e1ccaff2","state":"running"}],
+      ["self_correction",{"fields":"8b28e17f6d3dd4ab"}],
+      ["yield",{"chunk":["correction_step",{"compliance_score":0.6,"duration_ms":0.0,"improvements":["name the shallot bed"],"iteration":1,"quality_score":0.8}]}],
+      ["yield",{"chunk":[50,"6540cba510960244"]}],
+      ["yield",{"chunk":"garlic bed by the wall, and the shallot bed."}],
+      ["yield",{"chunk":["correction_done",{"corrected_response":[94,"f33c20e035a55973"],"iterations":1}]}],
+      ["step",{"fields":"8caec7130b2f88fd","state":"done"}],
+      ["store.add",{"fields":"4f3cf08eb04ce2ab","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"0e31441b34e1a75a","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"Name the three beds of the garden.","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[94,"f33c20e035a55973"],"context":["memory","tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      ["correction_step",{"compliance_score":0.6,"duration_ms":0.0,"improvements":["name the shallot bed"],"iteration":1,"quality_score":0.8}],
+      [50,"6540cba510960244"],
+      "garlic bed by the wall, and the shallot bed.",
+      ["correction_done",{"corrected_response":[94,"f33c20e035a55973"],"iterations":1}]
+     ]
+    }
+   ]
+  },
+  "stop/before-the-first-decision": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [],
+     "requests": [],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["stop"],
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}]
+     ],
+     "writes": [],
+     "yields": []
+    }
+   ]
+  },
+  "stop/final-closed-by-caller": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"fd33db3b235b8b4b","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",55,"9c0e21fb88b7636f"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"8cdf065ed40ccca264d88f63f168ee10abae27c1889e71a1523247615a0efff2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"aca290332a5de133","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",394,"ea142128b0908ee0"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"ae2a2d419b7987007fda75e8829f8a6959a3c6c90b78f03399731e37d37a3a35","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"f81399a94c623754","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",391,"a71eba9f7a1238b6"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"c55bf8c0c6cd26ffe3b929af3035ba1b7f1e72c30d3a3d37fb96c6108838634e","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"8cdf065ed40ccca2","think":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"ae2a2d419b798700","think":null}],
+      ["stream",{"request":"c55bf8c0c6cd26ff","think":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["close"]
+     ],
+     "writes": [],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,"
+     ]
+    }
+   ]
+  },
+  "stop/mid-loop": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"fd33db3b235b8b4b","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",55,"9c0e21fb88b7636f"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"8cdf065ed40ccca264d88f63f168ee10abae27c1889e71a1523247615a0efff2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"8cdf065ed40ccca2","think":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["stop"],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}]
+     ],
+     "writes": [],
+     "yields": []
+    }
+   ]
+  },
+  "think-tools/fast-tool-model": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"."},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"default"}},"reasoning":"","result":"notes.txt\nsow.py","retryable":false,"success":true,"tool_name":"list_files"}
+     ],
+     "requests": [
+      {"call":"stream","engine":"fcd9b3272dd4497c","given":["images","keep_alive","think"],"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",695,"0ff341e136b85a26"]],"model":"qwen3:8b","options":{"temperature":0.2},"schema":null,"sha256":"c725cc224b65d4aa28190f9f7ba7a87846559aa01945ad6d319b8007e5e1dadb","think":true,"tools":null},
+      {"call":"generate","engine":"4a10256d996303d2","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",73,"f73b7135be1b0316"]],"model":"qwen3:1.7b","options":{"temperature":0.0},"schema":null,"sha256":"1c67287d474ffc5869faa7f3121afc2468052f4ec6affb67603aa19dd9ada091","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"77651f3a127799e0","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",345,"368b2fd2a6429e55"]],"model":"qwen3:1.7b","options":{"temperature":0.0},"schema":null,"sha256":"db4a00352f951fe5ef6c5bc99c0fd4086297e954f906954c4c8d580e0c361062","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"57a74f4afd23739d","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",342,"de4dcefe518c5130"]],"model":"qwen3:1.7b","options":{"temperature":0.3},"schema":null,"sha256":"7340159d1aecb56b656fdf91d25f048cbc263ba7b23b4d0cbdabafb5d0633f73","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "context_label": [["memory"],[]],
+      "correction_result": null,
+      "pipeline": "think_tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"."},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"default"}},"reasoning":"","result":"notes.txt\nsow.py","retryable":false,"success":true,"tool_name":"list_files"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.executor.execute",{"keys":["capability_block","conversation_id","document","on_status","persist","question","refine","routing","run","think","web_search"],"positional":0}],
+      ["memory.build",{"fields":"6c9af7a96b5b644c"}],
+      ["status",{"message":"[>] Multi-turn: 0 previous messages, ~235 tokens"}],
+      ["cache.key",{"fields":"7b1ea5940a5fb834"}],
+      ["cache.get",{"fields":"0ec395f5cc22b2bb","hit":false}],
+      ["network.online",{"online":true}],
+      ["status",{"message":"[>] Generating with qwen3:8b (temp=0.2)..."}],
+      ["stream",{"request":"c725cc224b65d4aa","think":true}],
+      ["yield",{"chunk":["thinking","Weighing the beds before I look at the notes."]}],
+      ["yield",{"chunk":"The sunniest bed should"}],
+      ["yield",{"chunk":" take the onions."}],
+      ["status",{"message":"[OK] Completed in 0.0s"}],
+      ["cache.put",{"fields":"52f02fe68830c9fe"}],
+      ["ledger",{"caller":"chat","fields":"9cf953a5ec30888b","outcome":"completed"}],
+      ["call.execute_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"1c67287d474ffc58","think":null}],
+      ["tool",{"fields":"0714ffb3ed65a34a","tool":"list_files"}],
+      ["hook.tool_call",{"fields":"efd6e002ef910f3d","success":true,"tool":"list_files"}],
+      ["generate",{"request":"db4a00352f951fe5","think":null}],
+      ["generate",{"request":"7340159d1aecb56b","think":null}],
+      ["yield",{"chunk":"\n\n"}],
+      ["yield",{"chunk":"The notes agree: the east beds hold the onions."}],
+      ["store.add",{"fields":"ae7944b9ec3a6387","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"2fd9fb4d10742196","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[73,"f73b7135be1b0316"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[89,"45dbbe5c9c3fab5f"],"context":["memory","tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:1.7b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      ["thinking","Weighing the beds before I look at the notes."],
+      "The sunniest bed should",
+      " take the onions.",
+      "\n\n",
+      "The notes agree: the east beds hold the onions."
+     ]
+    }
+   ]
+  },
+  "think-tools/final-refused": {
+   "turns": [
+    {
+     "admissions": [
+      {"admitted":true,"caller":"chat","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":4328},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":false,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null}
+     ],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"stream","engine":"a7dc81fcb596f3e3","given":["images","keep_alive","think"],"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",684,"7c34e4e8900117b6"]],"model":"qwen3:8b","options":{"temperature":0.2},"schema":null,"sha256":"c10b5f6ca0d7abe8f9e6c3745976deb0af7ec5446698f2460904c842d89d92f5","think":true,"tools":null},
+      {"call":"generate","engine":"446798401560c7f5","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",62,"a6c5fdc9bb840fbc"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"6f7b780c7c735cef3b7fd44d76263c67f29ead6854115ff5e1dfc48ceb74c732","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"25ed3c985a012928","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",401,"7aa8ebdc1f884f60"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"72bc502df5f5d1d4094b445f9ae7f72ba881af7ff829350f55005812853d3d11","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":null,"given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",398,"473fde96d671456b"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"d89fc2aa311885a9ec030167d664c3d5a5c319bee6857c2eb91407f30fa779e8","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "context_label": [["memory"],[]],
+      "correction_result": null,
+      "pipeline": "think_tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.executor.execute",{"keys":["capability_block","conversation_id","document","on_status","persist","question","refine","routing","run","think","web_search"],"positional":0}],
+      ["memory.build",{"fields":"7bebc47ea753f3ba"}],
+      ["status",{"message":"[>] Multi-turn: 0 previous messages, ~232 tokens"}],
+      ["cache.key",{"fields":"24d676bcc889b331"}],
+      ["cache.get",{"fields":"9ad50cb06afbef90","hit":false}],
+      ["network.online",{"online":true}],
+      ["status",{"message":"[>] Generating with qwen3:8b (temp=0.2)..."}],
+      ["admit",{"admitted":true,"caller":"chat","fields":"0b3c6de1027e27ac","requested_ctx":4328}],
+      ["ticket.set",{"caller":"chat","fields":"56bb393472fccb14"}],
+      ["stream",{"request":"c10b5f6ca0d7abe8","think":true}],
+      ["ticket.clear"],
+      ["yield",{"chunk":["thinking","Weighing the beds before I look at the notes."]}],
+      ["yield",{"chunk":"The sunniest bed should"}],
+      ["yield",{"chunk":" take the onions."}],
+      ["status",{"message":"[OK] Completed in 0.0s"}],
+      ["cache.put",{"fields":"ff54fd36b5ea6424"}],
+      ["ledger",{"caller":"chat","fields":"2a4f0d3d193ae8ef","outcome":"completed"}],
+      ["call.execute_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"6f7b780c7c735cef","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"72bc502df5f5d1d4","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["generate",{"request":"d89fc2aa311885a9","think":null}],
+      ["admit",{"admitted":false,"caller":"direct","fields":"cc00ac1869a715ea","requested_ctx":null}],
+      ["yield",{"chunk":"\n\n"}],
+      ["yield",{"chunk":[203,"94322b6282c5cdf1"]}],
+      ["store.add",{"fields":"95fc6376d89f3670","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"84ea0fc672dbd8e9","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[62,"a6c5fdc9bb840fbc"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[245,"612056edb36f026d"],"context":["memory","tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      ["thinking","Weighing the beds before I look at the notes."],
+      "The sunniest bed should",
+      " take the onions.",
+      "\n\n",
+      [203,"94322b6282c5cdf1"]
+     ]
+    }
+   ]
+  },
+  "think-tools/governed": {
+   "turns": [
+    {
+     "admissions": [
+      {"admitted":true,"caller":"chat","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":4328},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null},
+      {"admitted":true,"caller":"direct","digest":null,"engine":null,"extra_models":null,"model":"qwen3:8b","requested_ctx":null}
+     ],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"stream","engine":"a7dc81fcb596f3e3","given":["images","keep_alive","think"],"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",684,"7c34e4e8900117b6"]],"model":"qwen3:8b","options":{"temperature":0.2},"schema":null,"sha256":"c10b5f6ca0d7abe8f9e6c3745976deb0af7ec5446698f2460904c842d89d92f5","think":true,"tools":null},
+      {"call":"generate","engine":"446798401560c7f5","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",62,"a6c5fdc9bb840fbc"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"6f7b780c7c735cef3b7fd44d76263c67f29ead6854115ff5e1dfc48ceb74c732","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"25ed3c985a012928","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",401,"7aa8ebdc1f884f60"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"72bc502df5f5d1d4094b445f9ae7f72ba881af7ff829350f55005812853d3d11","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"fb6f5a408f3d434e","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",398,"473fde96d671456b"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"d89fc2aa311885a9ec030167d664c3d5a5c319bee6857c2eb91407f30fa779e8","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "context_label": [["memory"],[]],
+      "correction_result": null,
+      "pipeline": "think_tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.executor.execute",{"keys":["capability_block","conversation_id","document","on_status","persist","question","refine","routing","run","think","web_search"],"positional":0}],
+      ["memory.build",{"fields":"7bebc47ea753f3ba"}],
+      ["status",{"message":"[>] Multi-turn: 0 previous messages, ~232 tokens"}],
+      ["cache.key",{"fields":"24d676bcc889b331"}],
+      ["cache.get",{"fields":"9ad50cb06afbef90","hit":false}],
+      ["network.online",{"online":true}],
+      ["status",{"message":"[>] Generating with qwen3:8b (temp=0.2)..."}],
+      ["admit",{"admitted":true,"caller":"chat","fields":"0b3c6de1027e27ac","requested_ctx":4328}],
+      ["ticket.set",{"caller":"chat","fields":"56bb393472fccb14"}],
+      ["stream",{"request":"c10b5f6ca0d7abe8","think":true}],
+      ["ticket.clear"],
+      ["yield",{"chunk":["thinking","Weighing the beds before I look at the notes."]}],
+      ["yield",{"chunk":"The sunniest bed should"}],
+      ["yield",{"chunk":" take the onions."}],
+      ["status",{"message":"[OK] Completed in 0.0s"}],
+      ["cache.put",{"fields":"ff54fd36b5ea6424"}],
+      ["ledger",{"caller":"chat","fields":"2a4f0d3d193ae8ef","outcome":"completed"}],
+      ["call.execute_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"6f7b780c7c735cef","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"72bc502df5f5d1d4","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["generate",{"request":"d89fc2aa311885a9","think":null}],
+      ["admit",{"admitted":true,"caller":"direct","fields":"8657fecd5fddaf94","requested_ctx":null}],
+      ["yield",{"chunk":"\n\n"}],
+      ["yield",{"chunk":"The notes agree: the east beds hold the onions."}],
+      ["store.add",{"fields":"95fc6376d89f3670","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"7433981adbbac786","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[62,"a6c5fdc9bb840fbc"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[89,"45dbbe5c9c3fab5f"],"context":["memory","tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      ["thinking","Weighing the beds before I look at the notes."],
+      "The sunniest bed should",
+      " take the onions.",
+      "\n\n",
+      "The notes agree: the east beds hold the onions."
+     ]
+    }
+   ]
+  },
+  "think-tools/one-save": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"stream","engine":"a7dc81fcb596f3e3","given":["images","keep_alive","think"],"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",684,"7c34e4e8900117b6"]],"model":"qwen3:8b","options":{"temperature":0.2},"schema":null,"sha256":"c10b5f6ca0d7abe8f9e6c3745976deb0af7ec5446698f2460904c842d89d92f5","think":true,"tools":null},
+      {"call":"generate","engine":"446798401560c7f5","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",62,"a6c5fdc9bb840fbc"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"6f7b780c7c735cef3b7fd44d76263c67f29ead6854115ff5e1dfc48ceb74c732","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"25ed3c985a012928","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",401,"7aa8ebdc1f884f60"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"72bc502df5f5d1d4094b445f9ae7f72ba881af7ff829350f55005812853d3d11","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"fb6f5a408f3d434e","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",398,"473fde96d671456b"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"d89fc2aa311885a9ec030167d664c3d5a5c319bee6857c2eb91407f30fa779e8","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "context_label": [["memory"],[]],
+      "correction_result": null,
+      "pipeline": "think_tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.executor.execute",{"keys":["capability_block","conversation_id","document","on_status","persist","question","refine","routing","run","think","web_search"],"positional":0}],
+      ["memory.build",{"fields":"7bebc47ea753f3ba"}],
+      ["status",{"message":"[>] Multi-turn: 0 previous messages, ~232 tokens"}],
+      ["cache.key",{"fields":"24d676bcc889b331"}],
+      ["cache.get",{"fields":"9ad50cb06afbef90","hit":false}],
+      ["network.online",{"online":true}],
+      ["status",{"message":"[>] Generating with qwen3:8b (temp=0.2)..."}],
+      ["stream",{"request":"c10b5f6ca0d7abe8","think":true}],
+      ["yield",{"chunk":["thinking","Weighing the beds before I look at the notes."]}],
+      ["yield",{"chunk":"The sunniest bed should"}],
+      ["yield",{"chunk":" take the onions."}],
+      ["status",{"message":"[OK] Completed in 0.0s"}],
+      ["cache.put",{"fields":"ff54fd36b5ea6424"}],
+      ["ledger",{"caller":"chat","fields":"05f36b24a7c7b1a3","outcome":"completed"}],
+      ["call.execute_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"6f7b780c7c735cef","think":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"72bc502df5f5d1d4","think":null}],
+      ["generate",{"request":"d89fc2aa311885a9","think":null}],
+      ["yield",{"chunk":"\n\n"}],
+      ["yield",{"chunk":"The notes agree: the east beds hold the onions."}],
+      ["store.add",{"fields":"95fc6376d89f3670","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"7433981adbbac786","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[62,"a6c5fdc9bb840fbc"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[89,"45dbbe5c9c3fab5f"],"context":["memory","tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      ["thinking","Weighing the beds before I look at the notes."],
+      "The sunniest bed should",
+      " take the onions.",
+      "\n\n",
+      "The notes agree: the east beds hold the onions."
+     ]
+    }
+   ]
+  },
+  "think-tools/zero-call": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [],
+     "requests": [
+      {"call":"stream","engine":"a7dc81fcb596f3e3","given":["images","keep_alive","think"],"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",684,"7c34e4e8900117b6"]],"model":"qwen3:8b","options":{"temperature":0.2},"schema":null,"sha256":"c10b5f6ca0d7abe8f9e6c3745976deb0af7ec5446698f2460904c842d89d92f5","think":true,"tools":null},
+      {"call":"generate","engine":"446798401560c7f5","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",62,"a6c5fdc9bb840fbc"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"6f7b780c7c735cef3b7fd44d76263c67f29ead6854115ff5e1dfc48ceb74c732","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "context_label": [["memory"],[]],
+      "correction_result": null,
+      "pipeline": "think_tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.executor.execute",{"keys":["capability_block","conversation_id","document","on_status","persist","question","refine","routing","run","think","web_search"],"positional":0}],
+      ["memory.build",{"fields":"7bebc47ea753f3ba"}],
+      ["status",{"message":"[>] Multi-turn: 0 previous messages, ~232 tokens"}],
+      ["cache.key",{"fields":"24d676bcc889b331"}],
+      ["cache.get",{"fields":"9ad50cb06afbef90","hit":false}],
+      ["network.online",{"online":true}],
+      ["status",{"message":"[>] Generating with qwen3:8b (temp=0.2)..."}],
+      ["stream",{"request":"c10b5f6ca0d7abe8","think":true}],
+      ["yield",{"chunk":["thinking","Weighing the beds before I look at the notes."]}],
+      ["yield",{"chunk":"The sunniest bed should"}],
+      ["yield",{"chunk":" take the onions."}],
+      ["status",{"message":"[OK] Completed in 0.0s"}],
+      ["cache.put",{"fields":"ff54fd36b5ea6424"}],
+      ["ledger",{"caller":"chat","fields":"05f36b24a7c7b1a3","outcome":"completed"}],
+      ["call.execute_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"6f7b780c7c735cef","think":null}],
+      ["store.add",{"fields":"95fc6376d89f3670","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"96439e536378a160","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[62,"a6c5fdc9bb840fbc"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":"The sunniest bed should take the onions.","context":["memory","tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      ["thinking","Weighing the beds before I look at the notes."],
+      "The sunniest bed should",
+      " take the onions."
+     ]
+    }
+   ]
+  },
+  "tools/approval-seam": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [
+      {"arguments":{"path":"notes.txt"},"channel":"approval","effect":"sandbox","labels":{"path":"unendorsed"},"tool":"read_file"}
+     ],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":true,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"fd33db3b235b8b4b","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",55,"9c0e21fb88b7636f"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"8cdf065ed40ccca264d88f63f168ee10abae27c1889e71a1523247615a0efff2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"aca290332a5de133","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",394,"ea142128b0908ee0"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"ae2a2d419b7987007fda75e8829f8a6959a3c6c90b78f03399731e37d37a3a35","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"f81399a94c623754","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",391,"a71eba9f7a1238b6"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"c55bf8c0c6cd26ffe3b929af3035ba1b7f1e72c30d3a3d37fb96c6108838634e","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":true,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"8cdf065ed40ccca2","think":null}],
+      ["ask.approval",{"effect":"sandbox","fields":"6103085691e6a2eb","tool":"read_file"}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"91dc505b8f863d21","success":true,"tool":"read_file"}],
+      ["generate",{"request":"ae2a2d419b798700","think":null}],
+      ["stream",{"request":"c55bf8c0c6cd26ff","think":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"491f7f1c5a38975c","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"3723f0b1e4a879c0","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[55,"9c0e21fb88b7636f"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall."
+     ]
+    }
+   ]
+  },
+  "tools/eleven-rows-last-ten": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"767664489fdb6f06","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",66,"2ce4af72dc1453f9"],["assistant",24,"376dc55810913f94"],["user",15,"a174a2ceeef8b2e7"],["assistant",14,"de83c48e549e8b32"],["user",15,"3834ff68a7410578"],["assistant",33,"ef90eda1046f70f0"],["user",27,"09ca0e558f4d8f44"],["assistant",16,"070ce6dac55ff1ac"],["user",10,"8569efc4ed5a6273"],["assistant",13,"dae4f486f907a83f"],["user",44,"363925733f635da3"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"9e83d7fde653c349f9ab3a7e44abeaa6a6229616e21b420528c7b8970b6aaa6f","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"ed58f712042473e3","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",66,"2ce4af72dc1453f9"],["assistant",24,"376dc55810913f94"],["user",15,"a174a2ceeef8b2e7"],["assistant",14,"de83c48e549e8b32"],["user",15,"3834ff68a7410578"],["assistant",33,"ef90eda1046f70f0"],["user",27,"09ca0e558f4d8f44"],["assistant",16,"070ce6dac55ff1ac"],["user",10,"8569efc4ed5a6273"],["assistant",13,"dae4f486f907a83f"],["user",383,"ae2a4ee9f8b2672e"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"74db4e86197a915dd931369913dbf37aefcc0e3d7b23d5e7f697a452408034e7","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"d900b9d06be1fe8b","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",66,"2ce4af72dc1453f9"],["assistant",24,"376dc55810913f94"],["user",15,"a174a2ceeef8b2e7"],["assistant",14,"de83c48e549e8b32"],["user",15,"3834ff68a7410578"],["assistant",33,"ef90eda1046f70f0"],["user",27,"09ca0e558f4d8f44"],["assistant",16,"070ce6dac55ff1ac"],["user",10,"8569efc4ed5a6273"],["assistant",13,"dae4f486f907a83f"],["user",380,"c505d800948f5835"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"c08aa098944e1b01ef8982eef9dcf41cfd6dc88d0bf6f825db58620f2aecf31a","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"9e83d7fde653c349","think":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"74db4e86197a915d","think":null}],
+      ["stream",{"request":"c08aa098944e1b01","think":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"665b24f100045fa0","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"01db8619a891a7de","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"Which bed did we settle on for the shallots?","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["document","memory","tool"],"lineage":[158,"d5c7de66655c0f86"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall."
+     ]
+    }
+   ]
+  },
+  "tools/fast-tool-model": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"."},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"default"}},"reasoning":"","result":"notes.txt\nsow.py","retryable":false,"success":true,"tool_name":"list_files"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"12d24bfa13c1bed5","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",66,"96766e8aacdb4cdc"]],"model":"qwen3:1.7b","options":{"temperature":0.0},"schema":null,"sha256":"ffda76c955f33e5449823c1e80663419bdd6cd6b9404440da1a56032928fb1f3","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"2557ea171f709ca9","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",338,"c11cf90a45c089ac"]],"model":"qwen3:1.7b","options":{"temperature":0.0},"schema":null,"sha256":"8f034894093f9da140c64f773cd146c03b56503760278489e0b7a3150a9f06cc","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"36a18bf4172681b4","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",335,"b8e70cca8367400b"]],"model":"qwen3:1.7b","options":{"temperature":0.3},"schema":null,"sha256":"aaf5a9b2c3cb70c374827c0bef138626342533b66a10d7ee2411b3edd8d77009","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"."},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"default"}},"reasoning":"","result":"notes.txt\nsow.py","retryable":false,"success":true,"tool_name":"list_files"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"ffda76c955f33e54","think":null}],
+      ["tool",{"fields":"0714ffb3ed65a34a","tool":"list_files"}],
+      ["hook.tool_call",{"fields":"efd6e002ef910f3d","success":true,"tool":"list_files"}],
+      ["generate",{"request":"8f034894093f9da1","think":null}],
+      ["stream",{"request":"aaf5a9b2c3cb70c3","think":null}],
+      ["yield",{"chunk":"notes.txt holds"}],
+      ["yield",{"chunk":" the notes."}],
+      ["store.add",{"fields":"59402f3fe112e1ca","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"63d1df6cb87ceaf6","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[66,"96766e8aacdb4cdc"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":"notes.txt holds the notes.","context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:1.7b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "notes.txt holds",
+      " the notes."
+     ]
+    }
+   ]
+  },
+  "tools/format-fallback": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"b1d9f520e9b809e4","given":["think"],"keep_alive":null,"messages":[["system",2232,"0a2cdb1aabb7631f"],["user",55,"9c0e21fb88b7636f"]],"model":"test-model:1b","options":{"temperature":0.0},"schema":[328,"b21b0bb3fc5a81eb"],"sha256":"b241d67f69d6a82a21ccf4c58cd17f69eddbf97af3e7df7159190a8bac96d6d9","think":false,"tools":null},
+      {"call":"generate","engine":"eaa7112eb5b22af3","given":["think"],"keep_alive":null,"messages":[["system",2232,"0a2cdb1aabb7631f"],["user",420,"3d57e1f464c2f18e"]],"model":"test-model:1b","options":{"temperature":0.0},"schema":[328,"b21b0bb3fc5a81eb"],"sha256":"936b5cb523f379f27d692b4c61600d9d509bf280683bece2605734d765289e6c","think":false,"tools":null},
+      {"call":"stream","engine":"90a70d412de76aec","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",391,"a71eba9f7a1238b6"]],"model":"test-model:1b","options":{"temperature":0.3},"schema":null,"sha256":"52c2e8cfece10fc6730216e3fc8830636740639181c377e907f0d57dafcf6487","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"b241d67f69d6a82a","think":false}],
+      ["engine.show",{"fields":"ea85d6c5dd780695"}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"936b5cb523f379f2","think":false}],
+      ["stream",{"request":"52c2e8cfece10fc6","think":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"491f7f1c5a38975c","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"4a533342adb8c461","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[55,"9c0e21fb88b7636f"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"test-model:1b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall."
+     ]
+    }
+   ]
+  },
+  "tools/format-zero-call": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [],
+     "requests": [
+      {"call":"generate","engine":"eec0eed6f4eb70f1","given":["think"],"keep_alive":null,"messages":[["system",2232,"0a2cdb1aabb7631f"],["user",41,"702f28ab77e939d4"]],"model":"test-model:1b","options":{"temperature":0.0},"schema":[328,"b21b0bb3fc5a81eb"],"sha256":"878060b74af3ca685dc23646e62479744bc68d913bde903a62c9c3a1c81d2b65","think":false,"tools":null},
+      {"call":"generate","engine":"c5e6067c4f7dac1a","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["user",41,"702f28ab77e939d4"]],"model":"test-model:1b","options":{"temperature":0.3},"schema":null,"sha256":"4924f2f357e11bb8480b0fc76206d5f42c389d070a491807109492735b6814f6","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"878060b74af3ca68","think":false}],
+      ["engine.show",{"fields":"ea85d6c5dd780695"}],
+      ["generate",{"request":"4924f2f357e11bb8","think":null}],
+      ["yield",{"chunk":[61,"c7000ff2390e1d45"]}],
+      ["store.add",{"fields":"a0aae41768ac658e","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"0c093a48297c6321","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"Good morning! When should onions be sown?","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[61,"c7000ff2390e1d45"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"test-model:1b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      [61,"c7000ff2390e1d45"]
+     ]
+    }
+   ]
+  },
+  "tools/native-two-calls": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"."},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"default"}},"reasoning":"","result":"notes.txt\nsow.py","retryable":false,"success":true,"tool_name":"list_files"},
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"512b0f45e52058cf","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",63,"ce8fff9a94b1390a"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"ed0733c99ae5136bffd40ecc7bab1fe3badf11d8d9a0e54e47c45b1b587a6675","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"f6e5d936eaabcf7c","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",63,"ce8fff9a94b1390a"],["assistant",0,"e3b0c44298fc1c14",61,"bbb41bd1e8cdf091"],["tool",82,"a35edd7a6220a74e"],["assistant",0,"e3b0c44298fc1c14",68,"2dd1e0ded2886b0a"],["tool",141,"b19c2b58b123e6d4"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"7a32fb04043644b13bf0a5f3a0b128fa3e47dad1c50895fd4c36b0c554713c0b","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"ed03050c79a830d4","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",63,"ce8fff9a94b1390a"],["assistant",0,"e3b0c44298fc1c14",61,"bbb41bd1e8cdf091"],["tool",82,"a35edd7a6220a74e"],["assistant",0,"e3b0c44298fc1c14",68,"2dd1e0ded2886b0a"],["tool",141,"b19c2b58b123e6d4"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"b5a95b544686330a073ac1893cfff493684e4d89fe36a26d86beb2fc9a1744e3","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"."},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"default"}},"reasoning":"","result":"notes.txt\nsow.py","retryable":false,"success":true,"tool_name":"list_files"},{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"ed0733c99ae5136b","think":null}],
+      ["tool",{"fields":"0714ffb3ed65a34a","tool":"list_files"}],
+      ["hook.tool_call",{"fields":"efd6e002ef910f3d","success":true,"tool":"list_files"}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"7a32fb04043644b1","think":null}],
+      ["stream",{"request":"b5a95b544686330a","think":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"dcf2cb01c8d16a84","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"3723f0b1e4a879c0","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[63,"ce8fff9a94b1390a"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall."
+     ]
+    }
+   ]
+  },
+  "tools/no-progress-guard": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"."},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"default"}},"reasoning":"","result":"notes.txt\nsow.py","retryable":false,"success":true,"tool_name":"list_files"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"9e478e15e82de641","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",33,"c6b67f1517bac175"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"9f1c705faf816340dbb7a333fba907076be589e607b7b74ca031398e088c17dd","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"da5b9593f15f56a2","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",305,"a91d2f6d2e4a07b1"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"79faa37cc897260bf2f03cfdca16f819afe2b35335485cdb9428d84f2180017d","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"29f550502ff15b57","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",302,"9afd984d5ac2cc37"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"7cc82770cefff6dcb9ea53ed0deb0abcbb40fcf3aa6428c149f1dc56bf6de744","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"."},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"default"}},"reasoning":"","result":"notes.txt\nsow.py","retryable":false,"success":true,"tool_name":"list_files"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"9f1c705faf816340","think":null}],
+      ["tool",{"fields":"0714ffb3ed65a34a","tool":"list_files"}],
+      ["hook.tool_call",{"fields":"efd6e002ef910f3d","success":true,"tool":"list_files"}],
+      ["generate",{"request":"79faa37cc897260b","think":null}],
+      ["stream",{"request":"7cc82770cefff6dc","think":null}],
+      ["yield",{"chunk":"The workspace holds notes.txt"}],
+      ["yield",{"chunk":" and sow.py."}],
+      ["store.add",{"fields":"cda8025de818eb63","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"02b70ae31670de66","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"Which files sit in the workspace?","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":"The workspace holds notes.txt and sow.py.","context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "The workspace holds notes.txt",
+      " and sow.py."
+     ]
+    }
+   ]
+  },
+  "tools/one-call-then-final": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"fd33db3b235b8b4b","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",55,"9c0e21fb88b7636f"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"8cdf065ed40ccca264d88f63f168ee10abae27c1889e71a1523247615a0efff2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"aca290332a5de133","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",394,"ea142128b0908ee0"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"ae2a2d419b7987007fda75e8829f8a6959a3c6c90b78f03399731e37d37a3a35","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"f81399a94c623754","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",391,"a71eba9f7a1238b6"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"c55bf8c0c6cd26ffe3b929af3035ba1b7f1e72c30d3a3d37fb96c6108838634e","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"8cdf065ed40ccca2","think":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"ae2a2d419b798700","think":null}],
+      ["stream",{"request":"c55bf8c0c6cd26ff","think":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"491f7f1c5a38975c","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"3723f0b1e4a879c0","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[55,"9c0e21fb88b7636f"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall."
+     ]
+    }
+   ]
+  },
+  "tools/prior-calls-native": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"636829ce5b80dd3a","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",41,"2c9f83d9a0e63f82"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"48cd9127c36308e6be7343cf95257b509894daf48b5571dc1a8395f949c834b2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"48069ee51928bcd4","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",41,"2c9f83d9a0e63f82"],["assistant",0,"e3b0c44298fc1c14",68,"2dd1e0ded2886b0a"],["tool",141,"b19c2b58b123e6d4"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"97c0c1544100691bdce0d227188db83ee6f8ff5fae43282f7c7a9383bb794d34","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"ea73f13110d58e2d","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",41,"2c9f83d9a0e63f82"],["assistant",0,"e3b0c44298fc1c14",68,"2dd1e0ded2886b0a"],["tool",141,"b19c2b58b123e6d4"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"0e2c11ba3661f2f40f954e9c390b9883bd7f51a3f0941451cc379a970dcda55c","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"48cd9127c36308e6","think":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"97c0c1544100691b","think":null}],
+      ["stream",{"request":"0e2c11ba3661f2f4","think":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"b5bb09b7624a64cb","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"3723f0b1e4a879c0","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"What does notes.txt say about the garlic?","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall."
+     ]
+    },
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"72c4fa2e6735fd16","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",41,"2c9f83d9a0e63f82"],["assistant",82,"3ead356dac86f5bb"],["assistant",0,"e3b0c44298fc1c14",68,"2dd1e0ded2886b0a"],["tool",149,"34f27e7523e68f77"],["user",37,"e4a956e61e7b53cc"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"73a1294766f785a764370cddc7fd7dfcd04807677e4fa4934cb4c978ec94cee4","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"73a1294766f785a7","think":null}],
+      ["yield",{"chunk":[51,"e3ed6b8f29d5b9a3"]}],
+      ["store.add",{"fields":"034b44d5e059685d","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"466f81229937d050","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"And which bed holds the onions, then?","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[51,"e3ed6b8f29d5b9a3"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      [51,"e3ed6b8f29d5b9a3"]
+     ]
+    }
+   ]
+  },
+  "tools/prior-calls-second-turn": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"636829ce5b80dd3a","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",41,"2c9f83d9a0e63f82"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"48cd9127c36308e6be7343cf95257b509894daf48b5571dc1a8395f949c834b2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"aa736143bd08f90d","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",380,"a946085c17f343db"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"dbc52b530f64b2a740dad2b428583d8971aa70aaec5b540530ff8480b3cf0933","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"013b7b4a394c931e","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",377,"371fbcb908baef0b"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"a25fc949f92a01e7dcf540bf9840419dfc654394f0e60713bcb49b7cda298359","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"48cd9127c36308e6","think":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"dbc52b530f64b2a7","think":null}],
+      ["stream",{"request":"a25fc949f92a01e7","think":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"b5bb09b7624a64cb","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"3723f0b1e4a879c0","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"What does notes.txt say about the garlic?","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall."
+     ]
+    },
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"2e6b065a7fb360cd","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",41,"2c9f83d9a0e63f82"],["assistant",82,"3ead356dac86f5bb"],["user",384,"f068d684c153d3fd"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"a76a25da0e6359097dc7aa3cc63fb70316228d6d7fac3129fe4fc5273acead65","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"a76a25da0e635909","think":null}],
+      ["yield",{"chunk":[51,"e3ed6b8f29d5b9a3"]}],
+      ["store.add",{"fields":"034b44d5e059685d","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"466f81229937d050","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"And which bed holds the onions, then?","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[51,"e3ed6b8f29d5b9a3"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      [51,"e3ed6b8f29d5b9a3"]
+     ]
+    }
+   ]
+  },
+  "tools/retryable-failure-then-success": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"file":"notes.txt"},"execution_time":0.0,"provenance":null,"reasoning":"","result":[69,"966157bf05bca1c6"],"retryable":true,"success":false,"tool_name":"read_file"},
+      {"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"0acfdb51c321542b","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",53,"b8ccf53ee0f9e6bd"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"01aaac2db2823d278ed5a17fffe639942dbdc47ab4befdadb815d8bee200bc14","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"a06094aa3753cddc","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",385,"e120f58a70f9cb0d"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"e2190dbe949544569345f9fc73aca89f694e12076bed4df2793c969166ec69f9","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"3bca5691d1c86e19","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",552,"374f74f4733eb0cd"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"deab87dce0afd2bd1df4907a573d2ef4b81af81fa86299a547215e410589f3c3","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"e89219cc1e6fece8","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",549,"9d75288de697e57c"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"54dd6af87e62ad217fa0addfacfdca325674fcbcf705913a1c32d615010a4f7c","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"file":"notes.txt"},"execution_time":0.0,"provenance":null,"reasoning":"","result":[69,"966157bf05bca1c6"],"retryable":true,"success":false,"tool_name":"read_file"},{"arguments":{"path":"notes.txt"},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"path":"unendorsed"}},"reasoning":"","result":[76,"c00a65e46669c565"],"retryable":false,"success":true,"tool_name":"read_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"01aaac2db2823d27","think":null}],
+      ["hook.tool_call",{"fields":"85a6d9b2a52dbb01","success":false,"tool":"read_file"}],
+      ["generate",{"request":"e2190dbe94954456","think":null}],
+      ["tool",{"fields":"e854fc68b07c310e","tool":"read_file"}],
+      ["hook.tool_call",{"fields":"3edaf76e70fb27c3","success":true,"tool":"read_file"}],
+      ["generate",{"request":"deab87dce0afd2bd","think":null}],
+      ["stream",{"request":"54dd6af87e62ad21","think":null}],
+      ["yield",{"chunk":"I read notes.txt: the east beds hold the onions,"}],
+      ["yield",{"chunk":" and the garlic grows by the wall."}],
+      ["store.add",{"fields":"cef9222230ab8acb","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"3723f0b1e4a879c0","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[53,"b8ccf53ee0f9e6bd"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[82,"3ead356dac86f5bb"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I read notes.txt: the east beds hold the onions,",
+      " and the garlic grows by the wall."
+     ]
+    }
+   ]
+  },
+  "tools/salvage-from-narration": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"content":[53,"b6d5519d31b9183a"],"filename":"sow.py"},"execution_time":0.0,"provenance":null,"reasoning":"intent-transpiled","result":[69,"966157bf05bca1c6"],"retryable":true,"success":false,"tool_name":"write_file"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"8b5357bceaef93d7","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",52,"c5c9775f710797d5"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"70a29cc0ce16a54e56bdbafdfe7a85b9ad8c5847250236293c6fa34d3a3b75b2","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"dc1349b8a73d1f8c","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",453,"33d247644725891c"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"82ca8f7218a7152a179b885f1c8084b6f65e4193d0f7db766799145ee4dfec22","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"content":[53,"b6d5519d31b9183a"],"filename":"sow.py"},"execution_time":0.0,"provenance":null,"reasoning":"intent-transpiled","result":[69,"966157bf05bca1c6"],"retryable":true,"success":false,"tool_name":"write_file"}],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"70a29cc0ce16a54e","think":null}],
+      ["hook.tool_call",{"fields":"8051ace033f130ca","success":false,"tool":"write_file"}],
+      ["stream",{"request":"82ca8f7218a7152a","think":null}],
+      ["yield",{"chunk":"I could not save sow.py: the"}],
+      ["yield",{"chunk":" call lacked its path."}],
+      ["store.add",{"fields":"c0a66ebe704ddaab","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"3e9742df7256513d","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[52,"c5c9775f710797d5"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[50,"13c42dba1e6d5854"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "I could not save sow.py: the",
+      " call lacked its path."
+     ]
+    }
+   ]
+  },
+  "tools/verification-hint": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [
+      {"arguments":{"code":"print(1 / 0)","language":"python","timeout":30},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"code":"unendorsed","language":"default","timeout":"default"}},"reasoning":"","result":[110,"e9a8637e9c7ca216"],"retryable":false,"success":true,"tool_name":"execute_code"},
+      {"arguments":{"code":"print(1 / 1)","language":"python","timeout":30},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"code":"unendorsed","language":"default","timeout":"default"}},"reasoning":"","result":"1.0","retryable":false,"success":true,"tool_name":"execute_code"}
+     ],
+     "requests": [
+      {"call":"generate","engine":"39f58b313b81a51e","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",57,"612f58e9c939d248"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"26d27728f8673dc0515e59e3c42fc9f1e88441aa82ef4416ca77e2ea392d1042","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"48d0960ab3724457","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",473,"3b250cc5c5938a01"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"82fcbf36b5fb899803537d3a12efdc065bb87d701ac927fc5b3668161b1b5af6","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"4a5cd4fc191d094d","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",603,"9cecb1a5d30693b2"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"10ede8541c83d5fc2606a063f7c90b4522441b6217ae4697700d9d4241dbda41","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"generate","engine":"e5c1f416681b24e2","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",740,"978c340354d61cc5"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"038be8bab2e0035e4f5ebcb4d93b9e87c5dc764f0c70b082bf2a4f1732e7441b","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]},
+      {"call":"stream","engine":"fe731a4e8e96cf75","given":[],"keep_alive":null,"messages":[["system",380,"e24d6047f47db6cb"],["system",454,"22f0e3e6383c683c"],["user",737,"8510ee2be854d809"]],"model":"qwen3:8b","options":{"temperature":0.3},"schema":null,"sha256":"2b3e8c68adbd04e1c62f2fb5f0e25573f483a17829d7ffb2c461749c62d389ba","think":null,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [{"arguments":{"code":"print(1 / 0)","language":"python","timeout":30},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"code":"unendorsed","language":"default","timeout":"default"}},"reasoning":"","result":[110,"e9a8637e9c7ca216"],"retryable":false,"success":true,"tool_name":"execute_code"},{"arguments":{"code":"print(1 / 1)","language":"python","timeout":30},"execution_time":0.0,"provenance":{"asked":false,"decision":"allowed","effect":"sandbox","labels":{"code":"unendorsed","language":"default","timeout":"default"}},"reasoning":"","result":"1.0","retryable":false,"success":true,"tool_name":"execute_code"}],
+      "verification_hints": 1,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"26d27728f8673dc0","think":null}],
+      ["tool",{"fields":"66f82e01a9501173","tool":"execute_code"}],
+      ["hook.tool_call",{"fields":"ed9eab0578f12870","success":true,"tool":"execute_code"}],
+      ["generate",{"request":"82fcbf36b5fb8998","think":null}],
+      ["generate",{"request":"10ede8541c83d5fc","think":null}],
+      ["tool",{"fields":"5163a60474acac8f","tool":"execute_code"}],
+      ["hook.tool_call",{"fields":"37190653efa00b95","success":true,"tool":"execute_code"}],
+      ["generate",{"request":"038be8bab2e0035e","think":null}],
+      ["stream",{"request":"2b3e8c68adbd04e1","think":null}],
+      ["yield",{"chunk":"The division by zero raised; divided"}],
+      ["yield",{"chunk":" by one it printed 1.0."}],
+      ["store.add",{"fields":"e2eed9f0ef3f6620","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"d4181e6541c5b8ef","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":[57,"612f58e9c939d248"],"context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[59,"beec8289380756a0"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "The division by zero raised; divided",
+      " by one it printed 1.0."
+     ]
+    }
+   ]
+  },
+  "tools/zero-call-reuse": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [],
+     "requests": [
+      {"call":"generate","engine":"18e681b6459c81e8","given":[],"keep_alive":null,"messages":[["system",454,"22f0e3e6383c683c"],["user",41,"702f28ab77e939d4"]],"model":"qwen3:8b","options":{"temperature":0.0},"schema":null,"sha256":"b8955dfacf1f8ba8bdcbcfa92d3c6894ed74b27c1f99cc125d193c67547a8c19","think":null,"tools":[["web_search","execute_code","read_file","write_file","list_files"],"9848ada5e5bef055"]}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "correction_result": null,
+      "pipeline": "tools",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.stream_with_tools",{"keys":["approval_fn","conversation_messages","manifest","message","model","on_tool_call","provenance","should_stop","tool_history"],"positional":0}],
+      ["generate",{"request":"b8955dfacf1f8ba8","think":null}],
+      ["yield",{"chunk":[61,"c7000ff2390e1d45"]}],
+      ["store.add",{"fields":"a0aae41768ac658e","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"a65706bebe2a0a81","origin":"assistant+tool","role":"assistant"}]
+     ],
+     "writes": [
+      {"content":"Good morning! When should onions be sown?","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":[61,"c7000ff2390e1d45"],"context":["tool"],"lineage":[2,"4f53cda18c2baa0c"],"model":"qwen3:8b","origin":"assistant+tool","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      [61,"c7000ff2390e1d45"]
+     ]
+    }
+   ]
+  },
+  "web/executor-save": {
+   "turns": [
+    {
+     "admissions": [],
+     "approvals": [],
+     "history": [],
+     "requests": [
+      {"call":"stream","engine":"8f1cbb8148a2658a","given":["images","keep_alive","think"],"keep_alive":"30m","messages":[["system",250,"4736872bb9d45fa3"],["user",1544,"6f83ed4697165f85"]],"model":"qwen3:8b","options":{"temperature":0.2},"schema":null,"sha256":"fee3a9e8ac33820d05376ca52053d2232c3e32ddd4ec2c1b634c1795ed0969db","think":false,"tools":null}
+     ],
+     "results": {
+      "cascade_result": null,
+      "consensus_result": null,
+      "context_label": [["memory","web"],[[68,"270ba7c8d0df33e2"],[68,"d51a94671d6efa49"]]],
+      "correction_result": null,
+      "pipeline": "web_search",
+      "reasoning_result": null,
+      "speculative_result": null,
+      "tool_calls": [],
+      "verification_hints": 0,
+      "verification_results": []
+     },
+     "trace": [
+      ["call.executor.execute",{"keys":["capability_block","conversation_id","document","on_status","question","refine","routing","run","think","web_search"],"positional":0}],
+      ["memory.build",{"fields":"7fe16f61633f1ec0"}],
+      ["status",{"message":[63,"2c86129f3b3ef381"]}],
+      ["web.search",{"fields":"3730d0155490cce3"}],
+      ["status",{"message":"[OK] 2 search results injected"}],
+      ["status",{"message":"[>] Multi-turn: 0 previous messages, ~448 tokens"}],
+      ["cache.key",{"fields":"ee5ab7c1184d8f96"}],
+      ["cache.get",{"fields":"9b53510434517101","hit":false}],
+      ["network.online",{"online":true}],
+      ["status",{"message":"[>] Generating with qwen3:8b (temp=0.2)..."}],
+      ["stream",{"request":"fee3a9e8ac33820d","think":false}],
+      ["engine.show",{"fields":"43ab2b0753d67e4c"}],
+      ["yield",{"chunk":"Onions are sown from February,"}],
+      ["yield",{"chunk":" the results say."}],
+      ["status",{"message":"[OK] Completed in 0.0s"}],
+      ["store.add",{"fields":"839ab0adf0979276","origin":"typed","role":"user"}],
+      ["store.add",{"fields":"bd28ed23ae3d7c3f","origin":"assistant+web","role":"assistant"}],
+      ["store.metadata",{"fields":"39647239c259228c"}],
+      ["capture",{"fields":"0b64431f2c09a0a0"}],
+      ["cache.put",{"fields":"4ff6d0aa7c667507"}],
+      ["ledger",{"caller":"chat","fields":"ff0f83953af74729","outcome":"completed"}]
+     ],
+     "writes": [
+      {"content":"Search the web for when onions are sown.","context":null,"lineage":null,"model":null,"origin":"typed","role":"user","segments":[]},
+      {"content":"Onions are sown from February, the results say.","context":["memory","web"],"lineage":[143,"bda3058e0e60fdf3"],"model":"qwen3:8b","origin":"assistant+web","role":"assistant","segments":[]}
+     ],
+     "yields": [
+      "Onions are sown from February,",
+      " the results say."
+     ]
+    }
+   ]
+  }
+ },
+ "format": 1
+}

@@ -27,7 +27,17 @@ sequence for the same (kind, record_id) can be deleted without changing any
 watermark's delta, the high-water, or any key's current clock, because ``since()``
 collapses to the latest per key, the global MAX(seq) row is by construction the
 latest of its key, and every writer appends a key's rows at non-decreasing clocks.
-Compaction is on-demand (``compact()``) plus an optional every-N-appends trigger
+Every append applies that rule at once to the keys it appends: a record's earlier
+versions are erased in the append's own transaction, so the journal keeps one
+version of each record, and a tombstone -- a deletion -- erases every version the
+record had; after one, the write-ahead log is emptied. A version whose clock is
+higher than an ordinary version appended after it stays: a writer appending out of
+order never sends a record's clock back; a tombstone erases it all the same. What
+is erased is overwritten (``secure_delete``), never left in the file's free pages.
+A conversation's deletion also erases every version of it before its commit
+(``forget_record``), so its words leave this device even when the tombstone
+cannot be appended after. ``compact()`` erases what older builds left superseded,
+by the same rule (``tend``, at boot), plus an optional every-N-appends trigger
 (``compact_every``, off by default); like journalling it is local-disk maintenance,
 permitted in any mode, never gated.
 
@@ -99,6 +109,8 @@ FEATURE_AVAILABLE = True
 # against the allowlist below wherever it is interpolated into a statement.
 TABLE_NAME = "veilid_change_feed"
 DB_FILENAME = "veilid_change_feed.db"
+# How long a write waits for another connection's lock.
+_BUSY_TIMEOUT_MS = 5000
 
 # The one-row feed-identity meta table: the journal's random epoch,
 # minted once per journal file. A second physical identifier in this database; it
@@ -107,9 +119,15 @@ DB_FILENAME = "veilid_change_feed.db"
 # touches the meta table by construction.
 META_TABLE_NAME = "veilid_feed_meta"
 
+# The clock floors: for a record whose versions a deletion erased before its tombstone landed, the highest clock it
+# erased -- ids and numbers, never a word. ``current_clock`` honours it, so the tombstone, minted above it, out-clocks
+# every version a peer may hold; an incoming version at or below it is the deleted one coming back
+# (``protocol._apply_batch``). The version that lands at or above it, the tombstone first, drops it.
+FLOOR_TABLE_NAME = "veilid_feed_floors"
+
 # The allowlist for the only identifiers ever formatted into SQL (table names).
 # This is the sanctioned alternative to an f-string: str.format() under a frozenset.
-_TABLES: frozenset[str] = frozenset({TABLE_NAME, META_TABLE_NAME})
+_TABLES: frozenset[str] = frozenset({TABLE_NAME, META_TABLE_NAME, FLOOR_TABLE_NAME})
 
 
 def _safe_table(name: str) -> str:
@@ -169,6 +187,30 @@ _SELECT_ALL = (
 )
 
 _SELECT_MAX_SEQ = f"SELECT MAX(seq) FROM {_safe_table(TABLE_NAME)}"
+# A record's versions before the one just appended: the supersession rule below, applied at once to that key. A
+# version whose clock is higher stays, so a record's clock never goes back even if a writer appends out of order.
+_DELETE_EARLIER = (
+    f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ? AND seq < ? AND clock <= ?"
+)
+# A tombstone's: every version before it, whatever its clock -- a deletion leaves none of the record's words.
+_DELETE_ALL_EARLIER = (
+    f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ? AND seq < ?"
+)
+# Every version of one record: a deletion's erasure before its commit.
+_DELETE_RECORD = (
+    f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ?"
+)
+_CREATE_FLOORS = (
+    f"CREATE TABLE IF NOT EXISTS {_safe_table(FLOOR_TABLE_NAME)} ("
+    "kind TEXT NOT NULL, record_id TEXT NOT NULL, clock INTEGER NOT NULL, PRIMARY KEY (kind, record_id))"
+)
+_SELECT_FLOOR = f"SELECT clock FROM {_safe_table(FLOOR_TABLE_NAME)} WHERE kind = ? AND record_id = ?"
+_RAISE_FLOOR = (
+    f"INSERT INTO {_safe_table(FLOOR_TABLE_NAME)} (kind, record_id, clock) VALUES (?, ?, ?) "
+    "ON CONFLICT(kind, record_id) DO UPDATE SET clock = MAX(clock, excluded.clock)"
+)
+# A version appended at or above a floor carries the clock itself: the floor goes.
+_DROP_FLOOR = f"DELETE FROM {_safe_table(FLOOR_TABLE_NAME)} WHERE kind = ? AND record_id = ? AND clock <= ?"
 _SELECT_COUNT = f"SELECT COUNT(*) FROM {_safe_table(TABLE_NAME)}"
 _DELETE_ALL = f"DELETE FROM {_safe_table(TABLE_NAME)}"
 
@@ -179,14 +221,19 @@ _SELECT_MAX_CLOCK = (
 )
 
 # The transparent supersession rule -- delete any row superseded
-# by a later sequence for the same (kind, record_id). One bounded statement: the
-# subquery keeps the MAX(seq) row per key, served by the existing
+# by a later sequence for the same (kind, record_id) whose clock is as high, or
+# by a later tombstone: the rule each append applies to its own key. With every
+# writer appending at non-decreasing clocks, only the MAX(seq) row of a key stays;
+# a row of a higher clock that an out-of-order append followed stays too, so no
+# key's clock goes back. One bounded statement, served by the existing
 # (kind, record_id) index (``seq`` is the rowid alias every secondary index
 # carries). Names the feed table only, through the allowlist, so a future meta
 # table (CHF-05) is untouched by construction.
 _DELETE_SUPERSEDED = (
-    f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE seq NOT IN "
-    f"(SELECT MAX(seq) FROM {_safe_table(TABLE_NAME)} GROUP BY kind, record_id)"
+    f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE EXISTS (SELECT 1 FROM {_safe_table(TABLE_NAME)} AS later "
+    f"WHERE later.kind = {_safe_table(TABLE_NAME)}.kind AND later.record_id = {_safe_table(TABLE_NAME)}.record_id "
+    f"AND later.seq > {_safe_table(TABLE_NAME)}.seq "
+    f"AND (later.clock >= {_safe_table(TABLE_NAME)}.clock OR later.deleted = 1))"
 )
 
 # The one-row meta table holding the feed epoch, minted once per
@@ -271,10 +318,12 @@ class ChangeFeed:
             self._db_path = self._resolve_db_path()
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
             conn = _safe_connect(
-                str(self._db_path), check_same_thread=False, timeout=5.0
+                str(self._db_path), check_same_thread=False, timeout=_BUSY_TIMEOUT_MS / 1000
             )
             # WAL is set outside any transaction, right after connect.
             conn.execute("PRAGMA journal_mode=WAL")
+            # A version erased is overwritten, never left in the file's free pages.
+            conn.execute("PRAGMA secure_delete = ON")
             conn.execute(_CREATE_TABLE)
             conn.execute(_CREATE_INDEX)
             # Add the signature column to journals that predate
@@ -292,6 +341,7 @@ class ChangeFeed:
                     f"ALTER TABLE {_safe_table(TABLE_NAME)} ADD COLUMN signature TEXT"
                 )
             conn.execute(_CREATE_META)
+            conn.execute(_CREATE_FLOORS)
             conn.commit()
             self._connection = conn
         return self._connection
@@ -336,7 +386,9 @@ class ChangeFeed:
         """Append a record version to the journal and return its sequence.
 
         Refuses a record whose content hash does not match its content, so the
-        journal never stores an inconsistent row. Local-disk only; never gated.
+        journal never stores an inconsistent row. The record's earlier versions
+        are erased in the same transaction; after a tombstone the log is emptied
+        (``_empty_log``). Local-disk only; never gated.
         """
         if not isinstance(record, SyncRecord):
             raise TypeError("record() requires a SyncRecord")
@@ -346,9 +398,20 @@ class ChangeFeed:
         params = self._row_params(record, now)
         with self._lock:
             conn = self._conn()
-            cur = conn.execute(_INSERT, params)
-            conn.commit()
-            seq = int(cur.lastrowid)
+            try:
+                cur = conn.execute(_INSERT, params)
+                seq = int(cur.lastrowid)
+                if record.deleted:
+                    conn.execute(_DELETE_ALL_EARLIER, (record.kind.value, record.record_id, seq))
+                else:
+                    conn.execute(_DELETE_EARLIER, (record.kind.value, record.record_id, seq, record.clock))
+                conn.execute(_DROP_FLOOR, (record.kind.value, record.record_id, record.clock))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            if record.deleted:
+                self._empty_log(conn)
             # The trigger ticks after the commit, under the lock;
             # the sequence is captured first and returned whatever the trigger does.
             self._maybe_autocompact(conn, 1)
@@ -361,7 +424,9 @@ class ChangeFeed:
         record is type-, hash- and serialisation-verified before anything is
         inserted, the batch lands under a single commit, and a mid-batch
         failure rolls the whole batch back and raises -- nothing is journalled,
-        so the caller's at-least-once retry re-journals the full batch. The
+        so the caller's at-least-once retry re-journals the full batch. Each
+        record's earlier versions are erased in the same transaction, the
+        batch's own included; after a tombstone the log is emptied. The
         every-N trigger counts the batch once, after the commit.
         """
         recs = list(records)
@@ -380,15 +445,41 @@ class ChangeFeed:
             conn = self._conn()
             seqs: list[int] = []
             try:
-                for p in params:
+                for r, p in zip(recs, params):
                     cur = conn.execute(_INSERT, p)
                     seqs.append(int(cur.lastrowid))
+                    if r.deleted:
+                        conn.execute(_DELETE_ALL_EARLIER, (r.kind.value, r.record_id, seqs[-1]))
+                    else:
+                        conn.execute(_DELETE_EARLIER, (r.kind.value, r.record_id, seqs[-1], r.clock))
+                    conn.execute(_DROP_FLOOR, (r.kind.value, r.record_id, r.clock))
                 conn.commit()
             except Exception:
                 conn.rollback()
                 raise
+            if any(r.deleted for r in recs):
+                self._empty_log(conn)
             self._maybe_autocompact(conn, len(recs))
         return seqs
+
+    def _empty_log(self, conn: sqlite3.Connection) -> None:
+        """Empty the write-ahead log after a deletion: its older frames still hold the versions the tombstone
+        erased. Assumes ``self._lock`` is held. Never waits: a read in progress keeps the log, said, until the next
+        deletion or the connection's close; the connection's own wait is given back after."""
+        try:
+            wait = int(conn.execute("PRAGMA busy_timeout").fetchone()[0])
+            conn.execute("PRAGMA busy_timeout = 0")
+            try:
+                busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            finally:
+                conn.execute(f"PRAGMA busy_timeout = {wait}")
+        except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+            logger.warning("change feed: a record deleted; the write-ahead log could not be emptied (%s: %s)",
+                           type(exc).__name__, exc)
+            return
+        if busy:
+            logger.warning("change feed: a record deleted; a read in progress keeps the write-ahead log, whose older "
+                           "frames hold what the deletion erased, until the next deletion")
 
     def _row_to_record(self, rest: tuple) -> SyncRecord | None:
         (
@@ -474,8 +565,10 @@ class ChangeFeed:
         (a local mint is current+1; an applied winner's clock is >= the local
         one), but MAX guarantees a minted clock never collides with anything
         ever journalled for the key, tombstones included -- a re-create after a
-        delete out-clocks the tombstone and wins the LWW merge. Local-disk
-        read; never gated.
+        delete out-clocks the tombstone and wins the LWW merge. A key whose
+        versions a deletion erased keeps its highest erased clock as a floor
+        (``forget_record``), honoured here: the tombstone minted after it
+        out-clocks every version a peer may hold. Local-disk read; never gated.
         """
         k = kind.value if isinstance(kind, RecordKind) else str(kind)
         if not isinstance(record_id, str) or not record_id:
@@ -483,7 +576,18 @@ class ChangeFeed:
         with self._lock:
             conn = self._conn()
             row = conn.execute(_SELECT_MAX_CLOCK, (k, record_id)).fetchone()
-        return int(row[0]) if row and row[0] is not None else 0
+            floor = conn.execute(_SELECT_FLOOR, (k, record_id)).fetchone()
+        journalled = int(row[0]) if row and row[0] is not None else 0
+        return max(journalled, int(floor[0]) if floor else 0)
+
+    def clock_floor(self, kind: RecordKind | str, record_id: str) -> int:
+        """The clock floor a deletion left a record whose versions it erased, 0 when there is none: an incoming
+        version at or below it is the deleted one coming back."""
+        k = kind.value if isinstance(kind, RecordKind) else str(kind)
+        with self._lock:
+            conn = self._conn()
+            floor = conn.execute(_SELECT_FLOOR, (k, record_id)).fetchone()
+        return int(floor[0]) if floor else 0
 
     def feed_epoch(self) -> str:
         """This journal's stable identity, minted once per journal file (CHF-05).
@@ -700,7 +804,9 @@ class ChangeFeed:
         """Delete superseded journal rows; returns how many were removed (CHF-02).
 
         The transparent supersession rule proven in the F9b register: a row is
-        superseded when a later sequence exists for the same (kind, record_id).
+        superseded when a later sequence exists for the same (kind, record_id),
+        of a clock as high or a tombstone (an out-of-order append never sends a
+        key's clock back).
         ``since()`` collapses to the latest per key and the global MAX(seq) row
         is by construction the latest of its key, so no watermark's delta, no
         ``high_water``, no ``current_records`` and no per-key ``current_clock``
@@ -731,6 +837,46 @@ class ChangeFeed:
                 # Outside any transaction (the compaction just committed).
                 conn.execute("VACUUM")
         return deleted
+
+    def forget_record(self, kind: RecordKind | str, record_id: str) -> int:
+        """Erase every version of one record, overwritten, and empty the log; how many rows went.
+
+        A deletion asks it before its commit, so the record's words leave this device even when its tombstone
+        cannot be appended after (the peers are then not told). The highest clock erased stays as the key's floor,
+        in the same transaction: ``current_clock`` honours it, so the tombstone minted after out-clocks every version
+        a peer may hold, and an incoming version at or below it loses (``protocol._apply_batch``). A journal whose
+        file is not there holds none, and is not created to be asked; one that cannot be written raises, and the
+        deletion refuses.
+        """
+        if self._connection is None and not self._resolve_db_path().exists():
+            return 0
+        k = kind.value if isinstance(kind, RecordKind) else str(kind)
+        with self._lock:
+            conn = self._conn()
+            try:
+                top = conn.execute(_SELECT_MAX_CLOCK, (k, record_id)).fetchone()
+                gone = int(conn.execute(_DELETE_RECORD, (k, record_id)).rowcount or 0)
+                if top and top[0] is not None:
+                    conn.execute(_RAISE_FLOOR, (k, record_id, int(top[0])))
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            if gone:
+                self._empty_log(conn)
+        return gone
+
+    def tend(self) -> int:
+        """Erase the versions older builds left superseded, overwritten, and empty the log; how many rows went. A
+        journal whose file is not there holds none, and is not created to be asked."""
+        if self._connection is None and not self._resolve_db_path().exists():
+            return 0
+        with self._lock:
+            conn = self._conn()
+            erased = self._compact_locked(conn)
+            if erased:
+                self._empty_log(conn)
+        return erased
 
     def clear(self) -> None:
         """Delete every journal row (the file and connection are kept)."""
@@ -769,6 +915,28 @@ def set_change_feed(feed: ChangeFeed | None) -> None:
     global _feed
     with _feed_lock:
         _feed = feed
+
+
+def forget_conversation(conversation_id: str) -> int:
+    """A deletion's erasure of every version of the conversation in the process journal, before its commit
+    (``ChangeFeed.forget_record``); how many rows. Raises when the journal cannot be written."""
+    return get_change_feed().forget_record(RecordKind.CONVERSATION, conversation_id)
+
+
+def forget_record(kind: RecordKind | str, record_id: str) -> int:
+    """An erasure of every version of one record in the process journal (``ChangeFeed.forget_record``)."""
+    return get_change_feed().forget_record(kind, record_id)
+
+
+def tend() -> int:
+    """At boot: the process journal's superseded versions erased (``ChangeFeed.tend``); how many. Never raises: a
+    journal that cannot be tended is said, and the next boot tries again."""
+    try:
+        return get_change_feed().tend()
+    except Exception as exc:  # noqa: BLE001 - the boot never breaks on the journal
+        logger.warning("change feed: superseded versions could not be erased (%s: %s); the next boot tries again",
+                       type(exc).__name__, exc)
+        return 0
 
 
 def reset_change_feed() -> None:

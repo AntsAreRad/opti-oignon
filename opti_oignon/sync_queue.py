@@ -3,9 +3,9 @@
 SYNC QUEUE -- SQLite-Backed Request Queue for Offline Mode
 =================================================================
 
-Stores pending LLM requests when Ollama is offline. Requests are
-queued with priority and replayed (FIFO within priority) when
-connectivity returns.
+A queue for LLM requests made while Ollama is offline, with priority
+(FIFO within priority). No replay is built yet, so the executor queues
+no turn: an offline turn is told it was not sent.
 
 The queue persists across restarts via SQLite. Max queue size is
 configurable to prevent unbounded growth.
@@ -94,8 +94,12 @@ class QueueEntry:
 class SyncQueue:
     """SQLite-backed request queue for offline mode.
 
-    Stores pending LLM requests and replays them when Ollama comes
-    back online. Entries are dequeued in priority-then-FIFO order.
+    Stores pending LLM requests; entries are dequeued in
+    priority-then-FIFO order. Nothing replays them yet -- the process
+    route marks entries done without running them -- so the executor
+    gives the queue no turn: a turn's words kept for a replay that never
+    comes would stay here for nothing. The queue stays for a replay to
+    come; what an older version queued is emptied at boot (``empty``).
 
     Args:
         db_path: Path to SQLite database file. None uses default.
@@ -176,6 +180,8 @@ class SyncQueue:
         """Get a new SQLite connection."""
         conn = _safe_connect(self._db_path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        # What any write frees is overwritten, never left in the file's free pages.
+        conn.execute("PRAGMA secure_delete = ON")
         if not self._schema_ready:
             self._schema_ready = True
             self._init_db()
@@ -378,6 +384,12 @@ class SyncQueue:
             return cursor.rowcount
         finally:
             conn.close()
+
+    def empty(self) -> int:
+        """Erase every entry, overwritten; how many. A file that is not there holds none, and is not created."""
+        if not self._db_path.exists():
+            return 0
+        return self.clear()
 
     def process_queue(
         self,

@@ -2517,7 +2517,7 @@ class AgenticExecutor:
         if why is not None:
             said = {"failed": _DRAFT_FAILED, "refused": str(turn.results.get("step_error")),
                     "admission": f"[ERR] {turn.results.get('admission_refused')}",
-                    "offline": initial_response.strip() or "[!] Ollama offline -- request queued"}[why]
+                    "offline": initial_response.strip() or "[!] Ollama offline -- request not sent"}[why]
             step("end", 0, "cancelled" if why in ("admission", "offline") else "failed", reason=said)
             step("end", 1, "not_run", reason="No first answer to check")
             yield "\n\n" + said if why == "failed" else said
