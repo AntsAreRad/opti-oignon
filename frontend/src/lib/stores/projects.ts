@@ -147,11 +147,11 @@ export async function updateProject(
 	}
 }
 
-/** Delete a project. */
-export async function deleteProject(projectId: string): Promise<void> {
+/** Delete a project; what could not be removed now is answered, named. */
+export async function deleteProject(projectId: string): Promise<string[]> {
 	projectError.set(null);
 	try {
-		await api.deleteProject(projectId);
+		const answer = await api.deleteProject(projectId);
 		projects.update((list) => list.filter((p) => p.id !== projectId));
 		// Clear active if it was the deleted one
 		const currentId = get(activeProjectId);
@@ -159,6 +159,7 @@ export async function deleteProject(projectId: string): Promise<void> {
 			activeProjectId.set(null);
 			activeProjectDetail.set(null);
 		}
+		return answer.not_forgotten ?? [];
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : 'Failed to delete project';
 		projectError.set(msg);
@@ -190,17 +191,18 @@ export async function uploadFile(projectId: string, file: File): Promise<Project
 	}
 }
 
-/** Delete a file from a project. */
-export async function deleteFile(projectId: string, fileId: string): Promise<void> {
+/** Delete a file from a project; what could not be removed now is answered, named. */
+export async function deleteFile(projectId: string, fileId: string): Promise<string[]> {
 	projectError.set(null);
 	try {
-		await api.deleteProjectFile(projectId, fileId);
+		const answer = await api.deleteProjectFile(projectId, fileId);
 		const detail = get(activeProjectDetail);
 		if (detail && detail.id === projectId) {
 			activeProjectDetail.update((d) =>
 				d ? { ...d, files: d.files.filter((f) => f.id !== fileId) } : d
 			);
 		}
+		return answer.not_forgotten ?? [];
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : 'Failed to delete file';
 		projectError.set(msg);

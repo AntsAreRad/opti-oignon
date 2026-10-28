@@ -530,15 +530,19 @@ STORES = {
     "projects": _store(
         "opti_oignon/projects.py", classes=("ProjectStore",), instances=("project_store",),
         writes=("create_project", "update_project", "delete_project", "add_file", "remove_file", "add_output",
-                "remove_output", "link_conversation", "unlink_conversation", "forget_conversation"),
+                "remove_output", "link_conversation", "unlink_conversation", "forget_conversation", "forget_project",
+                "forget_file", "forget_output"),
         functions=("forget_conversation",),
-        quiet=("delete_project", "remove_file", "remove_output", "unlink_conversation", "forget_conversation"),
+        quiet=("delete_project", "remove_file", "remove_output", "unlink_conversation", "forget_conversation",
+               "forget_project", "forget_file", "forget_output"),
         reason="projects: their system instructions and files, read into the turns of a linked conversation",
     ),
     "project_index": _store(
         "opti_oignon/project_context.py", classes=("ProjectIndexer",), instances=("project_indexer",),
-        writes=("index_file", "reindex_project", "remove_file_from_index", "delete_project_index"),
-        quiet=("remove_file_from_index", "delete_project_index"),
+        writes=("index_file", "reindex_project", "remove_file_from_index", "delete_project_index",
+                "forget_project_index", "forget_file_chunks", "sweep_index"),
+        quiet=("remove_file_from_index", "delete_project_index", "forget_project_index", "forget_file_chunks",
+               "sweep_index"),
         reason="the chunks of a project's files, retrieved into the turns of a linked conversation",
     ),
     "documents": _store(
@@ -729,6 +733,9 @@ EXEMPT = {
     ("opti_oignon/user_data_manager.py", "facts_vectors"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "legacy"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "notes"): ("quiet", "the user's own erasure"),
+    ("opti_oignon/user_data_manager.py", "projects"): ("quiet", "the user's own erasure"),
+    ("opti_oignon/projects.py", "project_index"): (
+        "quiet", "a project's deletion, or a file's removal, forgets the chunks drawn from its files"),
 }
 
 # The sites each exemption argued in prose covers, by function and method. No

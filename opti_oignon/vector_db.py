@@ -525,6 +525,9 @@ class Client:
         self._moved = legacy is None
         self._lock = threading.Lock()
         self._snapshots: dict = {}
+        # Per collection, the lowest generation a snapshot may be kept at: a deletion raises it past what it erased,
+        # so a query whose read began before the deletion never keeps its view of it -- a collection deleted, forever.
+        self._floor: dict = {}
 
     def pending(self) -> Any:
         """(folder, state, detail) of the ChromaDB folder this namespace waits for (``chroma_state``), or None."""
@@ -593,9 +596,7 @@ class Client:
             if row is None:
                 raise CollectionNotFound(f"no collection {name!r} in {self.namespace}")
             conn.execute("DELETE FROM collections WHERE id = ?", (row[0],))
-        with self._lock:
-            for key in [key for key in self._snapshots if key[0] == row[0]]:
-                del self._snapshots[key]
+        self._forget_snapshots(row[0], math.inf)
 
     def list_collections(self) -> list:
         with self._open(write=False) as conn:
@@ -605,8 +606,29 @@ class Client:
                 "SELECT name FROM collections WHERE namespace = ? ORDER BY id", (self.namespace,))]
         return [Collection(self, name) for name in names]
 
+    def empty_log(self) -> bool:
+        """Empty the store's write-ahead log after a deletion: its older frames still hold what the deletion erased
+        (the freed pages themselves are overwritten). Never waits: whether it was emptied -- a read in progress keeps
+        it until the next deletion. A store that is not there holds no log, and is not created."""
+        if not self.path.exists():
+            return True
+        conn = safe_connect(self.path, check_same_thread=False)
+        try:
+            conn.execute("PRAGMA busy_timeout = 0")
+            return not conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+        finally:
+            conn.close()
+
+    def _forget_snapshots(self, collection: int, floor: float) -> None:
+        """Drop every snapshot of ``collection``, and keep none below ``floor`` from now on."""
+        with self._lock:
+            self._floor[collection] = max(self._floor.get(collection, 0), floor)
+            for key in [key for key in self._snapshots if key[0] == collection]:
+                del self._snapshots[key]
+
     def _snapshot(self, conn: Any, row: Any) -> _Snapshot:
-        """The vectors of the collection at ``row`` under its active encoder, read again when its generation moved."""
+        """The vectors of the collection at ``row`` under its active encoder, read again when its generation moved;
+        kept for the next query only when no deletion came since the read began."""
         key = (row[0], row[4])
         with self._lock:
             held = self._snapshots.get(key)
@@ -621,7 +643,8 @@ class Client:
                 metadatas.append(_loads(metadata))
                 vectors.append(_unblob(blob))
             snapshot = _Snapshot(row[5], rows, ids, metadatas, vectors)
-            self._snapshots[key] = snapshot
+            if row[5] >= self._floor.get(row[0], 0):
+                self._snapshots[key] = snapshot
             return snapshot
 
 
@@ -715,6 +738,9 @@ class Collection:
                 conn.execute(f"DELETE FROM items WHERE id IN ({','.join('?' * len(part))})", part)
             if doomed:
                 conn.execute("UPDATE collections SET generation = generation + 1 WHERE id = ?", (row[0],))
+        if doomed:
+            # What the deleted items held leaves memory with them.
+            self._client._forget_snapshots(row[0], row[5] + 1)
 
     def _fits(self, row: Any, records: list) -> None:
         dimension = len(records[0][1]) if records else None

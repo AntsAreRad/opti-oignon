@@ -225,6 +225,18 @@ def _get_notes_store() -> Any:
     return get_notes_store()
 
 
+def _get_project_store() -> Any:
+    """The projects store: every project, its files and outputs, the whole install's (no user scope). None when this
+    tree has no projects; one that is there and cannot be loaded raises."""
+    try:
+        from opti_oignon.projects import project_store
+    except ModuleNotFoundError as e:
+        if _absent(e, "opti_oignon.projects"):
+            return None
+        raise
+    return project_store
+
+
 def _single_user() -> bool:
     """Whether the install runs for one user, by the auth manager's own rule -- multi-user when it cannot be read.
     Then every install-wide store is that one user's, and the wipe removes it."""
@@ -365,6 +377,11 @@ WIPE_WHEN_NAMED = {
         "notes and their updates",
         "note attachments (voice, images)",
     ),
+    "projects": (
+        "projects store (single-user)",
+        "project files and saved outputs",
+        "project indexes (chunks of the project files)",
+    ),
 }
 
 # Stores every wipe removes for the user it is asked for, in any mode: what the preview says goes.
@@ -384,6 +401,8 @@ EXPORT_NOT_COVERED = (
     "run journal (opt-in record of agent runs; wiped with the user's data, never exported)",
     "note attachments' bytes (each attachment's kind, size, hash and derived text are exported; its bytes are "
     "downloaded from its note)",
+    "project files' and outputs' bytes (each one's name, size and what was drawn from it are exported; its bytes "
+    "are downloaded from its project)",
 )
 
 # Stores deliberately RETAINED on a per-user wipe. Audit trails are accountability records; erasing them on request
@@ -404,6 +423,9 @@ WIPE_RETAINED_BY_DESIGN = (
 NOTES_NOTICE = ("Each note's deletion is published to your paired devices, which forget it too when they next sync; "
                 "one the sync journal cannot take now is named, and published at the next deletion. "
                 "Export your data first to keep a copy.")
+# What the preview says to the user when the projects are named.
+PROJECTS_NOTICE = ("The export carries each project, its instructions and what was drawn from its files, not the files "
+                   "themselves: download the files and outputs you want to keep from their project first.")
 # Said beside it when the notes hidden here cannot be counted.
 NOTES_UNREAD_NOTICE = ("The sync journal cannot be read: the notes hidden here that a paired device still shows are "
                        "not counted, and a wipe now would leave them.")
@@ -450,6 +472,13 @@ def _counted(words: tuple[str, ...]) -> dict[str, dict[str, int]]:
                                else {"notes": 0, "attachments": 0, "disputed": 0, "deleted_notes": 0, "code": ""})
         except Exception as e:  # noqa: BLE001 - said, and nothing is removed
             raise WipeRefused(503, f"the notes cannot be read: {type(e).__name__}; nothing removed") from e
+    if "projects" in words:
+        try:
+            store = _get_project_store()
+            counts["projects"] = ({**store.counts(), "code": store.fingerprint()} if store is not None
+                                  else {"projects": 0, "files": 0, "outputs": 0, "code": ""})
+        except Exception as e:  # noqa: BLE001 - said, and nothing is removed
+            raise WipeRefused(503, f"the projects cannot be read: {type(e).__name__}; nothing removed") from e
     return counts
 
 
@@ -463,6 +492,10 @@ def _phrase(counts: dict[str, dict[str, Any]]) -> str:
         n = counts["notes"]["notes"] + (counts["notes"].get("disputed") or 0)
         parts.append(f"{n} note" + ("" if n == 1 else "s") + (f" {counts['notes']['code']}"
                                                              if counts["notes"].get("code") else ""))
+    if "projects" in counts:
+        n = counts["projects"]["projects"]
+        parts.append(f"{n} project" + ("" if n == 1 else "s") + (f" {counts['projects']['code']}"
+                                                                if counts["projects"].get("code") else ""))
     return "remove " + " and ".join(parts)
 
 
@@ -487,10 +520,14 @@ def wipe_preview(user_id: str, remove: Any = ()) -> dict[str, Any]:
         counts = _counted(words)
         preview["counts"] = counts
         preview["phrase"] = _phrase(counts)
+        notices = []
         if "notes" in words:
-            preview["notice"] = NOTES_NOTICE
+            notices.append(NOTES_NOTICE)
             if counts["notes"].get("disputed") is None:
-                preview["notice"] += " " + NOTES_UNREAD_NOTICE
+                notices.append(NOTES_UNREAD_NOTICE)
+        if "projects" in words:
+            notices.append(PROJECTS_NOTICE)
+        preview["notice"] = " ".join(notices)
     return preview
 
 
@@ -557,9 +594,10 @@ class UserDataExporter:
         """Export all data for a user.
 
         For a single-user install's one user, the export carries what the wipe removes of the install's stores --
-        every conversation with its messages, every note with its updates and its attachments' manifest -- so the
-        copy offered before a wipe holds what it deletes. ``failed`` names each part that could not be read; its
-        list in the export is then empty, never taken for an empty store.
+        every conversation with its messages, every note with its updates and its attachments' manifest, every
+        project with its files' and outputs' manifest -- so the copy offered before a wipe holds what it deletes.
+        ``failed`` names each part that could not be read; its list in the export is then empty, never taken for an
+        empty store.
 
         Args:
             user_id: The user whose data to export.
@@ -570,11 +608,12 @@ class UserDataExporter:
         export_time = time.time()
         single = _single_user() and _the_one_user(user_id)
         failed: list[str] = []
+        # The projects' index is drawn from their files, which are carried: it is not.
         carried = ["conversations (store not user-scoped)", "artifacts (stored in conversation metadata)",
-                   *WIPE_WHEN_NAMED["notes"]] if single else []
+                   *WIPE_WHEN_NAMED["notes"], *WIPE_WHEN_NAMED["projects"][:2]] if single else []
         left = [label for label in [*WIPE_NOT_COVERED, *EXPORT_NOT_COVERED] if label not in carried]
         if not single:
-            left.remove(EXPORT_NOT_COVERED[1])
+            left = [label for label in left if label not in EXPORT_NOT_COVERED[1:]]
         data: dict[str, Any] = {
             "export_metadata": {
                 "user_id": user_id,
@@ -582,7 +621,8 @@ class UserDataExporter:
                 # 1.1: adds plugin_reviews and retained_by_design.
                 # 1.2: adds pending_writes.
                 # 1.3: adds notes, the one user's conversations, and failed.
-                "format_version": "1.3",
+                # 1.4: adds projects.
+                "format_version": "1.4",
                 "not_covered": left,
                 # Audit trails survive a wipe by design.
                 "retained_by_design": list(WIPE_RETAINED_BY_DESIGN),
@@ -591,6 +631,7 @@ class UserDataExporter:
             "conversations": (self._export_every_conversation(failed) if single
                               else self._export_conversations(user_id)),
             "notes": self._export_notes(failed) if single else [],
+            "projects": self._export_projects(failed) if single else [],
             "memories": self._export_memories(user_id),
             "rag_collections": self._export_rag(user_id),
             "plugin_configs": self._export_plugin_configs(user_id),
@@ -763,6 +804,47 @@ class UserDataExporter:
             except Exception as e:  # noqa: BLE001 - said
                 logger.warning("The note %s could not be read for the export: %s", note_id, e)
                 failed.append(f"note {note_id} (not exported: {type(e).__name__})")
+        return out
+
+    @staticmethod
+    def _export_projects(failed: list[str]) -> list[dict[str, Any]]:
+        """Single-user mode, the one user: every project -- its name, description, instructions, settings and times,
+        the conversations linked to it, its files' manifest with what was drawn from each (summary, key terms) and
+        its outputs' manifest with their description; the bytes stay in the app, downloaded from the project
+        (named). One that cannot be read is named in ``failed``."""
+        try:
+            store = _get_project_store()
+            if store is None:
+                return []
+            ids = store.project_ids()
+        except Exception as e:  # noqa: BLE001 - said
+            logger.warning("The projects could not be read for the export: %s", e)
+            failed.append(f"projects (not exported: {type(e).__name__})")
+            return []
+        out = []
+        for project_id in ids:
+            try:
+                project = store.get_project(project_id)
+                if project is None:
+                    # Gone since the listing.
+                    continue
+                entry = project.to_dict()
+                entry["conversations"] = [link["conversation_id"] for link in store.list_conversations(project_id)]
+                entry["files"] = [
+                    {"id": f.id, "filename": f.filename, "file_type": f.file_type, "bytes": int(f.file_size_bytes),
+                     "indexed": bool(f.indexed), "chunk_count": int(f.chunk_count), "summary": f.summary,
+                     "key_terms": f.key_terms, "uploaded_at": f.uploaded_at, "updated_at": f.updated_at}
+                    for f in store.list_files(project_id)
+                ]
+                entry["outputs"] = [
+                    {"id": o.id, "filename": o.filename, "output_type": o.output_type, "description": o.description,
+                     "source_conversation_id": o.source_conversation_id, "created_at": o.created_at}
+                    for o in store.list_outputs(project_id)
+                ]
+                out.append(entry)
+            except Exception as e:  # noqa: BLE001 - said
+                logger.warning("The project %s could not be read for the export: %s", project_id, e)
+                failed.append(f"project {project_id} (not exported: {type(e).__name__})")
         return out
 
     def _export_memories(self, user_id: str) -> list[dict[str, Any]]:
@@ -969,6 +1051,12 @@ class UserDataDeleter:
                     results["content_removed"]["notes"] = notes
                     results["not_covered"] = [label for label in results["not_covered"]
                                               if label not in WIPE_WHEN_NAMED["notes"]] + left_notes
+            if "projects" in words:
+                projects, left_projects = _guarded(failed, "projects", self._remove_projects, (0, None))
+                if left_projects is not None:
+                    results["content_removed"]["projects"] = projects
+                    results["not_covered"] = [label for label in results["not_covered"]
+                                              if label not in WIPE_WHEN_NAMED["projects"]] + left_projects
         results["not_covered"] += failed
 
         # Log to admin audit
@@ -1020,6 +1108,64 @@ class UserDataDeleter:
         left += store.sweep_dead_notes()
         left += store.forget_orphan_blobs(before=started)
         return removed, list(dict.fromkeys(left))
+
+    @staticmethod
+    def _remove_projects() -> tuple[int, list[str]]:
+        """Single-user mode, the projects named: every project forgotten through its deletion
+        (``ProjectStore.forget_project``: its index, its files and outputs overwritten, its rows), in up to three
+        passes, then what earlier deletions left (``sweep_orphans``), then both logs emptied once (``empty_logs``);
+        how many projects, and what could not be removed, named. A project made while the wipe runs goes with the
+        others, one still arriving after the passes is named; a project whose deletion fails is tried again at the
+        next pass, and named when it fails at the last; a listing or a sweep that fails is named, and what went is
+        still counted. A store that cannot be read at first raises: nothing was removed. A tree without projects
+        holds none."""
+        store = _get_project_store()
+        if store is None:
+            return 0, []
+        removed, left, failed = 0, [], {}
+        ids = store.project_ids()
+        for _ in range(3):
+            if not ids:
+                break
+            for project_id in ids:
+                try:
+                    gone, rest = store.forget_project(project_id, sweep=False, empty=False)
+                except Exception as e:  # noqa: BLE001 - named, and the other projects go on
+                    logger.warning("The wipe could not delete project %s: %s", project_id, type(e).__name__)
+                    failed[project_id] = f"projects (project {project_id} not deleted: {type(e).__name__})"
+                    continue
+                failed.pop(project_id, None)
+                removed += int(gone)
+                left += rest
+            try:
+                ids = store.project_ids()
+            except Exception as e:  # noqa: BLE001 - named, and what went is still counted
+                logger.warning("The wipe could not list the projects again: %s", type(e).__name__)
+                left.append(f"projects (not listed again: {type(e).__name__}; any project left is not counted)")
+                ids = None
+                break
+        if ids:
+            arrived = [project_id for project_id in ids if project_id not in failed]
+            if arrived:
+                left.append(f"projects ({len(arrived)} made while the wipe ran, left)")
+        left += [failed[project_id] for project_id in (ids or failed) if project_id in failed]
+        try:
+            swept = store.sweep_orphans()
+        except Exception as e:  # noqa: BLE001 - named, and what went is still counted
+            logger.warning("The wipe could not sweep what earlier deletions left: %s", type(e).__name__)
+            swept = [f"projects (what earlier deletions left, not swept: {type(e).__name__})"]
+        # What a deletion could not remove and the final sweep then removed is no longer said: a part the sweep
+        # reached without a failure holds nothing of the projects any more.
+        for label in WIPE_WHEN_NAMED["projects"][1:]:
+            if not any(line.startswith(label) for line in swept):
+                left = [line for line in left if not (line.startswith(f"{label} (project ")
+                                                      and ("not removed:" in line or "not all removed:" in line))]
+        # The logs emptied once, at the end: what that emptying could not do is what is said of them.
+        try:
+            emptied = store.empty_logs()
+        except Exception as e:  # noqa: BLE001 - named
+            emptied = [f"projects (the logs not emptied: {type(e).__name__})"]
+        return removed, list(dict.fromkeys(left + swept + emptied))
 
     def _delete_pending_writes(self, user_id: str, *, failed: list[str] | None = None) -> int:
         """Delete the user's pending writes, so a proposal left waiting cannot bring wiped words back; a failure is

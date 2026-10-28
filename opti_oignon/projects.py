@@ -12,12 +12,16 @@ Prepares the data layer for RAG-based context injection.
 Author: Leon
 """
 
+import hashlib
 import json
 import logging
 import os
-import shutil
+import re
 import sqlite3
+import stat
+import threading
 import uuid
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -45,6 +49,166 @@ _DEFAULT_STORAGE_BASE = _DATA_DIR / "projects"
 
 # File type detection by extension
 _FILE_TYPE_MAP: dict[str, str] = {}
+
+# Every write of the store, and the indexer's landing of a file's chunks, hold this lock: a deletion never interleaves
+# with a write that would bring back what it removes -- a file added, a file's chunks landed, as it goes.
+_WRITES = threading.RLock()
+
+# An id as ``Project``, ``ProjectFile`` and ``ProjectOutput`` make it: the sweep removes only what is named so.
+_ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{3}")
+
+# What the account wipe's answer calls what a deletion could not remove (``store_inventory``).
+_STORE_LABEL = "projects store (single-user)"
+_FILES_LABEL = "project files and saved outputs"
+
+
+@contextmanager
+def holding():
+    """Hold the store's write lock (``_WRITES``)."""
+    with _WRITES:
+        yield
+
+
+def _plain(name: str) -> bool:
+    """Whether ``name`` names one entry of a folder, and nothing beyond it."""
+    return bool(name) and "/" not in name and "\\" not in name and name not in (".", "..") and "\x00" not in name
+
+
+def _overwrite_and_remove(path: Path, said: list | None = None) -> bool:
+    """Overwrite a file's bytes in place, then remove it; whether it was there. A filesystem that writes in place no
+    longer holds them; a copy-on-write filesystem, a snapshot or a backup may. A link is refused, never followed.
+
+    A file another link also names -- a backup made of links, say -- is removed without its overwrite: those bytes
+    are the other copy's too. One this process may not write is made writable first, being the process's own; one
+    that stays unwritable is removed without its overwrite. Each removal without its overwrite is said: in ``said``
+    when it is given, in the log otherwise."""
+    # Never blocks: a FIFO with no reader refuses the open rather than wait for one.
+    nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    reason = None
+    try:
+        fd = os.open(path, os.O_WRONLY | nofollow)
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        try:
+            fd, reason = _made_writable(path, nofollow)
+        except FileNotFoundError:
+            return False
+    if fd is not None:
+        try:
+            held = os.fstat(fd)
+            if not stat.S_ISREG(held.st_mode):
+                reason = "not a regular file"
+            elif held.st_nlink > 1:
+                reason = "other links hold its bytes"
+            else:
+                left = held.st_size
+                block = b"\0" * 65536
+                while left > 0:
+                    left -= os.write(fd, block[:min(len(block), left)])
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+    os.unlink(path)
+    if reason is not None:
+        if said is None:
+            logger.warning("a file removed without its overwrite (%s)", reason)
+        else:
+            said.append(reason)
+    return True
+
+
+def _made_writable(path: Path, nofollow: int) -> tuple:
+    """(a descriptor that writes ``path``, None) once the file is made readable and writable by its owner -- it is
+    this process's own --, or (None, why) when it cannot be; only a regular file no other link names is changed."""
+    try:
+        held = os.lstat(path)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        return None, type(exc).__name__
+    if not stat.S_ISREG(held.st_mode):
+        return None, "not a regular file"
+    if held.st_nlink > 1:
+        return None, "other links hold its bytes"
+    try:
+        os.chmod(path, stat.S_IMODE(held.st_mode) | stat.S_IRUSR | stat.S_IWUSR)
+        return os.open(path, os.O_WRONLY | nofollow), None
+    except OSError as exc:
+        return None, type(exc).__name__
+
+
+# What a deletion says of a link it removed: the link goes, never what it leads to.
+_LINK = "a link: what it led to is left"
+
+
+def _forget_entry(path: Path, said: list) -> None:
+    """Overwrite and remove one file; remove a link, never followed, a folder with what it holds, or anything else
+    that is not a regular file. A link removed, and a file removed without its overwrite, said in ``said``."""
+    if path.is_symlink():
+        os.unlink(path)
+        said.append(_LINK)
+    elif path.is_dir():
+        _forget_folder(path, said)
+    elif not path.is_file():
+        os.unlink(path)
+    else:
+        _overwrite_and_remove(path, said)
+
+
+def _forget_folder(folder: Path, said: list) -> None:
+    """Overwrite and remove every file under ``folder``, then its folders and itself: a link is removed, never
+    followed; a link removed, and a file removed without its overwrite, said in ``said``. Each entry is tried; the
+    first that fails raises once the others are done. A folder that is not there holds none."""
+    if not os.path.lexists(folder):
+        return
+    if folder.is_symlink():
+        os.unlink(folder)
+        said.append(_LINK)
+        return
+    if not folder.is_dir():
+        os.unlink(folder)
+        return
+    first: OSError | None = None
+    for top, dirs, files in os.walk(folder, topdown=False, followlinks=False):
+        for name in files:
+            try:
+                _forget_entry(Path(top) / name, said)
+            except OSError as exc:
+                first = first or exc
+        for name in dirs:
+            path = Path(top) / name
+            try:
+                if path.is_symlink():
+                    os.unlink(path)
+                    said.append(_LINK)
+                else:
+                    os.rmdir(path)
+            except OSError as exc:
+                first = first or exc
+    try:
+        os.rmdir(folder)
+    except OSError as exc:
+        first = first or exc
+    if first is not None:
+        raise first
+
+
+def _absent(error: ModuleNotFoundError, module: str) -> bool:
+    """Whether an import failed because the module, or a package it would be in, is not in this tree -- then it holds
+    nothing; a module that is there and fails to load is broken, and raises."""
+    return bool(error.name) and (error.name == module or module.startswith(error.name + "."))
+
+
+def _unwritten(said: list, what: str) -> list[str]:
+    """What the answer says of files removed without their overwrite: one line per reason."""
+    return [f"{_FILES_LABEL} ({what}: removed, not overwritten -- {reason})" for reason in dict.fromkeys(said)]
+
+
+def _no_index(error: ModuleNotFoundError) -> bool:
+    """Whether an import of the projects' index failed because this tree has none: then nothing is indexed; an index
+    that is there and fails to load raises."""
+    return _absent(error, "opti_oignon.project_context")
 
 
 def _build_file_type_map(categories: dict[str, list[str]]) -> dict[str, str]:
@@ -280,10 +444,16 @@ class ProjectStore:
         db_path: Path | None = None,
         config_path: Path | None = None,
         storage_base: Path | None = None,
+        vectors_db: Path | None = None,
     ):
         self._db_path = db_path or _DEFAULT_DB_PATH
         self._config_path = config_path or _DEFAULT_CONFIG_PATH
         self._storage_base = storage_base or _DEFAULT_STORAGE_BASE
+        # The index of the projects' files: the knowledge base's store beside this store's database (``rag/``), the
+        # indexer's default for the default store.
+        self._vectors_db = (Path(vectors_db) if vectors_db is not None
+                            else None if self._db_path == _DEFAULT_DB_PATH
+                            else Path(self._db_path).parent / "rag" / "vectors.db")
         self._config: dict[str, Any] = {}
 
         # Load config
@@ -501,34 +671,35 @@ class ProjectStore:
             settings=merged_settings,
         )
 
-        # Create project directory
-        project_dir = self._storage_base / project.id
-        project_dir.mkdir(parents=True, exist_ok=True)
-        (project_dir / "files").mkdir(exist_ok=True)
-        (project_dir / "outputs").mkdir(exist_ok=True)
+        with _WRITES:
+            # Create project directory
+            project_dir = self._storage_base / project.id
+            project_dir.mkdir(parents=True, exist_ok=True)
+            (project_dir / "files").mkdir(exist_ok=True)
+            (project_dir / "outputs").mkdir(exist_ok=True)
 
-        conn = self._get_conn()
-        try:
-            conn.execute(
-                """
-                INSERT INTO projects (id, name, description, system_instructions, settings, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    project.id,
-                    project.name,
-                    project.description,
-                    project.system_instructions,
-                    json.dumps(project.settings),
-                    project.created_at,
-                    project.updated_at,
-                ),
-            )
-            conn.commit()
-        finally:
-            conn.close()
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO projects (id, name, description, system_instructions, settings, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        project.id,
+                        project.name,
+                        project.description,
+                        project.system_instructions,
+                        json.dumps(project.settings),
+                        project.created_at,
+                        project.updated_at,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
 
-        logger.info("Created project '%s' (id=%s)", project.name, project.id)
+        logger.info("Created project %s", project.id)
         return project
 
     def get_project(self, project_id: str) -> Project | None:
@@ -627,14 +798,11 @@ class ProjectStore:
         finally:
             conn.close()
 
-        logger.info("Updated project '%s' (id=%s)", project.name, project.id)
+        logger.info("Updated project %s", project.id)
         return project
 
     def delete_project(self, project_id: str) -> bool:
-        """Delete a project and all associated data.
-
-        Removes the project record, all linked files (from disk and DB),
-        all outputs, and all conversation links.
+        """Delete a project and all associated data, keeping none of its words (``forget_project``).
 
         Args:
             project_id: The project ID.
@@ -642,28 +810,45 @@ class ProjectStore:
         Returns:
             True if the project existed and was deleted.
         """
-        project = self.get_project(project_id)
-        if project is None:
-            return False
+        return self.forget_project(project_id)[0]
 
-        # Remove project directory from disk (files + outputs)
-        project_dir = self._storage_base / project_id
-        if project_dir.exists():
+    def forget_project(self, project_id: str, *, sweep: bool = True, empty: bool = True) -> tuple[bool, list[str]]:
+        """Delete a project, keeping none of its words: its index first (every chunk of its files, their metadata and
+        vectors), then every file and output under its folder overwritten and removed, its rows -- files, outputs and
+        conversation links by cascade; the conversations stay --, its folder, and both logs emptied.
+
+        Whether it existed, and what could not be removed, named: the deletion stands, and the next deletion's
+        sweep (``sweep_orphans``) removes what it left. With ``sweep``, what earlier deletions left goes too; without
+        ``empty``, the logs are left to the caller (``empty_logs``), as the wipe does once at its end.
+        """
+        with _WRITES:
+            if self.get_project(project_id) is None:
+                return False, []
+            left = self._forget_index(project_id)
+            # What this deletion could not reach is not swept again now -- the next deletion does --, so the answer
+            # names each failure once, and never one a sweep then mended.
+            reached, on_disk, said = not left, True, []
+            if _plain(project_id):
+                try:
+                    _forget_folder(self._storage_base / project_id, said)
+                except OSError as exc:
+                    logger.warning("project %s: its files could not all be removed: %s", project_id,
+                                   type(exc).__name__)
+                    left.append(f"{_FILES_LABEL} (project {project_id}'s, not all removed: {type(exc).__name__})")
+                    on_disk = False
+            left += _unwritten(said, f"project {project_id}'s")
+            conn = self._get_conn()
             try:
-                shutil.rmtree(project_dir)
-            except OSError as e:
-                logger.warning("Failed to remove project directory %s: %s", project_dir, e)
-
-        # Cascade delete in DB (foreign keys handle child tables)
-        conn = self._get_conn()
-        try:
-            conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
-            conn.commit()
-        finally:
-            conn.close()
-
+                conn.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+                conn.commit()
+            finally:
+                conn.close()
+            if sweep:
+                left += self.sweep_orphans(index=reached, disk=on_disk)
+            if empty:
+                left += self.empty_logs()
         logger.info("Deleted project id=%s", project_id)
-        return True
+        return True, list(dict.fromkeys(left))
 
     # =========================================================================
     # FILE MANAGEMENT
@@ -727,58 +912,64 @@ class ProjectStore:
 
         # Generate unique file ID and write to disk
         file_id = str(uuid.uuid4())[:12]
-        project_files_dir = self._storage_base / project_id / "files"
-        project_files_dir.mkdir(parents=True, exist_ok=True)
 
-        # Use file_id prefix to avoid name collisions
-        stored_name = f"{file_id}_{safe_name}"
-        file_path = project_files_dir / stored_name
+        # The bytes and their row land under the write lock, the project read again there: a deletion that came
+        # since leaves no file on disk that no row names.
+        with _WRITES:
+            if self.get_project(project_id) is None:
+                raise ValueError(f"Project not found: {project_id}")
+            project_files_dir = self._storage_base / project_id / "files"
+            project_files_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            with open(file_path, "wb") as f:
-                f.write(content)
-        except OSError as e:
-            raise ValueError(f"Failed to write file to disk: {e}")
+            # Use file_id prefix to avoid name collisions
+            stored_name = f"{file_id}_{safe_name}"
+            file_path = project_files_dir / stored_name
 
-        # Extract metadata
-        meta = extract_file_metadata(file_path)
+            try:
+                with open(file_path, "wb") as f:
+                    f.write(content)
+            except OSError as e:
+                raise ValueError(f"Failed to write file to disk: {e}")
 
-        pf = ProjectFile(
-            id=file_id,
-            project_id=project_id,
-            filename=safe_name,
-            file_path=str(file_path),
-            file_type=file_type,
-            file_size_bytes=meta["size_bytes"],
-        )
+            # Extract metadata
+            meta = extract_file_metadata(file_path)
 
-        conn = self._get_conn()
-        try:
-            conn.execute(
-                """
-                INSERT INTO project_files
-                    (id, project_id, filename, file_path, file_type,
-                     file_size_bytes, indexed, chunk_count, summary,
-                     key_terms, uploaded_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    pf.id, pf.project_id, pf.filename, pf.file_path,
-                    pf.file_type, pf.file_size_bytes, int(pf.indexed),
-                    pf.chunk_count, pf.summary, json.dumps(pf.key_terms),
-                    pf.uploaded_at, pf.updated_at,
-                ),
+            pf = ProjectFile(
+                id=file_id,
+                project_id=project_id,
+                filename=safe_name,
+                file_path=str(file_path),
+                file_type=file_type,
+                file_size_bytes=meta["size_bytes"],
             )
-            conn.commit()
-        finally:
-            conn.close()
 
-        # Touch project updated_at
-        self._touch_project(project_id)
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO project_files
+                        (id, project_id, filename, file_path, file_type,
+                         file_size_bytes, indexed, chunk_count, summary,
+                         key_terms, uploaded_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        pf.id, pf.project_id, pf.filename, pf.file_path,
+                        pf.file_type, pf.file_size_bytes, int(pf.indexed),
+                        pf.chunk_count, pf.summary, json.dumps(pf.key_terms),
+                        pf.uploaded_at, pf.updated_at,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            # Touch project updated_at
+            self._touch_project(project_id)
 
         logger.info(
-            "Added file '%s' to project %s (id=%s, type=%s, %d bytes)",
-            safe_name, project_id, file_id, file_type, pf.file_size_bytes,
+            "Added file %s to project %s (type=%s, %d bytes)",
+            file_id, project_id, file_type, pf.file_size_bytes,
         )
         return pf
 
@@ -822,9 +1013,7 @@ class ProjectStore:
             conn.close()
 
     def remove_file(self, file_id: str) -> bool:
-        """Remove a file from its project.
-
-        Deletes the file from disk and the database record.
+        """Remove a file from its project, keeping none of its words (``forget_file``).
 
         Args:
             file_id: The file ID.
@@ -832,31 +1021,33 @@ class ProjectStore:
         Returns:
             True if the file existed and was removed.
         """
-        pf = self.get_file(file_id)
-        if pf is None:
-            return False
+        return self.forget_file(file_id)[0]
 
-        # Remove from disk
-        fp = Path(pf.file_path)
-        if fp.exists():
+    def forget_file(self, file_id: str, *, sweep: bool = True) -> tuple[bool, list[str]]:
+        """Remove a file from its project, keeping none of its words: its chunks first, so no turn retrieves them
+        again, then its bytes overwritten and removed, its row (its summary and key terms), and both logs emptied.
+        Whether it existed, and what could not be removed, named; with ``sweep``, what earlier deletions left goes
+        too (``sweep_orphans``)."""
+        with _WRITES:
+            pf = self.get_file(file_id)
+            if pf is None:
+                return False, []
+            left = self._forget_chunks(pf.project_id, {pf.file_path})
+            reached = not left
+            stored = self._forget_stored(pf.project_id, "files", file_id)
+            left += stored
+            conn = self._get_conn()
             try:
-                fp.unlink()
-            except OSError as e:
-                logger.warning("Failed to remove file %s: %s", fp, e)
-
-        # Remove from DB
-        conn = self._get_conn()
-        try:
-            conn.execute("DELETE FROM project_files WHERE id = ?", (file_id,))
-            conn.commit()
-        finally:
-            conn.close()
-
-        # Touch project updated_at
-        self._touch_project(pf.project_id)
-
+                conn.execute("DELETE FROM project_files WHERE id = ?", (file_id,))
+                conn.commit()
+            finally:
+                conn.close()
+            self._touch_project(pf.project_id)
+            if sweep:
+                left += self.sweep_orphans(index=reached, disk=not [line for line in stored if "not removed" in line])
+            left += self.empty_logs()
         logger.info("Removed file id=%s from project %s", file_id, pf.project_id)
-        return True
+        return True, list(dict.fromkeys(left))
 
     def read_file_content(self, file_id: str) -> bytes | None:
         """Read file content from disk.
@@ -870,13 +1061,7 @@ class ProjectStore:
         pf = self.get_file(file_id)
         if pf is None:
             return None
-        fp = Path(pf.file_path)
-        if not fp.exists():
-            return None
-        try:
-            return fp.read_bytes()
-        except OSError:
-            return None
+        return self._read_stored(pf.project_id, "files", file_id)
 
     # =========================================================================
     # OUTPUT MANAGEMENT
@@ -916,49 +1101,54 @@ class ProjectStore:
             safe_name = "output_file"
 
         output_id = str(uuid.uuid4())[:12]
-        outputs_dir = self._storage_base / project_id / "outputs"
-        outputs_dir.mkdir(parents=True, exist_ok=True)
 
-        stored_name = f"{output_id}_{safe_name}"
-        file_path = outputs_dir / stored_name
+        # As for a file: the bytes and their row land under the write lock, the project read again there.
+        with _WRITES:
+            if self.get_project(project_id) is None:
+                raise ValueError(f"Project not found: {project_id}")
+            outputs_dir = self._storage_base / project_id / "outputs"
+            outputs_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            with open(file_path, "wb") as f:
-                f.write(content)
-        except OSError as e:
-            raise ValueError(f"Failed to write output to disk: {e}")
+            stored_name = f"{output_id}_{safe_name}"
+            file_path = outputs_dir / stored_name
 
-        po = ProjectOutput(
-            id=output_id,
-            project_id=project_id,
-            source_conversation_id=source_conversation_id,
-            filename=safe_name,
-            file_path=str(file_path),
-            output_type=output_type,
-            description=description,
-        )
+            try:
+                with open(file_path, "wb") as f:
+                    f.write(content)
+            except OSError as e:
+                raise ValueError(f"Failed to write output to disk: {e}")
 
-        conn = self._get_conn()
-        try:
-            conn.execute(
-                """
-                INSERT INTO project_outputs
-                    (id, project_id, source_conversation_id, filename,
-                     file_path, output_type, description, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    po.id, po.project_id, po.source_conversation_id,
-                    po.filename, po.file_path, po.output_type,
-                    po.description, po.created_at,
-                ),
+            po = ProjectOutput(
+                id=output_id,
+                project_id=project_id,
+                source_conversation_id=source_conversation_id,
+                filename=safe_name,
+                file_path=str(file_path),
+                output_type=output_type,
+                description=description,
             )
-            conn.commit()
-        finally:
-            conn.close()
 
-        self._touch_project(project_id)
-        logger.info("Added output '%s' to project %s", safe_name, project_id)
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO project_outputs
+                        (id, project_id, source_conversation_id, filename,
+                         file_path, output_type, description, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        po.id, po.project_id, po.source_conversation_id,
+                        po.filename, po.file_path, po.output_type,
+                        po.description, po.created_at,
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            self._touch_project(project_id)
+        logger.info("Added output %s to project %s", output_id, project_id)
         return po
 
     def get_output(self, output_id: str) -> ProjectOutput | None:
@@ -986,29 +1176,240 @@ class ProjectStore:
         finally:
             conn.close()
 
-    def remove_output(self, output_id: str) -> bool:
-        """Remove an output file from its project."""
+    def read_output_content(self, output_id: str) -> bytes | None:
+        """An output's bytes, or None when it is not there."""
         po = self.get_output(output_id)
         if po is None:
-            return False
+            return None
+        return self._read_stored(po.project_id, "outputs", output_id)
 
-        fp = Path(po.file_path)
-        if fp.exists():
+    def remove_output(self, output_id: str) -> bool:
+        """Remove an output file from its project, keeping none of its words (``forget_output``)."""
+        return self.forget_output(output_id)[0]
+
+    def forget_output(self, output_id: str) -> tuple[bool, list[str]]:
+        """Remove an output from its project: its bytes overwritten and removed, its row (its description), the log
+        emptied. Whether it existed, and what could not be removed, named."""
+        with _WRITES:
+            po = self.get_output(output_id)
+            if po is None:
+                return False, []
+            left = self._forget_stored(po.project_id, "outputs", output_id)
+            conn = self._get_conn()
             try:
-                fp.unlink()
-            except OSError as e:
-                logger.warning("Failed to remove output %s: %s", fp, e)
+                conn.execute("DELETE FROM project_outputs WHERE id = ?", (output_id,))
+                conn.commit()
+            finally:
+                conn.close()
+            self._touch_project(po.project_id)
+            left += self.empty_logs(index=False)
+        logger.info("Removed output id=%s from project %s", output_id, po.project_id)
+        return True, left
 
+    # =========================================================================
+    # FORGETTING
+    # =========================================================================
+
+    @property
+    def present(self) -> bool:
+        """Whether the store's database is there: one that is not holds nothing, and reading it would make it."""
+        return Path(self._db_path).exists()
+
+    def project_ids(self) -> list[str]:
+        """Every project's id; none, and nothing made, when the store is not there."""
+        if not self.present:
+            return []
         conn = self._get_conn()
         try:
-            conn.execute("DELETE FROM project_outputs WHERE id = ?", (output_id,))
-            conn.commit()
+            return [row["id"] for row in conn.execute("SELECT id FROM projects ORDER BY id")]
         finally:
             conn.close()
 
-        self._touch_project(po.project_id)
-        logger.info("Removed output id=%s from project %s", output_id, po.project_id)
-        return True
+    def counts(self) -> dict[str, int]:
+        """How many projects, files and outputs the store holds; zeros, and nothing made, when it is not there."""
+        if not self.present:
+            return {"projects": 0, "files": 0, "outputs": 0}
+        conn = self._get_conn()
+        try:
+            return {key: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
+                    for key, table in (("projects", "projects"), ("files", "project_files"),
+                                       ("outputs", "project_outputs"))}
+        finally:
+            conn.close()
+
+    def fingerprint(self) -> str:
+        """Four hex characters drawn from every project, file and output id: a project, file or output that came
+        while another went, the counts unchanged, changes them. Empty when the store holds nothing."""
+        if not self.present:
+            return ""
+        conn = self._get_conn()
+        try:
+            ids = [f"{kind}:{row[0]}" for kind, table in (("p", "projects"), ("f", "project_files"),
+                                                         ("o", "project_outputs"))
+                   for row in conn.execute(f"SELECT id FROM {table} ORDER BY id")]
+        finally:
+            conn.close()
+        return hashlib.sha256("\n".join(ids).encode("utf-8")).hexdigest()[:4] if ids else ""
+
+    def sweep_orphans(self, *, index: bool = True, disk: bool = True) -> list[str]:
+        """What earlier deletions left, removed: in the index (unless ``index`` is False), the collections of projects
+        that are gone and the chunks of files that are gone; on disk (unless ``disk`` is False), the folders named
+        like a project that is gone, and in each project's folder the files and outputs no row names -- each
+        overwritten before it goes; what could not be removed, named. A store that is not there holds no project:
+        everything of the projects' that is left goes."""
+        with _WRITES:
+            live: dict[str, set[str]] = {}
+            stored: dict[str, dict[str, set[str]]] = {}
+            if self.present:
+                conn = self._get_conn()
+                try:
+                    for row in conn.execute("SELECT id FROM projects"):
+                        live[row["id"]] = set()
+                        stored[row["id"]] = {"files": set(), "outputs": set()}
+                    for row in conn.execute("SELECT id, project_id, file_path FROM project_files"):
+                        live.setdefault(row["project_id"], set()).add(row["file_path"])
+                        stored.setdefault(row["project_id"], {"files": set(), "outputs": set()})["files"].add(
+                            row["id"])
+                    for row in conn.execute("SELECT id, project_id FROM project_outputs"):
+                        stored.setdefault(row["project_id"], {"files": set(), "outputs": set()})["outputs"].add(
+                            row["id"])
+                finally:
+                    conn.close()
+            left = self._sweep_index(live) if index else []
+            failed: OSError | None = None
+            said: list = []
+            try:
+                children = (sorted(self._storage_base.iterdir()) if disk and self._storage_base.is_dir()
+                            else [])
+            except OSError as exc:
+                children, failed = [], exc
+            for child in children:
+                if not _ID.fullmatch(child.name):
+                    continue
+                try:
+                    if child.name not in stored:
+                        _forget_folder(child, said)
+                        continue
+                    for kind in ("files", "outputs"):
+                        folder = child / kind
+                        if folder.is_symlink() or not folder.is_dir():
+                            continue
+                        for entry in sorted(folder.iterdir()):
+                            owner = entry.name.split("_", 1)[0]
+                            if _ID.fullmatch(owner) and owner not in stored[child.name][kind]:
+                                _forget_entry(entry, said)
+                except OSError as exc:
+                    failed = failed or exc
+            if failed is not None:
+                logger.warning("projects: what earlier deletions left on disk could not all be removed: %s",
+                               type(failed).__name__)
+                left.append(f"{_FILES_LABEL} (what earlier deletions left, not all removed: {type(failed).__name__})")
+            left += _unwritten(said, "what earlier deletions left")
+        return left
+
+    def _forget_index(self, project_id: str) -> list[str]:
+        """The project's index removed (``ProjectIndexer.forget_project_index``); what stays, named."""
+        try:
+            from opti_oignon.project_context import ProjectIndexer
+        except ModuleNotFoundError as e:
+            if _no_index(e):
+                return []
+            raise
+        return ProjectIndexer.forget_project_index(project_id, self._vectors_db)
+
+    def _forget_chunks(self, project_id: str, paths: set[str]) -> list[str]:
+        """The chunks drawn from ``paths`` removed from the project's index; what stays, named."""
+        try:
+            from opti_oignon.project_context import ProjectIndexer
+        except ModuleNotFoundError as e:
+            if _no_index(e):
+                return []
+            raise
+        return ProjectIndexer.forget_file_chunks(project_id, paths, self._vectors_db)
+
+    def _sweep_index(self, live: dict[str, set[str]]) -> list[str]:
+        """What earlier deletions left in the index removed (``ProjectIndexer.sweep_index``); what stays, named."""
+        try:
+            from opti_oignon.project_context import ProjectIndexer
+        except ModuleNotFoundError as e:
+            if _no_index(e):
+                return []
+            raise
+        return ProjectIndexer.sweep_index(live, self._vectors_db)
+
+    def _forget_stored(self, project_id: str, kind: str, item_id: str) -> list[str]:
+        """The bytes of one file or output -- every entry of the project's ``kind`` folder its id prefixes --
+        overwritten and removed; what could not be, named. Only the store's own folder is touched."""
+        folder = self._storage_base / project_id / kind
+        if not (_plain(project_id) and _plain(item_id)) or folder.is_symlink() or not folder.is_dir():
+            return []
+        failed: OSError | None = None
+        said: list = []
+        for entry in sorted(folder.iterdir()):
+            if entry.name.startswith(f"{item_id}_"):
+                try:
+                    _forget_entry(entry, said)
+                except OSError as exc:
+                    failed = failed or exc
+        unwritten = _unwritten(said, f"a removed {kind[:-1]} of project {project_id}")
+        if failed is None:
+            return unwritten
+        logger.warning("project %s: a removed %s's bytes could not be removed: %s", project_id, kind[:-1],
+                       type(failed).__name__)
+        return [f"{_FILES_LABEL} (a removed {kind[:-1]} of project {project_id}, not removed: "
+                f"{type(failed).__name__})", *unwritten]
+
+    def _read_stored(self, project_id: str, kind: str, item_id: str) -> bytes | None:
+        """The bytes of one file or output, read where the store keeps them -- the entry of the project's ``kind``
+        folder its id prefixes, the place its deletion removes --, a link never followed; None when not there."""
+        folder = self._storage_base / project_id / kind
+        if (not (_plain(project_id) and _plain(item_id)) or folder.parent.is_symlink() or folder.is_symlink()
+                or not folder.is_dir()):
+            return None
+        for entry in sorted(folder.iterdir()):
+            if entry.name.startswith(f"{item_id}_"):
+                try:
+                    fd = os.open(entry, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+                    with os.fdopen(fd, "rb") as handle:
+                        return handle.read()
+                except OSError:
+                    return None
+        return None
+
+    def empty_logs(self, *, index: bool = True) -> list[str]:
+        """Empty the store's write-ahead log, and the index's unless ``index`` is False (a deletion that removed no
+        chunk), after a deletion, so the pages it overwrote reach the database's file and no older frame keeps what
+        it erased; what could not be, named. Never waits: a read or a
+        write in progress keeps both what the deletion erased in the file and its log, until it ends and the next
+        deletion empties them."""
+        left: list[str] = []
+        try:
+            from opti_oignon.project_context import empty_index_log
+        except ModuleNotFoundError as e:
+            if not _no_index(e):
+                raise
+        else:
+            if index:
+                left += empty_index_log(self._vectors_db)
+        if not self.present:
+            return left
+        try:
+            conn = _safe_connect(self._db_path, check_same_thread=False)
+            try:
+                conn.execute("PRAGMA busy_timeout = 0")
+                busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+            logger.warning("projects: a deletion made; the write-ahead log could not be emptied (%s)",
+                           type(exc).__name__)
+            return [*left, f"{_STORE_LABEL} (its log not emptied: {type(exc).__name__}; the next deletion tries again)"]
+        if busy:
+            logger.warning("projects: a deletion made; a read or a write in progress keeps what it erased in the "
+                           "database and its log until it ends")
+            left.append(f"{_STORE_LABEL} (a read or a write in progress keeps what the deletion erased in the database "
+                        "until it ends; the next deletion empties it)")
+        return left
 
     # =========================================================================
     # CONVERSATION LINKING

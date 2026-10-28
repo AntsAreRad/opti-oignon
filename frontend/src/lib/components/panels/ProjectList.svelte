@@ -19,7 +19,7 @@
 		deleteProject,
 	} from '$lib/stores/projects';
 	import type { ProjectInfo } from '$lib/types';
-	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { toastSuccess, toastError, toastWarning } from '$lib/stores/notifications';
 
 	/** When true (driven by ?new=1), open the create modal on load. */
 	export let openCreate = false;
@@ -169,8 +169,9 @@
 	async function handleDelete(p: ProjectInfo) {
 		busyId = p.id;
 		try {
-			await deleteProject(p.id);
-			toastSuccess(`Project "${p.name}" deleted`);
+			const left = await deleteProject(p.id);
+			if (left.length > 0) toastWarning(`Project "${p.name}" deleted; not all of it went: ${left.join('; ')}`);
+			else toastSuccess(`Project "${p.name}" deleted`);
 			deleteConfirmId = null;
 		} catch (e) {
 			toastError(e instanceof Error ? e.message : 'Failed to delete project');

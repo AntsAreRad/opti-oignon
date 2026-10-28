@@ -9,8 +9,10 @@ output management, conversation linking, and project context
 
 import logging
 from typing import Any
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -188,7 +190,7 @@ def _output_to_response(po: "ProjectOutput") -> dict[str, Any]:
 # =============================================================================
 
 @router.post("/projects", response_model=ProjectResponse, status_code=201)
-async def create_project(req: ProjectCreateRequest) -> dict:
+def create_project(req: ProjectCreateRequest) -> dict:
     """Create a new project."""
     _require_projects()
     try:
@@ -253,13 +255,26 @@ async def update_project(project_id: str, req: ProjectUpdateRequest) -> dict:
 
 
 @router.delete("/projects/{project_id}")
-async def delete_project(project_id: str) -> dict:
-    """Delete a project and all associated data (files, outputs, conversation links)."""
+def delete_project(project_id: str) -> dict:
+    """Delete a project and all associated data (files, outputs, conversation links), keeping none of its words:
+    its index, its files and outputs overwritten, its rows. ``not_forgotten`` names what could not be removed now;
+    the next deletion removes it. A plain function: the framework runs it off the event loop, since a deletion
+    waits for an indexing that is landing and sweeps what earlier ones left -- as every route that takes the
+    store's write lock does, so no deletion holds the loop."""
     _require_projects()
-    deleted = project_store.delete_project(project_id)
+    deleted, left = project_store.forget_project(project_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Project not found")
-    return {"status": "ok", "deleted": project_id}
+    return {"status": "ok", "deleted": project_id, "not_forgotten": left}
+
+
+def _download(content: bytes, filename: str) -> Response:
+    """The bytes of a project's file or output, as an attachment under its own name."""
+    return Response(
+        content=content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename, safe='')}"},
+    )
 
 
 # =============================================================================
@@ -288,7 +303,9 @@ async def upload_project_file(project_id: str, file: UploadFile = File(...)) -> 
         raise HTTPException(status_code=500, detail=f"Failed to read uploaded file: {e}")
 
     try:
-        pf = project_store.add_file(
+        # Off the event loop: the write waits for the store's lock, which a deletion holds while it sweeps.
+        pf = await run_in_threadpool(
+            project_store.add_file,
             project_id=project_id,
             filename=file.filename,
             content=content,
@@ -320,18 +337,32 @@ async def get_project_file(project_id: str, file_id: str) -> dict:
     return _file_to_response(pf)
 
 
+@router.get("/projects/{project_id}/files/{file_id}/content")
+def download_project_file(project_id: str, file_id: str) -> Response:
+    """The bytes of a project's file, as uploaded."""
+    _require_projects()
+    pf = project_store.get_file(file_id)
+    if pf is None or pf.project_id != project_id:
+        raise HTTPException(status_code=404, detail="File not found")
+    content = project_store.read_file_content(file_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="File content not found")
+    return _download(content, pf.filename)
+
+
 @router.delete("/projects/{project_id}/files/{file_id}")
-async def delete_project_file(project_id: str, file_id: str) -> dict:
-    """Remove a file from a project (deletes from disk and database)."""
+def delete_project_file(project_id: str, file_id: str) -> dict:
+    """Remove a file from a project, keeping none of its words: its chunks, so no turn retrieves them again, its
+    bytes overwritten, its row. ``not_forgotten`` names what could not be removed now."""
     _require_projects()
     # Verify file belongs to this project
     pf = project_store.get_file(file_id)
     if pf is None or pf.project_id != project_id:
         raise HTTPException(status_code=404, detail="File not found")
-    removed = project_store.remove_file(file_id)
+    removed, left = project_store.forget_file(file_id)
     if not removed:
         raise HTTPException(status_code=404, detail="File not found")
-    return {"status": "ok", "deleted": file_id}
+    return {"status": "ok", "deleted": file_id, "not_forgotten": left}
 
 
 # =============================================================================
@@ -362,7 +393,8 @@ async def upload_project_output(
         raise HTTPException(status_code=500, detail=f"Failed to read uploaded file: {e}")
 
     try:
-        po = project_store.add_output(
+        po = await run_in_threadpool(
+            project_store.add_output,
             project_id=project_id,
             filename=file.filename,
             content=content,
@@ -386,17 +418,31 @@ async def list_project_outputs(project_id: str) -> list:
     return [_output_to_response(o) for o in outputs]
 
 
-@router.delete("/projects/{project_id}/outputs/{output_id}")
-async def delete_project_output(project_id: str, output_id: str) -> dict:
-    """Remove an output from a project."""
+@router.get("/projects/{project_id}/outputs/{output_id}/content")
+def download_project_output(project_id: str, output_id: str) -> Response:
+    """The bytes of a project's output, as saved."""
     _require_projects()
     po = project_store.get_output(output_id)
     if po is None or po.project_id != project_id:
         raise HTTPException(status_code=404, detail="Output not found")
-    removed = project_store.remove_output(output_id)
+    content = project_store.read_output_content(output_id)
+    if content is None:
+        raise HTTPException(status_code=404, detail="Output content not found")
+    return _download(content, po.filename)
+
+
+@router.delete("/projects/{project_id}/outputs/{output_id}")
+def delete_project_output(project_id: str, output_id: str) -> dict:
+    """Remove an output from a project: its bytes overwritten, its row. ``not_forgotten`` names what could not be
+    removed now."""
+    _require_projects()
+    po = project_store.get_output(output_id)
+    if po is None or po.project_id != project_id:
+        raise HTTPException(status_code=404, detail="Output not found")
+    removed, left = project_store.forget_output(output_id)
     if not removed:
         raise HTTPException(status_code=404, detail="Output not found")
-    return {"status": "ok", "deleted": output_id}
+    return {"status": "ok", "deleted": output_id, "not_forgotten": left}
 
 
 # =============================================================================
@@ -439,7 +485,7 @@ async def list_project_conversations(project_id: str) -> dict:
 # =============================================================================
 
 @router.post("/projects/{project_id}/files/{file_id}/index")
-async def index_project_file(project_id: str, file_id: str) -> dict:
+def index_project_file(project_id: str, file_id: str) -> dict:
     """Trigger indexation of a single project file into the knowledge base's store.
 
     Chunks the file, generates embeddings, stores in the per-project
@@ -476,7 +522,7 @@ async def index_project_file(project_id: str, file_id: str) -> dict:
 
 
 @router.post("/projects/{project_id}/reindex")
-async def reindex_project(project_id: str) -> dict:
+def reindex_project(project_id: str) -> dict:
     """Reindex all files in a project.
 
     Processes each file sequentially: chunks, embeds, writes into the knowledge base's store.

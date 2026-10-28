@@ -2,8 +2,9 @@
  * The rules of the "Your data" panel, dependency-free so a contract runs them under Node.
  *
  * The panel offers the export first, then shows what a wipe removes and leaves, lets the user name the content
- * removed only on request (the notes), and asks two typed confirmations: the wipe's own words, and the phrase the
- * preview gave for what is named -- the server checks that phrase again against what it counts at that moment.
+ * removed only on request (the notes, the projects), and asks two typed confirmations: the wipe's own words, and the
+ * phrase the preview gave for what is named -- the server checks that phrase again against what it counts at that
+ * moment.
  */
 
 /** What the user types to confirm the wipe itself. */
@@ -17,6 +18,11 @@ export function wipeQuery(remove: string[], confirm?: string): string {
 	return parts.length > 0 ? `?${parts.join('&')}` : '';
 }
 
+/** A count with its word, singular for one: `1 project`, `3 projects`. */
+export function counted(n: number, one: string, many = `${one}s`): string {
+	return `${n} ${n === 1 ? one : many}`;
+}
+
 /** Whether what the user typed is the expected words, exactly (spaces around them ignored). */
 export function typedMatches(typed: string, expected: string | undefined): boolean {
 	return expected !== undefined && expected !== '' && typed.trim() === expected;
@@ -27,7 +33,7 @@ export interface WipeGate {
 	exportOffered: boolean;
 	/** What the user typed for the wipe's own words. */
 	typedWipe: string;
-	/** The content named for removal (the notes), as the preview counted it. */
+	/** The content named for removal (the notes, the projects), as the preview counted it. */
 	named: string[];
 	/** The phrase the preview gave for what is named. */
 	phrase: string | undefined;

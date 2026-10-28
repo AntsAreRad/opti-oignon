@@ -18,6 +18,7 @@
 		getContextPreview,
 		formatFileSize,
 	} from '$lib/stores/projects';
+	import { downloadProjectOutput } from '$lib/api/projects';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import type { ProjectContextPreview } from '$lib/types';
 	import FileManager from './FileManager.svelte';
@@ -143,6 +144,15 @@
 			toastError(e instanceof Error ? e.message : 'Context preview failed');
 		} finally {
 			contextLoading = false;
+		}
+	}
+
+	async function downloadOutput(outputId: string, filename: string) {
+		if (!detail) return;
+		try {
+			await downloadProjectOutput(detail.id, outputId, filename);
+		} catch (e) {
+			toastError(e instanceof Error ? e.message : 'Download failed');
 		}
 	}
 
@@ -322,6 +332,13 @@
 										{output.output_type}
 									</span>
 									<span style="color: var(--oo-fg-faint);">{formatDate(output.created_at)}</span>
+									<Button
+										variant="ghost"
+										size="sm"
+										iconOnly="download"
+										ariaLabel="Download output"
+										on:click={() => downloadOutput(output.id, output.filename)}
+									/>
 								</div>
 							{/each}
 						</div>

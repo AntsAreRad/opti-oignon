@@ -2,9 +2,9 @@
  * API client for the user's own data: the export, the wipe's preview, the wipe.
  *
  *   GET    /api/users/{id}/export              -- everything the account holds, as JSON
- *   GET    /api/users/{id}/data/wipe-preview   -- what a wipe removes and leaves; `?remove=notes` counts the notes
- *                                                 and gives the phrase to repeat
- *   DELETE /api/users/{id}/data                -- the wipe; `?remove=notes&confirm=<the phrase>` removes the notes
+ *   GET    /api/users/{id}/data/wipe-preview   -- what a wipe removes and leaves; `?remove=notes&remove=projects`
+ *                                                 counts what is named and gives the phrase to repeat
+ *   DELETE /api/users/{id}/data                -- the wipe; `?remove=...&confirm=<the phrase>` removes what is named
  */
 
 import { apiDelete, apiGet } from './client';
@@ -19,10 +19,10 @@ export interface WipePreview {
 	retained_by_design: string[];
 	/** The content removed only when named, by its word, with the stores it covers (single-user mode only). */
 	on_request: Record<string, string[]>;
-	counts?: Record<
-		string,
-		{ notes: number; attachments: number; disputed: number | null; deleted_notes: number; code: string }
-	>;
+	counts?: {
+		notes?: { notes: number; attachments: number; disputed: number | null; deleted_notes: number; code: string };
+		projects?: { projects: number; files: number; outputs: number; code: string };
+	};
 	phrase?: string;
 	notice?: string;
 }

@@ -418,9 +418,15 @@ install's stores: every conversation with its messages, and every note
 with its title, its body (as text and as its stored bytes, base64), its
 tags, the history of its edits and its attachments' kind, size, hash
 and derived text -- an attachment's bytes stay in the app, named in
-`not_covered`. `failed` names each part that could not be read -- a
-conversation the store answers nothing for, the conversations it counts
-and its listing did not reach.
+`not_covered` --, and every project with its name, description,
+instructions and settings, the conversations linked to it, and its
+files' and outputs' names, sizes and what was drawn from each (summary,
+key terms) -- their bytes are downloaded from the project
+(`GET /api/projects/{id}/files/{file_id}/content`,
+`.../outputs/{output_id}/content`), named in `not_covered`. `failed`
+names each part that could not be read -- a conversation the store
+answers nothing for, the conversations it counts and its listing did
+not reach.
 
 **Response (200):**
 
@@ -429,13 +435,14 @@ and its listing did not reach.
   "export_metadata": {
     "user_id": "local",
     "exported_at": 1793000000.0,
-    "format_version": "1.3",
+    "format_version": "1.4",
     "not_covered": ["note attachments' bytes (...)", "..."],
     "retained_by_design": ["..."],
     "failed": []
   },
   "conversations": [...],
   "notes": [{"id": "...", "title": "...", "body_text": "...", "updates": [...], "attachments": [...]}],
+  "projects": [{"id": "...", "name": "...", "system_instructions": "...", "files": [...], "outputs": [...]}],
   "memories": [...],
   "rag_collections": [...],
   "plugin_configs": [...],
@@ -485,7 +492,20 @@ deleted too, as the user's own deletion, and counted: the preview counts
 it as `disputed`, and the phrase's number includes it. When the sync
 journal cannot be read, `disputed` is `null`, the notice says so, and the
 wipe names those notes as left. A deletion the journal could not take is
-named as not told to the paired devices, and published by the next one. The rest of the content the user manages -- projects, the
+named as not told to the paired devices, and published by the next one.
+The projects go the same way, only when named (`remove=projects`): each
+project deleted as its own deletion does -- its index (every chunk of
+its files), its files and outputs (overwritten), its rows --, then what
+earlier deletions left (the index of projects already gone, the chunks
+of files already removed, their folders), then both stores' logs
+emptied once; a read or a write in progress then is named, and keeps
+what it held until it ends. The conversations linked to the projects
+stay. A project whose deletion fails is tried again, and named when it
+still fails; `content_removed` counts what went. While ChromaDB's projects folder
+waits for `db_encryption migrate`, the index cannot be reached: it is
+named as left, and the first deletion after the migration removes it.
+Both words can be named at once (`remove=notes&remove=projects`), with
+one phrase for both. The rest of the content the user manages -- the
 knowledge base's documents, the coding history, skills, the garden, the
 plugins' data -- is not removed. `not_covered` names every store it leaves, and why one
 could not be emptied or removed -- a store that cannot even be opened
@@ -513,8 +533,8 @@ base is named in `not_covered`.
   "encryption_keys": true,
   "plugin_reviews": 1,
   "pending_writes": 0,
-  "content_removed": {"notes": 12},
-  "not_covered": ["projects store (single-user)", "..."],
+  "content_removed": {"notes": 12, "projects": 3},
+  "not_covered": ["coding history store", "..."],
   "retained_by_design": ["sandbox audit: the record of what ran, without its words", "..."]
 }
 ```
@@ -533,7 +553,10 @@ residue the wipe forgets), the `phrase` the wipe asks back, and the
 `notice` about the paired devices. The phrase carries the count the user
 reads and four characters drawn from the notes and attachments counted
 (`remove 12 notes a3f9`), so the same count over other notes refuses
-too. Refusals as the wipe's.
+too. With `remove=projects`, the projects, files and outputs counted,
+the phrase's part for them (`remove 3 projects b2c1`, or `remove 12
+notes a3f9 and 3 projects b2c1` for both), and a notice that the export
+carries no file's bytes. Refusals as the wipe's.
 
 **Response (200):**
 
@@ -545,7 +568,8 @@ too. Refusals as the wipe's.
   "removed": ["run journal (opt-in record of agent runs)", "...", "notes and their updates"],
   "left": ["projects store (single-user)", "..."],
   "retained_by_design": ["..."],
-  "on_request": {"notes": ["notes and their updates", "note attachments (voice, images)"]},
+  "on_request": {"notes": ["notes and their updates", "note attachments (voice, images)"],
+                 "projects": ["projects store (single-user)", "project files and saved outputs", "..."]},
   "counts": {"notes": {"notes": 12, "attachments": 3, "disputed": 0, "deleted_notes": 4, "code": "a3f9"}},
   "phrase": "remove 12 notes a3f9",
   "notice": "Each note's deletion is published to your paired devices, ..."
@@ -606,3 +630,46 @@ Count admin audit events (admin only).
   "count": 234
 }
 ```
+
+## Projects
+
+### DELETE /api/projects/{project_id}
+
+Delete a project, keeping none of its words: its index first (every
+chunk of its files, with their metadata and vectors), then every file
+and output under its folder -- each overwritten, then removed; a link is
+removed, never followed --, its rows (the conversations linked to it
+stay, unlinked), its folder, and both stores' logs emptied. A file
+another link also names (a backup made of links) is removed without its
+overwrite. `not_forgotten` names what could not be removed now, or was
+removed without its overwrite, each under the label the account wipe
+uses for its store; the next deletion's sweep removes what is left, with
+what deletions made before this left. While ChromaDB's projects folder
+waits for `db_encryption migrate`, the index is named as left.
+
+**Response (200):**
+
+```json
+{"status": "ok", "deleted": "1b4e28ba-2fa", "not_forgotten": []}
+```
+
+**Errors:** 404 if the project does not exist.
+
+### DELETE /api/projects/{project_id}/files/{file_id}
+
+Remove a file from its project: its chunks first, so no turn retrieves
+them again, then its bytes (overwritten) and its row, with the summary
+and key terms drawn from it. `not_forgotten` as above.
+`DELETE /api/projects/{project_id}/outputs/{output_id}` does the same
+for an output (it has no chunks).
+
+### GET /api/projects/{project_id}/files/{file_id}/content
+
+The bytes of a project's file, as uploaded, read from the project's own
+folder (where its deletion removes them; a link is never followed), as
+an attachment under the file's name (`filename*=UTF-8''...`).
+`GET /api/projects/{project_id}/outputs/{output_id}/content` gives an
+output's.
+
+**Errors:** 404 if the file is not this project's, or its bytes are not
+there.

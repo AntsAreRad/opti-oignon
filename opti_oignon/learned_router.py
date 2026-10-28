@@ -25,6 +25,7 @@ import importlib.util
 import logging
 import os
 import sqlite3
+import stat
 import threading
 import time
 from dataclasses import dataclass, field
@@ -117,23 +118,68 @@ def _model_mac_path(model_path) -> Path:
     return Path(f"{model_path}.mac")
 
 
-def _overwrite_and_remove(path: Path) -> bool:
+def _overwrite_and_remove(path: Path, said: list | None = None) -> bool:
     """Overwrite a file's bytes in place, then remove it; whether it was there. A filesystem that writes in place no
-    longer holds them; a copy-on-write filesystem, a snapshot or a backup may. A link is refused, never followed."""
+    longer holds them; a copy-on-write filesystem, a snapshot or a backup may. A link is refused, never followed.
+
+    A file another link also names -- a backup made of links, say -- is removed without its overwrite: those bytes
+    are the other copy's too. One this process may not write is made writable first, being the process's own; one
+    that stays unwritable is removed without its overwrite. Each removal without its overwrite is said: in ``said``
+    when it is given, in the log otherwise."""
+    # Never blocks: a FIFO with no reader refuses the open rather than wait for one.
+    nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    reason = None
     try:
-        fd = os.open(path, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
+        fd = os.open(path, os.O_WRONLY | nofollow)
     except FileNotFoundError:
         return False
-    try:
-        left = os.fstat(fd).st_size
-        block = b"\0" * 65536
-        while left > 0:
-            left -= os.write(fd, block[:min(len(block), left)])
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    except PermissionError:
+        try:
+            fd, reason = _made_writable(path, nofollow)
+        except FileNotFoundError:
+            return False
+    if fd is not None:
+        try:
+            held = os.fstat(fd)
+            if not stat.S_ISREG(held.st_mode):
+                reason = "not a regular file"
+            elif held.st_nlink > 1:
+                reason = "other links hold its bytes"
+            else:
+                left = held.st_size
+                block = b"\0" * 65536
+                while left > 0:
+                    left -= os.write(fd, block[:min(len(block), left)])
+                os.fsync(fd)
+        finally:
+            os.close(fd)
     os.unlink(path)
+    if reason is not None:
+        if said is None:
+            logger.warning("a file removed without its overwrite (%s)", reason)
+        else:
+            said.append(reason)
     return True
+
+
+def _made_writable(path: Path, nofollow: int) -> tuple:
+    """(a descriptor that writes ``path``, None) once the file is made readable and writable by its owner -- it is
+    this process's own --, or (None, why) when it cannot be; only a regular file no other link names is changed."""
+    try:
+        held = os.lstat(path)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        return None, type(exc).__name__
+    if not stat.S_ISREG(held.st_mode):
+        return None, "not a regular file"
+    if held.st_nlink > 1:
+        return None, "other links hold its bytes"
+    try:
+        os.chmod(path, stat.S_IMODE(held.st_mode) | stat.S_IRUSR | stat.S_IWUSR)
+        return os.open(path, os.O_WRONLY | nofollow), None
+    except OSError as exc:
+        return None, type(exc).__name__
 
 
 def _forget_queries(db_path: Path, model_path: Path) -> int:

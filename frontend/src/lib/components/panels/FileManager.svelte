@@ -2,7 +2,7 @@
   FileManager.svelte
   Manages project files: upload (drag-and-drop + file picker),
   list with type icon/size/indexed status/chunk count,
-  index/reindex individual files, view summary + key terms, delete.
+  index/reindex individual files, view summary + key terms, download, delete.
 -->
 <script lang="ts">
 	import {
@@ -12,8 +12,9 @@
 		getFileSummary,
 		formatFileSize,
 	} from '$lib/stores/projects';
-	import { toastSuccess, toastError } from '$lib/stores/notifications';
-	import { Modal } from '$lib/ds';
+	import { downloadProjectFile } from '$lib/api/projects';
+	import { toastSuccess, toastError, toastWarning } from '$lib/stores/notifications';
+	import { Button, Modal } from '$lib/ds';
 	import type { ProjectFileInfo, ProjectFileSummary } from '$lib/types';
 
 	export let projectId: string;
@@ -124,11 +125,20 @@
 		}
 	}
 
+	async function handleDownload(fileId: string, filename: string) {
+		try {
+			await downloadProjectFile(projectId, fileId, filename);
+		} catch (e) {
+			toastError(e instanceof Error ? e.message : 'Download failed');
+		}
+	}
+
 	async function handleDelete(fileId: string, filename: string) {
 		deletingId = fileId;
 		try {
-			await deleteFile(projectId, fileId);
-			toastSuccess(`Deleted "${filename}"`);
+			const left = await deleteFile(projectId, fileId);
+			if (left.length > 0) toastWarning(`Deleted "${filename}"; not all of it went: ${left.join('; ')}`);
+			else toastSuccess(`Deleted "${filename}"`);
 			deleteConfirmId = null;
 		} catch (e) {
 			toastError(e instanceof Error ? e.message : 'Delete failed');
@@ -294,6 +304,15 @@
 								</svg>
 							</button>
 						{/if}
+
+						<!-- Download button -->
+						<Button
+							variant="ghost"
+							size="sm"
+							iconOnly="download"
+							ariaLabel="Download file"
+							on:click={() => handleDownload(f.id, f.filename)}
+						/>
 
 						<!-- Delete button -->
 						{#if deleteConfirmId === f.id}

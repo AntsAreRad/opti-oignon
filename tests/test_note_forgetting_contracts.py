@@ -198,7 +198,8 @@ def _world(tmp_path, *, wipe=False, single=True, auth=True, engine=True, routes=
 
 def _plant(world, *, title=TITLE, body=BODY, tag=TAG, attachment="att-1", witness=None):
     """A note holding words everywhere a note keeps them: its row, an attachment with its derived text and its
-    blob, two updates and a checkpoint, and their versions in the journal; ``witness``, a hard link to the blob."""
+    blob, two updates and a checkpoint, and their versions in the journal; ``witness``, a list given the blob's
+    descriptor, open on its bytes after the file is gone (a hard link would make it a file no deletion overwrites)."""
     note = world.notes.add_note(title, body_crdt=body, tags=f'["{tag}"]')
     world.notes.add_attachment(note.id, "audio", blob_ref=attachment, mime="audio/ogg", byte_size=len(BLOB),
                                attachment_id=attachment, transcript_text=TRANSCRIPT, caption_text=CAPTION,
@@ -210,7 +211,7 @@ def _plant(world, *, title=TITLE, body=BODY, tag=TAG, attachment="att-1", witnes
     # A sealing interrupted: its partial file beside the blob.
     (folder / f"{attachment}.blob.tmp").write_bytes(BLOB)
     if witness is not None:
-        os.link(blob, witness)
+        witness.append(os.open(blob, os.O_RDONLY))
     world.updates.append_update(note.id, UPDATE + b"-1")
     world.updates.append_update(note.id, UPDATE + b"-2")
     world.updates.set_checkpoint_watermark(note.id, 1)
@@ -243,7 +244,7 @@ def test_dn1_a_deleted_note_keeps_no_words(tmp_path):
     world = _world(tmp_path)
     readers = []
     try:
-        witness = tmp_path / "witness"
+        witness = []
         note = _plant(world, witness=witness)
         kept = world.notes.add_note(KEEP, body_crdt=KEEP.encode(), tags=f'["{KEEP}"]')
         world.updates.append_update(kept.id, KEEP.encode() + b"-update")
@@ -261,7 +262,11 @@ def test_dn1_a_deleted_note_keeps_no_words(tmp_path):
         assert _held(world.data, *_WORDS) == set(), f"a deleted note's words stay: {_held(world.data, *_WORDS)}"
         assert not (world.data / "notes_blobs" / "att-1.blob").exists(), "the blob stays"
         assert not (world.data / "notes_blobs" / "att-1.blob.tmp").exists(), "the partial blob stays"
-        assert set(witness.read_bytes()) == {0}, "the blob was removed, not overwritten first"
+        (held,) = witness
+        try:
+            assert set(os.pread(held, os.fstat(held).st_size, 0)) == {0}, "the blob was removed, not overwritten first"
+        finally:
+            os.close(held)
         raw = sqlite3.connect(str(world.data / "notes.db"))
         try:
             row = raw.execute("SELECT title, body_crdt, tags, pinned, deleted FROM note WHERE id = ?",
@@ -556,7 +561,7 @@ def test_dn7_the_preview_and_every_refusal_before_anything_is_removed(tmp_path):
         assert "phrase" not in plain and set(_NOTE_LABELS) <= set(plain["left"]), plain
         deleter = udm.UserDataDeleter()
 
-        _refused(lambda: udm.wipe_preview("local", ["projects"]), 422)
+        _refused(lambda: udm.wipe_preview("local", ["everything"]), 422)
         _refused(lambda: deleter.delete_all("local", remove=["notes"]), 422)
         _refused(lambda: deleter.delete_all("local", remove=["notes"], confirm="remove 2 notes"), 409)
         _refused(lambda: deleter.delete_all("u-2", remove=["notes"], confirm="remove 3 notes"), 409)
@@ -583,7 +588,7 @@ def test_dn7_the_preview_and_every_refusal_before_anything_is_removed(tmp_path):
         # Through the routes: the same refusals, as HTTP.
         request = SimpleNamespace(client=SimpleNamespace(host="127.0.0.1"), headers={})
         for call, status in (
-            (routes.preview_user_data_wipe("local", request, remove=["projects"], current_user={"sub": "local"}),
+            (routes.preview_user_data_wipe("local", request, remove=["everything"], current_user={"sub": "local"}),
              422),
             (routes.delete_user_data("local", request, remove=["notes"], confirm=None, current_user={"sub": "local"}),
              422),
@@ -787,7 +792,7 @@ def test_dn10_the_export_carries_what_the_wipe_removes(tmp_path):
         note = _plant(world)
         data = udm.UserDataExporter().export("local")
         meta = data["export_metadata"]
-        assert meta["format_version"] == "1.3"
+        assert meta["format_version"] == "1.4"
         (exported,) = data["notes"]
         assert exported["title"] == TITLE and exported["body_text"] == BODY.decode()
         assert base64.b64decode(exported["body_b64"]) == BODY and exported["tags"] == f'["{TAG}"]'

@@ -5,7 +5,7 @@
  * conversation linking, and project context (indexation, triggers, RAG).
  */
 
-import { apiGet, apiPost, apiPut, apiDelete, ApiError } from './client';
+import { apiGet, apiGetBlob, apiPost, apiPut, apiDelete, ApiError } from './client';
 import type {
 	ProjectInfo,
 	ProjectDetailInfo,
@@ -19,6 +19,26 @@ const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 function buildUrl(path: string): string {
 	return new URL(`${API_BASE}${path}`, window.location.origin).toString();
+}
+
+/** A deletion's answer: what could not be removed now is named, and the next deletion removes it. */
+export interface ForgetAnswer {
+	status: string;
+	deleted: string;
+	not_forgotten?: string[];
+}
+
+/** Fetch a project's file or output bytes and hand them to the browser as a download under their own name. */
+async function downloadBytes(path: string, filename: string): Promise<void> {
+	const url = URL.createObjectURL(await apiGetBlob(path));
+	const a = document.createElement('a');
+	a.href = url;
+	a.download = filename;
+	document.body.appendChild(a);
+	a.click();
+	document.body.removeChild(a);
+	// Revoked once the browser has taken the download: at once, some browsers cancel it.
+	setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // =========================================================================
@@ -59,8 +79,8 @@ export async function updateProject(
 }
 
 /** Delete a project and all associated data. */
-export async function deleteProject(projectId: string): Promise<{ status: string; deleted: string }> {
-	return apiDelete<{ status: string; deleted: string }>(`/api/projects/${projectId}`);
+export async function deleteProject(projectId: string): Promise<ForgetAnswer> {
+	return apiDelete<ForgetAnswer>(`/api/projects/${projectId}`);
 }
 
 // =========================================================================
@@ -107,11 +127,13 @@ export async function getProjectFile(projectId: string, fileId: string): Promise
 }
 
 /** Delete a project file. */
-export async function deleteProjectFile(
-	projectId: string,
-	fileId: string
-): Promise<{ status: string; deleted: string }> {
-	return apiDelete<{ status: string; deleted: string }>(`/api/projects/${projectId}/files/${fileId}`);
+export async function deleteProjectFile(projectId: string, fileId: string): Promise<ForgetAnswer> {
+	return apiDelete<ForgetAnswer>(`/api/projects/${projectId}/files/${fileId}`);
+}
+
+/** Download a project file's bytes, as uploaded. */
+export async function downloadProjectFile(projectId: string, fileId: string, filename: string): Promise<void> {
+	return downloadBytes(`/api/projects/${projectId}/files/${fileId}/content`, filename);
 }
 
 // =========================================================================
@@ -137,11 +159,13 @@ export async function listProjectOutputs(projectId: string): Promise<ProjectOutp
 }
 
 /** Delete a project output. */
-export async function deleteProjectOutput(
-	projectId: string,
-	outputId: string
-): Promise<{ status: string; deleted: string }> {
-	return apiDelete<{ status: string; deleted: string }>(`/api/projects/${projectId}/outputs/${outputId}`);
+export async function deleteProjectOutput(projectId: string, outputId: string): Promise<ForgetAnswer> {
+	return apiDelete<ForgetAnswer>(`/api/projects/${projectId}/outputs/${outputId}`);
+}
+
+/** Download a project output's bytes, as saved. */
+export async function downloadProjectOutput(projectId: string, outputId: string, filename: string): Promise<void> {
+	return downloadBytes(`/api/projects/${projectId}/outputs/${outputId}/content`, filename);
 }
 
 // =========================================================================

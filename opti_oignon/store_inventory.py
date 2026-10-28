@@ -32,7 +32,8 @@ WIPES = (REMOVED, ONE_USER, NOT_COVERED, KEPT, NOT_THE_USERS)
 # The words a wipe's request names content by, closed: a store not covered that carries one is removed when the
 # request names it -- in single-user mode, for the install's one user, the preview's phrase repeated.
 NOTES = "notes"
-REQUESTS = (NOTES,)
+PROJECTS = "projects"
+REQUESTS = (NOTES, PROJECTS)
 
 
 class Entry(NamedTuple):
@@ -109,15 +110,16 @@ STORES: tuple[Entry, ...] = (
     Entry("note attachments (voice, images)", ("notes_blobs",), ("notes/blob_store.py", "notes/notes_store.py"),
           WORDS, NOT_COVERED, request=NOTES),
     Entry("projects store (single-user)", ("projects.db",), ("projects.py", "user_isolation.py"), WORDS,
-          NOT_COVERED),
-    Entry("project files and saved outputs", ("projects",), ("projects.py",), WORDS, NOT_COVERED),
+          NOT_COVERED, failures=("projects",), request=PROJECTS),
+    Entry("project files and saved outputs", ("projects",), ("projects.py",), WORDS, NOT_COVERED,
+          request=PROJECTS),
     Entry("the knowledge base: documents, their chunks and vectors (not user-scoped)",
           ("rag_documents.db", "vectors.db", "*"), ("rag_store.py", "rag/config.py"), WORDS, NOT_COVERED,
           failures=("knowledge base collections named for the user",)),
     Entry("the knowledge base's index cache (the documents' paths and hashes)", ("cache", "index_cache.json"),
           ("rag/config.py", "rag/indexer.py"), IDS, NOT_COVERED),
-    Entry("project indexes (chunks of the project files)", ("vectors.db",), ("project_context.py",), WORDS,
-          NOT_COVERED),
+    Entry("project indexes (chunks of the project files)", ("vectors.db",), ("project_context.py", "projects.py"),
+          WORDS, NOT_COVERED, request=PROJECTS),
     Entry("the knowledge base's injection audit (the flagged chunks' text)", ("rag_injection_audit.db", "*"),
           ("rag_sanitizer.py",), DRAWN, NOT_COVERED),
     Entry("knowledge-base ingest jobs", ("rag_ingest_jobs.db",), ("rag/batch_ingest.py",), IDS, NOT_COVERED),

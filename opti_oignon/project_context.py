@@ -16,9 +16,11 @@ indexation is skipped but system_instructions are still injected.
 Author: Leon
 """
 
+import contextlib
 import logging
 import math
 import re
+import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -58,12 +60,16 @@ except ImportError:
 
 # ProjectStore for updating file records
 try:
-    from opti_oignon.projects import ProjectFile, project_store
+    from opti_oignon.projects import ProjectFile, holding, project_store
     PROJECTS_AVAILABLE = True
 except ImportError:
     PROJECTS_AVAILABLE = False
     project_store = None
     ProjectFile = None
+
+    def holding():
+        """No project store, no lock to hold: nothing lands without one."""
+        return contextlib.nullcontext()
 
 # Config
 try:
@@ -86,15 +92,72 @@ _DEFAULT_VECTORS_DB = _DATA_DIR / "rag" / "vectors.db"
 _VECTOR_NAMESPACE = "projects"
 
 
+_CLIENTS: dict[tuple, Any] = {}
+_CLIENTS_LOCK = threading.Lock()
+
+
 def _vector_client(vectors_db: Path | None) -> Any:
-    """One client of the projects' namespace: the default store's waits while
-    ChromaDB's projects folder holds a store (``vector_db.MigrationPending``)."""
+    """The client of the projects' namespace in the store at ``vectors_db``: the default store's waits while
+    ChromaDB's projects folder holds a store (``vector_db.MigrationPending``). One per store, shared by the indexer,
+    the context builder and the deletions, so a collection deleted takes every snapshot of it."""
     if vectors_db is None:
-        return vector_db.Client(_DEFAULT_VECTORS_DB, _VECTOR_NAMESPACE, legacy=_DEFAULT_CHROMA_BASE)
-    return vector_db.Client(vectors_db, _VECTOR_NAMESPACE)
+        key = (_DEFAULT_VECTORS_DB, _DEFAULT_CHROMA_BASE)
+    else:
+        key = (Path(vectors_db), None)
+    with _CLIENTS_LOCK:
+        client = _CLIENTS.get(key)
+        if client is None:
+            client = _CLIENTS[key] = vector_db.Client(key[0], _VECTOR_NAMESPACE, legacy=key[1])
+        return client
 
 # Collection name pattern for per-project collections
 _COLLECTION_PREFIX = "project_"
+
+# What the account wipe's answer calls the index (``store_inventory``): what a deletion could not remove of it is
+# named under it.
+_INDEX_LABEL = "project indexes (chunks of the project files)"
+
+
+def _waiting(client: Any) -> str | None:
+    """What stays of the index while ChromaDB's projects folder waits for its migration: every call of the client
+    refuses until then, and the chunks are in that folder."""
+    if client.pending() is None:
+        return None
+    return (f"{_INDEX_LABEL} (in the legacy folder, which waits for `{vector_db.MIGRATE_COMMAND}`; the first "
+            "deletion after it removes them)")
+
+
+def _source(item_id: str, metadata: Any, project_id: str) -> str | None:
+    """The path of the file a chunk was drawn from: its metadata's, else the one its id carries
+    (``<project>::<path>::<index>``)."""
+    named = (metadata or {}).get("source_file") if isinstance(metadata, dict) else None
+    if isinstance(named, str) and named:
+        return named
+    prefix = f"{project_id}::"
+    if item_id.startswith(prefix) and "::" in item_id[len(prefix):]:
+        return item_id[len(prefix):].rsplit("::", 1)[0]
+    return None
+
+
+def empty_index_log(vectors_db: Path | None = None) -> list[str]:
+    """Empty the index's write-ahead log after a deletion, so the pages it overwrote reach the store's file and no
+    older frame keeps what it erased; what could not be, named. Never waits: a read or a write in progress keeps the
+    chunks in the file and its log until it ends and the next deletion empties them."""
+    if not VECTOR_STORE_AVAILABLE:
+        return []
+    client = _vector_client(vectors_db)
+    try:
+        emptied = client.empty_log()
+    except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+        logger.warning("projects: a deletion's chunks removed; the index's write-ahead log could not be emptied "
+                       "(%s)", type(exc).__name__)
+        return [f"{_INDEX_LABEL} (the store's log not emptied: {type(exc).__name__}; the next deletion tries again)"]
+    if not emptied:
+        logger.warning("projects: a deletion's chunks removed; a read or a write in progress keeps them in the "
+                       "index's store and its log until it ends")
+        return [f"{_INDEX_LABEL} (a read or a write in progress keeps the removed chunks in the store until it ends; "
+                "the next deletion empties it)"]
+    return []
 
 # File type mapping from project categories to RAG chunker types
 _PROJECT_TYPE_TO_RAG_TYPE: dict[str, str] = {
@@ -366,7 +429,8 @@ class ProjectIndexer:
         """
         self._config = _load_context_config()
         self._vectors_db = Path(vectors_db) if vectors_db is not None else _DEFAULT_VECTORS_DB
-        self._client = (_vector_client(None if vectors_db is None else Path(vectors_db))
+        self._vectors_arg = None if vectors_db is None else Path(vectors_db)
+        self._client = (_vector_client(self._vectors_arg)
                         if VECTOR_STORE_AVAILABLE else None)
         self._store = store if store is not None else project_store
         self._embedder: Any | None = None
@@ -450,7 +514,7 @@ class ProjectIndexer:
                         parts.append(f"[Page {i + 1}]\n{t}")
                 return "\n\n".join(parts) if parts else None
             except Exception as e:
-                logger.warning("PDF extraction failed for %s: %s", filename, e)
+                logger.warning("PDF extraction failed for a project file: %s", type(e).__name__)
                 return None
 
         if ext in (".xlsx", ".xls"):
@@ -469,7 +533,7 @@ class ProjectIndexer:
                         parts.append(f"[Sheet: {sheet_name}]\n" + "\n".join(rows))
                 return "\n\n".join(parts) if parts else None
             except Exception as e:
-                logger.warning("Excel extraction failed for %s: %s", filename, e)
+                logger.warning("Excel extraction failed for a project file: %s", type(e).__name__)
                 return None
 
         if ext == ".docx":
@@ -479,7 +543,7 @@ class ProjectIndexer:
                 parts = [p.text for p in doc.paragraphs if p.text.strip()]
                 return "\n\n".join(parts) if parts else None
             except Exception as e:
-                logger.warning("DOCX extraction failed for %s: %s", filename, e)
+                logger.warning("DOCX extraction failed for a project file: %s", type(e).__name__)
                 return None
 
         # Text-based files: try multiple encodings
@@ -490,7 +554,7 @@ class ProjectIndexer:
             except UnicodeDecodeError:
                 continue
             except Exception as e:
-                logger.warning("Read error for %s: %s", filename, e)
+                logger.warning("Read error for a project file: %s", type(e).__name__)
                 return None
 
         return None
@@ -550,9 +614,8 @@ class ProjectIndexer:
             result.error = "File is empty or too short to index"
             return result
 
-        # Get the project's collection
-        collection = self._get_collection(project_id)
-        if collection is None:
+        # A store that waits for its migration takes nothing: said before the embedding is paid for.
+        if _waiting(self._client) is not None:
             result.error = "Project collection unavailable"
             return result
 
@@ -561,14 +624,6 @@ class ProjectIndexer:
         if embedder is None:
             result.error = "Embedding model unavailable"
             return result
-
-        # Remove old chunks for this file (reindex safe)
-        try:
-            existing = collection.get(where={"source_file": pf.file_path})
-            if existing and existing["ids"]:
-                collection.delete(ids=existing["ids"])
-        except Exception:
-            pass
 
         # Chunk the content
         try:
@@ -605,48 +660,70 @@ class ProjectIndexer:
         # Normalize before storing (see _l2_normalize).
         valid_embeddings = [_l2_normalize(e) for e in valid_embeddings]
 
-        # Store in the knowledge base's store
-        try:
-            # Use project-scoped chunk IDs to avoid collisions
-            chunk_ids = [
-                f"{project_id}::{pf.file_path}::{c.chunk_index}"
-                for c in valid_chunks
-            ]
-            metadatas = [c.metadata for c in valid_chunks]
-            collection.add(
-                ids=chunk_ids,
-                embeddings=valid_embeddings,
-                documents=[c.content for c in valid_chunks],
-                metadatas=metadatas,
-            )
-        except Exception as e:
-            result.error = f"Insertion into the knowledge base's store failed: {e}"
-            return result
-
         # Extract summary and key terms
         summary = _generate_summary(content, self._config.get("summary_max_tokens", 200))
         key_terms = _extract_key_terms(content, self._config.get("key_terms_max", 20))
 
-        result.success = True
-        result.chunk_count = len(valid_chunks)
-        result.summary = summary
-        result.key_terms = key_terms
+        # The chunks land under the store's write lock, and only while the file's row still names the file they were
+        # drawn from: a deletion that came while the file was read or embedded keeps it removed.
+        with holding():
+            current = self._store.get_file(file_id)
+            if current is None or current.project_id != project_id or current.file_path != pf.file_path:
+                result.error = "The file was removed while it was indexed: nothing kept"
+                return result
 
-        # Update the SQLite record
-        try:
-            self._update_file_record(
-                file_id=file_id,
-                indexed=True,
-                chunk_count=len(valid_chunks),
-                summary=summary,
-                key_terms=key_terms,
-            )
-        except Exception as e:
-            logger.warning("Failed to update file record after indexing: %s", e)
+            # Get the project's collection
+            collection = self._get_collection(project_id)
+            if collection is None:
+                result.error = "Project collection unavailable"
+                return result
+
+            # Remove old chunks for this file (reindex safe)
+            try:
+                existing = collection.get(where={"source_file": pf.file_path})
+                if existing and existing["ids"]:
+                    collection.delete(ids=existing["ids"])
+            except Exception:
+                pass
+
+            # Store in the knowledge base's store
+            try:
+                # Use project-scoped chunk IDs to avoid collisions
+                chunk_ids = [
+                    f"{project_id}::{pf.file_path}::{c.chunk_index}"
+                    for c in valid_chunks
+                ]
+                metadatas = [c.metadata for c in valid_chunks]
+                collection.add(
+                    ids=chunk_ids,
+                    embeddings=valid_embeddings,
+                    documents=[c.content for c in valid_chunks],
+                    metadatas=metadatas,
+                )
+            except Exception as e:
+                result.error = f"Insertion into the knowledge base's store failed: {e}"
+                return result
+
+            result.success = True
+            result.chunk_count = len(valid_chunks)
+            result.summary = summary
+            result.key_terms = key_terms
+
+            # Update the SQLite record
+            try:
+                self._update_file_record(
+                    file_id=file_id,
+                    indexed=True,
+                    chunk_count=len(valid_chunks),
+                    summary=summary,
+                    key_terms=key_terms,
+                )
+            except Exception as e:
+                logger.warning("Failed to update file record after indexing: %s", e)
 
         logger.info(
-            "Indexed file '%s' for project %s: %d chunks, %d key terms",
-            pf.filename, project_id, len(valid_chunks), len(key_terms),
+            "Indexed file %s for project %s: %d chunks, %d key terms",
+            file_id, project_id, len(valid_chunks), len(key_terms),
         )
         return result
 
@@ -666,37 +743,38 @@ class ProjectIndexer:
         if self._store is None:
             return False
 
-        pf = self._store.get_file(file_id)
-        if pf is None:
-            return False
+        with holding():
+            pf = self._store.get_file(file_id)
+            if pf is None:
+                return False
 
-        collection = self._get_collection(project_id)
-        if collection is None:
-            return False
+            collection = self._get_collection(project_id)
+            if collection is None:
+                return False
 
-        try:
-            existing = collection.get(where={"source_file": pf.file_path})
-            if existing and existing["ids"]:
-                collection.delete(ids=existing["ids"])
-                logger.info(
-                    "Removed %d chunks for file '%s' from project %s",
-                    len(existing["ids"]), pf.filename, project_id,
+            try:
+                existing = collection.get(where={"source_file": pf.file_path})
+                if existing and existing["ids"]:
+                    collection.delete(ids=existing["ids"])
+                    logger.info(
+                        "Removed %d chunks for file %s from project %s",
+                        len(existing["ids"]), file_id, project_id,
+                    )
+            except Exception as e:
+                logger.warning("Failed to remove chunks from index: %s", e)
+                return False
+
+            # Reset the indexed fields
+            try:
+                self._update_file_record(
+                    file_id=file_id,
+                    indexed=False,
+                    chunk_count=0,
+                    summary="",
+                    key_terms=[],
                 )
-        except Exception as e:
-            logger.warning("Failed to remove chunks from index: %s", e)
-            return False
-
-        # Reset the indexed fields
-        try:
-            self._update_file_record(
-                file_id=file_id,
-                indexed=False,
-                chunk_count=0,
-                summary="",
-                key_terms=[],
-            )
-        except Exception:
-            pass
+            except Exception:
+                pass
 
         return True
 
@@ -722,26 +800,105 @@ class ProjectIndexer:
         return results
 
     def delete_project_index(self, project_id: str) -> bool:
-        """Delete the entire collection of a project.
+        """Delete the entire collection of a project (``forget_project_index``).
 
         Args:
             project_id: The project ID.
 
         Returns:
-            True if deletion succeeded.
+            True when nothing of it stays.
         """
         if not VECTOR_STORE_AVAILABLE:
             return False
 
-        try:
-            client = self._client
-            collection_name = f"{_COLLECTION_PREFIX}{project_id}"
-            client.delete_collection(collection_name)
+        with holding():
+            left = self.forget_project_index(project_id, self._vectors_arg)
+        if not left:
             logger.info("Deleted the collection of project %s", project_id)
-            return True
-        except Exception as e:
-            logger.warning("Failed to delete project index: %s", e)
-            return False
+        return not left
+
+    @staticmethod
+    def forget_project_index(project_id: str, vectors_db: Path | None = None) -> list[str]:
+        """A project's deletion's erasure of its index: the collection of its files' chunks, their metadata and
+        vectors; what could not be removed, named (nothing when all went). A store that is not there holds none, and is
+        not created; a project never indexed has no collection to remove."""
+        if not VECTOR_STORE_AVAILABLE:
+            return []
+        client = _vector_client(vectors_db)
+        waiting = _waiting(client)
+        if waiting is not None:
+            return [waiting]
+        if not client.path.exists():
+            return []
+        try:
+            client.delete_collection(f"{_COLLECTION_PREFIX}{project_id}")
+        except vector_db.CollectionNotFound:
+            pass
+        except Exception as exc:  # noqa: BLE001 - named, and the next deletion's sweep tries again
+            logger.warning("project %s: its index could not be removed: %s", project_id, type(exc).__name__)
+            return [f"{_INDEX_LABEL} (project {project_id}'s, not removed: {type(exc).__name__})"]
+        return []
+
+    @staticmethod
+    def forget_file_chunks(project_id: str, paths: Any, vectors_db: Path | None = None) -> list[str]:
+        """A file's removal's erasure of its chunks from its project's collection, each drawn from one of ``paths``;
+        what could not be removed, named. A store, or a collection, that is not there holds none."""
+        if not VECTOR_STORE_AVAILABLE:
+            return []
+        paths = set(paths)
+        client = _vector_client(vectors_db)
+        waiting = _waiting(client)
+        if waiting is not None:
+            return [waiting]
+        if not client.path.exists():
+            return []
+        try:
+            collection = client.get_collection(f"{_COLLECTION_PREFIX}{project_id}")
+            held = collection.get(include=["metadatas"])
+            doomed = [item for item, metadata in zip(held["ids"], held["metadatas"])
+                      if _source(item, metadata, project_id) in paths]
+            if doomed:
+                collection.delete(ids=doomed)
+        except vector_db.CollectionNotFound:
+            pass
+        except Exception as exc:  # noqa: BLE001 - named, and the next deletion's sweep tries again
+            logger.warning("project %s: a removed file's chunks could not be removed: %s", project_id,
+                           type(exc).__name__)
+            return [f"{_INDEX_LABEL} (a removed file's chunks in project {project_id}, not removed: "
+                    f"{type(exc).__name__})"]
+        return []
+
+    @staticmethod
+    def sweep_index(live: dict[str, set[str]], vectors_db: Path | None = None) -> list[str]:
+        """What earlier deletions left in the projects' index, removed: each collection whose project ``live`` does not
+        hold, and in each project's collection the chunks drawn from no file ``live`` gives it (``project -> paths``);
+        what could not be removed, named. A store that is not there holds none, and is not created."""
+        if not VECTOR_STORE_AVAILABLE:
+            return []
+        client = _vector_client(vectors_db)
+        waiting = _waiting(client)
+        if waiting is not None:
+            return [waiting]
+        if not client.path.exists():
+            return []
+        try:
+            for collection in client.list_collections():
+                if not collection.name.startswith(_COLLECTION_PREFIX):
+                    continue
+                project_id = collection.name[len(_COLLECTION_PREFIX):]
+                if project_id not in live:
+                    client.delete_collection(collection.name)
+                    continue
+                held = collection.get(include=["metadatas"])
+                doomed = [item for item, metadata in zip(held["ids"], held["metadatas"])
+                          if _source(item, metadata, project_id) not in live[project_id]]
+                if doomed:
+                    collection.delete(ids=doomed)
+        except Exception as exc:  # noqa: BLE001 - named, and the next deletion's sweep tries again
+            logger.warning("projects: what earlier deletions left in the index could not be removed: %s",
+                           type(exc).__name__)
+            return [f"{_INDEX_LABEL} (what earlier deletions left, not removed: {type(exc).__name__})"]
+        return []
 
     def _update_file_record(
         self,

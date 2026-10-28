@@ -216,6 +216,22 @@ function handleNetworkError(err: unknown, path: string): never {
 	throw new ApiError(0, 'Connection failed', detail, true);
 }
 
+/** GET `path`'s bytes as a Blob -- a file the server gives back as it was stored --, with apiGet's credentials and
+ * errors. */
+export async function apiGetBlob(path: string): Promise<Blob> {
+	try {
+		const response = await fetch(buildUrl(path), {
+			method: 'GET',
+			headers: { 'Accept': 'application/octet-stream', ...authHeaders() },
+			credentials: 'include',
+		});
+		if (!response.ok) await handleResponse<never>(response, path);
+		return await response.blob();
+	} catch (err) {
+		return handleNetworkError(err, path);
+	}
+}
+
 /** GET `path` with `params` in its query; aborting `signal` stops the request. */
 export async function apiGet<T>(path: string, params?: Record<string, string>, signal?: AbortSignal): Promise<T> {
 	try {

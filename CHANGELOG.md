@@ -3480,6 +3480,56 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] A deleted project keeps no words, a removed file is no
+  longer retrieved, and the account wipe removes the projects when the
+  request names them. Deleting a project removed its folder and its rows,
+  nothing overwritten, and never touched its index: every chunk of every
+  file -- the text, its metadata, its vector -- stayed in the knowledge
+  base's store. Removing a file left its chunks too, so the project went
+  on retrieving a removed file into every turn of a linked conversation.
+  The server's log named the projects and their files. Now a project's
+  deletion removes its index first, then overwrites and removes every
+  file and output under its folder (a link is removed, never followed),
+  deletes its rows and its folder, and empties both stores' logs -- a read
+  or a write in progress keeps what was erased in the database's file until
+  it ends, and is named, the next deletion emptying it; removing a file removes its
+  chunks, then its bytes, overwritten, and its row with the summary and key
+  terms drawn from it; removing an output overwrites it. An indexing that
+  was reading or embedding a file when it was removed keeps nothing, a
+  query that was reading the index keeps no copy of what went, and a file
+  added while its project is deleted leaves no bytes behind. A file
+  another link also names -- a backup made of links -- is removed without
+  its overwrite: its bytes are that copy's too; a file of the app's own it
+  may not read or write is made so, then overwritten; a link is removed,
+  never followed, and what it led to is left. The deletion's answer says
+  each. Every overwrite the package does follows the same rule (a note's
+  attachments, the command line's history, the learned router's model),
+  which say it in the server's log. What a step could not remove is named
+  (`not_forgotten` in the deletion's answer), and the next deletion's
+  sweep removes it, with what deletions made before this left -- the
+  index of projects already gone, the chunks of files already removed,
+  their folders; the first start removes nothing. While ChromaDB's
+  projects folder waits for `db_encryption migrate`, the index cannot be
+  reached: it is named as left, and the first deletion after the
+  migration removes it. The log names a project or a file by its id
+  only. A project's file and output can now be downloaded
+  (`GET /api/projects/{id}/files/{file_id}/content`,
+  `.../outputs/{output_id}/content`), read from the project's own folder,
+  where its deletion removes them, a link never followed at any level. In single-user mode, for the
+  install's one user, the account wipe removes every project when the
+  request names them (`remove=projects`) and repeats the phrase its
+  preview gives (`remove 3 projects b2c1`, the four characters drawn from
+  the projects, files and outputs counted; with the notes, one phrase for
+  both), then sweeps what earlier deletions left and empties the logs once;
+  a project whose deletion fails is tried again, then named, and the count
+  is what went; without the request, the projects are left and named, as
+  before.
+  The account export carries every project, its instructions, the
+  conversations linked to it and what was drawn from its files, their
+  bytes downloaded from the project (named; `format_version` 1.4). "Your
+  data" offers the projects apart, and says the files are downloaded from
+  their project first.
+
 - [SECURITY] A deleted note keeps no words, here or on the paired
   devices, and the account wipe removes the notes when the request names
   them. Deleting a note only set its flag: the row kept its title, body

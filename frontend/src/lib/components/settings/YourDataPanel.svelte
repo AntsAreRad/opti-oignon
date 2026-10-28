@@ -2,9 +2,10 @@
   YourDataPanel.svelte -- the user's own data: export it first, see what a wipe removes and leaves, then wipe.
 
   1. The export, offered before anything else: downloaded, or skipped by a deliberate choice.
-  2. The preview: what the wipe removes and what stays. In single-user mode the notes can be named for removal;
-     the preview then counts them and gives the phrase to type, and says the paired devices forget them too.
-  3. The typed confirmations: the wipe's own words, and the preview's phrase when the notes are named. The server
+  2. The preview: what the wipe removes and what stays. In single-user mode the notes and the projects can be
+     named for removal; the preview then counts them and gives the phrase to type, and says what the paired devices
+     and the export do with them.
+  3. The typed confirmations: the wipe's own words, and the preview's phrase when content is named. The server
      checks the phrase again against what it counts at that moment, and refuses when the counts moved.
   4. The answer, failures first.
 -->
@@ -17,7 +18,7 @@
 	import { currentUser } from '$lib/stores/auth';
 	import { parseApiError } from '$lib/api/errorHandler';
 	import { downloadUserData, previewWipe, wipeUserData, type WipePreview, type WipeResult } from '$lib/api/userData';
-	import { WIPE_WORDS, answerLines, canWipe, type WipeAnswerLines } from '$lib/settings/yourData';
+	import { WIPE_WORDS, answerLines, canWipe, counted, type WipeAnswerLines } from '$lib/settings/yourData';
 
 	$: userId = $currentUser?.user_id ?? 'local';
 
@@ -26,6 +27,7 @@
 	let exportError = '';
 
 	let removeNotes = false;
+	let removeProjects = false;
 	let preview: WipePreview | null = null;
 	let previewing = false;
 	let previewError = '';
@@ -39,8 +41,9 @@
 	let result: WipeResult | null = null;
 	let lines: WipeAnswerLines | null = null;
 
-	$: named = wordsNamed(removeNotes);
+	$: named = wordsNamed(removeNotes, removeProjects);
 	$: notesCounted = preview?.counts?.notes;
+	$: projectsCounted = preview?.counts?.projects;
 	$: allowed = canWipe({
 		exportOffered,
 		typedWipe,
@@ -52,8 +55,8 @@
 
 	onMount(loadPreview);
 
-	function wordsNamed(notes: boolean): string[] {
-		return notes ? ['notes'] : [];
+	function wordsNamed(notes: boolean, projects: boolean): string[] {
+		return [...(notes ? ['notes'] : []), ...(projects ? ['projects'] : [])];
 	}
 
 	async function downloadFirst() {
@@ -75,7 +78,7 @@
 		previewError = '';
 		typedPhrase = '';
 		try {
-			const answer = await previewWipe(userId, wordsNamed(removeNotes));
+			const answer = await previewWipe(userId, wordsNamed(removeNotes, removeProjects));
 			if (asked === previewAsked) preview = answer;
 		} catch (err: unknown) {
 			if (asked === previewAsked) previewError = parseApiError(err, 'reading what a wipe removes').message;
@@ -86,6 +89,11 @@
 
 	function toggleNotes(event: CustomEvent<boolean>) {
 		removeNotes = event.detail;
+		loadPreview();
+	}
+
+	function toggleProjects(event: CustomEvent<boolean>) {
+		removeProjects = event.detail;
 		loadPreview();
 	}
 
@@ -119,7 +127,10 @@
 <div class="oo-your-data">
 	<section class="oo-your-data-step" aria-labelledby="oo-your-data-export">
 		<h3 id="oo-your-data-export">1. Keep a copy first</h3>
-		<p>The export holds your conversations, notes, facts and settings as JSON. A wipe cannot be undone.</p>
+		<p>
+			The export holds your conversations, notes, projects, facts and settings as JSON; a project's files and
+			outputs are downloaded from the project. A wipe cannot be undone.
+		</p>
 		<div class="oo-your-data-actions">
 			<Button variant="primary" loading={exporting} on:click={downloadFirst}>Download my data</Button>
 			<Button variant="link" disabled={exportOffered} on:click={() => (exportOffered = true)}>
@@ -137,7 +148,7 @@
 				checked={removeNotes}
 				disabled={previewing || wiping}
 				description={notesCounted
-					? `${notesCounted.notes} notes and ${notesCounted.attachments} attachments` +
+					? `${counted(notesCounted.notes, 'note')} and ${counted(notesCounted.attachments, 'attachment')}` +
 						(notesCounted.disputed === null
 							? ', and the notes hidden here could not be counted'
 							: notesCounted.disputed > 0
@@ -146,9 +157,21 @@
 					: 'Your notes, their attachments and their history'}
 				on:change={toggleNotes}
 			/>
-			{#if removeNotes && preview?.notice}
-				<p class="oo-your-data-notice">{preview.notice}</p>
-			{/if}
+		{/if}
+		{#if preview?.on_request?.projects}
+			<Checkbox
+				label="Also delete my projects"
+				checked={removeProjects}
+				disabled={previewing || wiping}
+				description={projectsCounted
+					? `${counted(projectsCounted.projects, 'project')}, ${counted(projectsCounted.files, 'file')} and ` +
+						counted(projectsCounted.outputs, 'output')
+					: 'Your projects, their files, outputs and index'}
+				on:change={toggleProjects}
+			/>
+		{/if}
+		{#if named.length > 0 && preview?.notice}
+			<p class="oo-your-data-notice">{preview.notice}</p>
 		{/if}
 		<InlineError message={previewError} onRetry={loadPreview} retrying={previewing} />
 		{#if preview}
@@ -172,9 +195,9 @@
 			<p>Download your data, or choose to continue without a copy, before wiping.</p>
 		{/if}
 		<Input label={`Type "${WIPE_WORDS}" to confirm`} bind:value={typedWipe} disabled={!exportOffered || wiping} />
-		{#if removeNotes && preview?.phrase}
+		{#if named.length > 0 && preview?.phrase}
 			<Input
-				label={`Type "${preview.phrase}" to delete your notes`}
+				label={`Type "${preview.phrase}" to delete your ${named.join(' and ')}`}
 				bind:value={typedPhrase}
 				disabled={!exportOffered || wiping}
 			/>
@@ -189,7 +212,7 @@
 		<section class="oo-your-data-step" aria-labelledby="oo-your-data-answer" aria-live="polite">
 			<h3 id="oo-your-data-answer">What the wipe did</h3>
 			{#if lines.failed.length > 0}
-				<p class="oo-your-data-failed">Could not be removed:</p>
+				<p class="oo-your-data-failed">Not removed, or not overwritten:</p>
 				<ul>{#each lines.failed as line}<li>{line}</li>{/each}</ul>
 			{/if}
 			<ul>{#each lines.removed as line}<li>{line}</li>{/each}</ul>

@@ -208,7 +208,7 @@ async def export_user_data(
 async def preview_user_data_wipe(
     user_id: str,
     request: Request,
-    remove: list[str] = Query(default=[], description="Content removed only when named, by its word: notes"),
+    remove: list[str] = Query(default=[], description="Content removed only when named, by its word: notes, projects"),
     current_user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
     """What a wipe of the user's data would remove and leave; with ``remove``, the counts of what is named and the
@@ -230,7 +230,7 @@ async def preview_user_data_wipe(
 async def delete_user_data(
     user_id: str,
     request: Request,
-    remove: list[str] = Query(default=[], description="Content removed only when named, by its word: notes"),
+    remove: list[str] = Query(default=[], description="Content removed only when named, by its word: notes, projects"),
     confirm: str | None = Query(default=None, description="The phrase the preview gave for ``remove``"),
     current_user: dict = Depends(get_current_user),
 ) -> DeleteDataResponse:
