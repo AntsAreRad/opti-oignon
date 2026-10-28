@@ -380,6 +380,43 @@ class NotesBlobStore:
             return True
         return False
 
+    def forget(self, attachment_id: str) -> bool:
+        """Overwrite the blob (and a partial ``.tmp`` sibling) in place, then remove it; whether one was there
+        (``forget_blob``)."""
+        return forget_blob(self._blob_dir.parent, attachment_id)
+
+
+def _overwrite_and_remove(path: Path) -> bool:
+    """Overwrite a file's bytes in place, then remove it; whether it was there. A filesystem that writes in place no
+    longer holds them; a copy-on-write filesystem, a snapshot or a backup may. A link is refused, never followed."""
+    try:
+        fd = os.open(path, os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0))
+    except FileNotFoundError:
+        return False
+    try:
+        left = os.fstat(fd).st_size
+        block = b"\0" * 65536
+        while left > 0:
+            left -= os.write(fd, block[:min(len(block), left)])
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.unlink(path)
+    return True
+
+
+def forget_blob(root: Path | str, attachment_id: str) -> bool:
+    """A note's deletion's erasure of one attachment's blob under ``root`` (the notes' data folder):
+    the sealed file and a partial ``.tmp`` sibling, each overwritten, then removed; whether one was there. A folder
+    that is not there holds none, and is not created; a file that cannot be overwritten raises. An id that is no
+    plain file name names no blob here (the landing refuses such ids): nothing is touched for it. The bytes are
+    ciphertext under the install's key: overwriting them leaves nothing to open even where the key survives."""
+    if not attachment_id or "/" in attachment_id or "\\" in attachment_id or attachment_id in (".", ".."):
+        return False
+    folder = Path(root) / BLOB_DIRNAME
+    gone = _overwrite_and_remove(folder / (attachment_id + BLOB_SUFFIX))
+    return _overwrite_and_remove(folder / (attachment_id + BLOB_SUFFIX + ".tmp")) or gone
+
 
 # Module-level singleton with a reset for test isolation.
 _blob_store: NotesBlobStore | None = None

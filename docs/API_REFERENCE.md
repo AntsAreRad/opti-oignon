@@ -412,19 +412,36 @@ Prefix: `/api/users`
 ### GET /api/users/{user_id}/export
 
 Export all data for a user (GDPR data portability). Users can
-export their own data; admins can export any user's data.
+export their own data; admins can export any user's data. For a
+single-user install's one user it carries what the wipe removes of the
+install's stores: every conversation with its messages, and every note
+with its title, its body (as text and as its stored bytes, base64), its
+tags, the history of its edits and its attachments' kind, size, hash
+and derived text -- an attachment's bytes stay in the app, named in
+`not_covered`. `failed` names each part that could not be read -- a
+conversation the store answers nothing for, the conversations it counts
+and its listing did not reach.
 
 **Response (200):**
 
 ```json
 {
-  "user_id": "user_abc",
-  "export_date": "2026-03-20T14:30:00Z",
+  "export_metadata": {
+    "user_id": "local",
+    "exported_at": 1793000000.0,
+    "format_version": "1.3",
+    "not_covered": ["note attachments' bytes (...)", "..."],
+    "retained_by_design": ["..."],
+    "failed": []
+  },
   "conversations": [...],
+  "notes": [{"id": "...", "title": "...", "body_text": "...", "updates": [...], "attachments": [...]}],
+  "memories": [...],
   "rag_collections": [...],
-  "plugin_configs": {...},
-  "feedback": [...],
-  "settings": {...}
+  "plugin_configs": [...],
+  "plugin_reviews": [...],
+  "settings": {...},
+  "pending_writes": [...]
 }
 ```
 
@@ -451,9 +468,26 @@ log, with older frames of what was deleted, until it ends (the server's
 log says so). A copy-on-write filesystem, a snapshot or a backup may
 keep older blocks. Asked for any other name, it removes nothing
 install-wide, and it makes no knowledge base an install does not have.
-The content the user manages -- notes, projects, the knowledge base's
-documents, the coding history, skills, the garden, the plugins' data --
-is not removed. `not_covered` names every store it leaves, and why one
+The notes go only when the request names them: `remove=notes` with
+`confirm`, the phrase the preview gave (below), in single-user mode for
+the install's one user. Each note is then deleted as a note's own
+deletion does -- the row left a bare tombstone, its attachments, their
+text and blobs (overwritten), the history of its edits and the sync
+journal's copies removed --, its deletion published, so the paired
+devices forget it too when they next sync (unless a paired device's
+later edit wins), and `content_removed` counts them. A word the wipe does
+not know, or a missing phrase, answers 422; another mode or name, or a
+phrase the counts no longer give (a note came or went since the
+preview, or another note or attachment), 409; notes that cannot be read,
+503 -- each before anything is removed. A note dead here that the sync
+journal still holds alive (a paired device's deletion that lost) is
+deleted too, as the user's own deletion, and counted: the preview counts
+it as `disputed`, and the phrase's number includes it. When the sync
+journal cannot be read, `disputed` is `null`, the notice says so, and the
+wipe names those notes as left. A deletion the journal could not take is
+named as not told to the paired devices, and published by the next one. The rest of the content the user manages -- projects, the
+knowledge base's documents, the coding history, skills, the garden, the
+plugins' data -- is not removed. `not_covered` names every store it leaves, and why one
 could not be emptied or removed -- a store that cannot even be opened
 included, which stops none of the steps after it; `retained_by_design`,
 the trails kept on purpose. Every store is classified in
@@ -479,12 +513,44 @@ base is named in `not_covered`.
   "encryption_keys": true,
   "plugin_reviews": 1,
   "pending_writes": 0,
-  "not_covered": ["notes and their updates", "..."],
+  "content_removed": {"notes": 12},
+  "not_covered": ["projects store (single-user)", "..."],
   "retained_by_design": ["sandbox audit: the record of what ran, without its words", "..."]
 }
 ```
 
-**Errors:** 403 if requesting another user's data without admin role.
+**Errors:** 403 if requesting another user's data without admin role;
+409, 422 and 503 for a request that names content, as above.
+
+### GET /api/users/{user_id}/data/wipe-preview
+
+What a wipe of the user's data would remove and leave, read only:
+`removed` and `left` (labels of the inventory), `retained_by_design`,
+and, in single-user mode for the one user, `on_request` -- the content
+removed only when named, by its word. With `remove=notes`, `counts`
+(the live notes, their attachments, the notes deleted earlier whose
+residue the wipe forgets), the `phrase` the wipe asks back, and the
+`notice` about the paired devices. The phrase carries the count the user
+reads and four characters drawn from the notes and attachments counted
+(`remove 12 notes a3f9`), so the same count over other notes refuses
+too. Refusals as the wipe's.
+
+**Response (200):**
+
+```json
+{
+  "user_id": "local",
+  "single_user": true,
+  "remove": ["notes"],
+  "removed": ["run journal (opt-in record of agent runs)", "...", "notes and their updates"],
+  "left": ["projects store (single-user)", "..."],
+  "retained_by_design": ["..."],
+  "on_request": {"notes": ["notes and their updates", "note attachments (voice, images)"]},
+  "counts": {"notes": {"notes": 12, "attachments": 3, "disputed": 0, "deleted_notes": 4, "code": "a3f9"}},
+  "phrase": "remove 12 notes a3f9",
+  "notice": "Each note's deletion is published to your paired devices, ..."
+}
+```
 
 ### GET /api/users/{user_id}/plugins
 

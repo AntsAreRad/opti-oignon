@@ -29,12 +29,17 @@ KEPT = "kept"  # retained by design, named in the answer, the label saying why
 NOT_THE_USERS = "not the user's"  # never named: nothing of anyone's
 WIPES = (REMOVED, ONE_USER, NOT_COVERED, KEPT, NOT_THE_USERS)
 
+# The words a wipe's request names content by, closed: a store not covered that carries one is removed when the
+# request names it -- in single-user mode, for the install's one user, the preview's phrase repeated.
+NOTES = "notes"
+REQUESTS = (NOTES,)
+
 
 class Entry(NamedTuple):
     """One store: the label the wipe's answer uses, the files or folders as the code spells them (``*`` for one
     joined to a data folder under a name built at run time), the modules that spell or build them (relative to the
-    package), what it holds, what the wipe does with it, and the labels a failure to remove or empty it is named by
-    in the answer."""
+    package), what it holds, what the wipe does with it, the labels a failure to remove or empty it is named by in
+    the answer, and the word of ``REQUESTS`` that removes it when a request names it."""
 
     label: str
     names: tuple[str, ...]
@@ -42,6 +47,7 @@ class Entry(NamedTuple):
     holds: str
     wipe: str
     failures: tuple[str, ...] = ()
+    request: str = ""
 
 
 STORES: tuple[Entry, ...] = (
@@ -96,10 +102,12 @@ STORES: tuple[Entry, ...] = (
     Entry("the knowledge base's search log (the queries, not user-scoped)", ("rag_documents.db",),
           ("rag_store.py", "rag_dashboard.py"), WORDS, ONE_USER,
           failures=("knowledge base search log",)),
-    # -- The content the user manages: named --------------------------------------------------------------------
+    # -- The content the user manages: named, the notes removed when the request names them -----------------------
     Entry("notes and their updates", ("notes.db", "note_updates.db"),
-          ("notes/notes_store.py", "notes/note_updates_store.py"), WORDS, NOT_COVERED),
-    Entry("note attachments (voice, images)", ("notes_blobs",), ("notes/blob_store.py",), WORDS, NOT_COVERED),
+          ("notes/notes_store.py", "notes/note_updates_store.py"), WORDS, NOT_COVERED,
+          failures=("notes and their updates",), request=NOTES),
+    Entry("note attachments (voice, images)", ("notes_blobs",), ("notes/blob_store.py", "notes/notes_store.py"),
+          WORDS, NOT_COVERED, request=NOTES),
     Entry("projects store (single-user)", ("projects.db",), ("projects.py", "user_isolation.py"), WORDS,
           NOT_COVERED),
     Entry("project files and saved outputs", ("projects",), ("projects.py",), WORDS, NOT_COVERED),

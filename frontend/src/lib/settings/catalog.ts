@@ -178,7 +178,8 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
 		description: 'Backup and restore, fine-tune export and data management.',
 		groups: [
 			{ id: 'backup-restore', title: 'Backup & restore', description: 'Export and import configuration and data.', synonyms: ['backup', 'restore', 'export', 'import'], panel: 'BackupRestorePanel', space: 'workshop', section: 'backup' },
-			{ id: 'fine-tune', title: 'Fine-tune export', description: 'Export training data, track variants and A/B compare.', synonyms: ['fine-tune', 'export data', 'variants', 'a/b'], panel: 'FineTunePanel', space: 'workshop', section: 'backup' }
+			{ id: 'fine-tune', title: 'Fine-tune export', description: 'Export training data, track variants and A/B compare.', synonyms: ['fine-tune', 'export data', 'variants', 'a/b'], panel: 'FineTunePanel', space: 'workshop', section: 'backup' },
+			{ id: 'your-data', title: 'Your data', description: 'Export everything, see what a wipe removes and leaves, and erase your data.', synonyms: ['erase', 'delete my data', 'wipe', 'gdpr', 'export my data', 'delete notes'], panel: 'YourDataPanel', space: 'workshop', section: 'backup' }
 		]
 	}
 ];

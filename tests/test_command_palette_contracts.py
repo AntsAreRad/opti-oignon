@@ -1095,8 +1095,8 @@ def test_nv14_the_sources_cover_every_place_command_group_and_chat(half):
     if half == "sources":
         result = _sources()
         live = [g for g in result["groups"] if not g["retired"]]
-        assert len(result["groups"]) == 51 and len(live) == 50, (
-            f"the catalog holds 51 groups, 50 not retired: {len(result['groups'])}, {len(live)}"
+        assert len(result["groups"]) == 52 and len(live) == 51, (
+            f"the catalog holds 52 groups, 51 not retired: {len(result['groups'])}, {len(live)}"
         )
         index = {hit["id"]: hit for hit in result["index"]}
         settings = result["settings"]

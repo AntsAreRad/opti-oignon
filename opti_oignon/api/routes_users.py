@@ -91,6 +91,8 @@ class DeleteDataResponse(BaseModel):
     plugin_reviews: int = 0
     # The user's proposals waiting for review, removed so none brings wiped words back.
     pending_writes: int = 0
+    # The content removed only on request (``remove``), by its word: how many of each.
+    content_removed: dict[str, int] = {}
     # UD-03: stores the per-user wipe cannot cover today
     # (single-user / unscoped); never empty until the scoping cycle.
     not_covered: list[str] = []
@@ -202,16 +204,42 @@ async def export_user_data(
 # ---------------------------------------------------------------------------
 
 
+@router.get("/api/users/{user_id}/data/wipe-preview")
+async def preview_user_data_wipe(
+    user_id: str,
+    request: Request,
+    remove: list[str] = Query(default=[], description="Content removed only when named, by its word: notes"),
+    current_user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """What a wipe of the user's data would remove and leave; with ``remove``, the counts of what is named and the
+    phrase the wipe asks back (``user_data_manager.wipe_preview``). Reads only; whoever may wipe may preview."""
+    _check_user_mgmt_rate(request)
+
+    caller_id = current_user.get("sub", "")
+    if caller_id != user_id and current_user.get("role") != "admin":
+        raise HTTPException(403, "Cannot preview the wipe of another user's data.")
+
+    from opti_oignon.user_data_manager import WipeRefused, wipe_preview
+    try:
+        return wipe_preview(user_id, remove)
+    except WipeRefused as e:
+        raise HTTPException(e.status, e.reason)
+
+
 @router.delete("/api/users/{user_id}/data")
 async def delete_user_data(
     user_id: str,
     request: Request,
+    remove: list[str] = Query(default=[], description="Content removed only when named, by its word: notes"),
+    confirm: str | None = Query(default=None, description="The phrase the preview gave for ``remove``"),
     current_user: dict = Depends(get_current_user),
 ) -> DeleteDataResponse:
     """Cascade delete all data for a user (GDPR right to erasure).
 
     - Users can delete their own data.
     - Admins can delete any user's data.
+    - The content the user manages goes only when ``remove`` names it, in single-user mode for the install's one
+      user, with ``confirm`` the preview's phrase: refused before anything is removed otherwise (409, 422, 503).
     """
     _check_user_mgmt_rate(request)
 
@@ -219,12 +247,15 @@ async def delete_user_data(
     if caller_id != user_id and current_user.get("role") != "admin":
         raise HTTPException(403, "Cannot delete another user's data.")
 
+    from opti_oignon.user_data_manager import WipeRefused
     try:
         from opti_oignon.user_data_manager import get_user_data_deleter
         deleter = get_user_data_deleter()
         admin_id = caller_id if caller_id != user_id else None
-        result = deleter.delete_all(user_id=user_id, admin_id=admin_id)
+        result = deleter.delete_all(user_id=user_id, admin_id=admin_id, remove=remove, confirm=confirm)
         return DeleteDataResponse(**result)
+    except WipeRefused as e:
+        raise HTTPException(e.status, e.reason)
     except Exception as e:
         logger.error("Failed to delete data for user %s: %s", user_id, e)
         raise HTTPException(500, "Failed to delete user data.")

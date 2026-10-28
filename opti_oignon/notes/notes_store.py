@@ -28,7 +28,12 @@ Security posture (inherited, not invented):
   the store never interprets), so the backend stays CRDT-agnostic and note
   structure stays end-to-end private (the CRDT model).
 - Deletions are tombstones (``deleted = 1``), so a delete on one device syncs
-  safely once N.8 makes notes a Veilid record type.
+  safely once N.8 makes notes a Veilid record type -- and a tombstone keeps no
+  words: a deletion, this device's or a peer's, blanks the row to its id, user,
+  flag and times, removes its attachments with their derived text and blobs,
+  its update tail, and its versions and updates in the sync journal
+  (``forget_note``); the sweep (``sweep_dead_notes``) finishes what an
+  interrupted or older deletion left.
 
 This module is importable in isolation (the guarded-import idiom of
 canonical_store.py), so the runtime tests can load it without the fastapi /
@@ -40,11 +45,12 @@ singleton has a ``reset_notes_store`` hook for test isolation.
 from __future__ import annotations
 
 import base64
+import hashlib
 import logging
 import sqlite3
 import threading
 import uuid
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -124,6 +130,65 @@ _ORDERABLE_COLUMNS: frozenset[str] = frozenset(
 # from "field set to None" (write a NULL). Used by update_attachment so a
 # write-back that touches one column never blanks the others.
 _UNSET: Any = object()
+
+# A deletion's statements, constant strings. The tombstone it leaves holds the id, the user, the flag and its times:
+# nothing the user wrote. A tombstone an older deletion left with its words is blanked the same, its time kept.
+_KILL_NOTE = (
+    "UPDATE note SET title = '', body_crdt = x'', tags = '[]', pinned = 0, "
+    "deleted = 1, updated_at = ? WHERE id = ? AND user_id = ? AND deleted = 0"
+)
+# A peer's tombstone, landed before the sync journal's verdict: the flag alone. What the note held is forgotten
+# once the tombstone is journalled -- it won here (``forget_tombstoned``) -- and kept while it is not: it may lose.
+_FLAG_SYNCED_NOTE = "UPDATE note SET deleted = 1, updated_at = ? WHERE id = ? AND user_id = ?"
+_BLANK_DEAD_NOTE = (
+    "UPDATE note SET title = '', body_crdt = x'', tags = '[]', pinned = 0 "
+    "WHERE id = ? AND user_id = ? AND deleted = 1"
+)
+# An attachment's derived text and thumbnail go with its note's death; its row goes once its blob is gone, so a blob
+# that could not be removed stays named by a row the sweep finds.
+_BLANK_NOTE_ATTACHMENTS = (
+    "UPDATE attachment SET transcript_text = NULL, caption_text = NULL, ocr_text = NULL, thumbnail = x'' "
+    "WHERE note_id = ? AND user_id = ?"
+)
+_SELECT_NOTE_ATTACHMENTS = "SELECT id FROM attachment WHERE note_id = ? AND user_id = ? ORDER BY id"
+_DELETE_ATTACHMENT_ROW = "DELETE FROM attachment WHERE id = ? AND user_id = ?"
+_SELECT_DEAD_IDS = "SELECT id FROM note WHERE user_id = ? AND deleted = 1 ORDER BY id"
+_SELECT_DELETED = "SELECT deleted FROM note WHERE id = ? AND user_id = ?"
+
+# The update store's file, beside this one (``note_updates_store.DB_FILENAME``; spelled here so that loading this
+# store loads nothing else).
+_NOTE_UPDATES_FILENAME = "note_updates.db"
+# The blob store's folder and suffix beside this one (``blob_store.BLOB_DIRNAME``, ``BLOB_SUFFIX``).
+_BLOB_DIRNAME = "notes_blobs"
+_BLOB_SUFFIX = ".blob"
+
+
+def _absent(exc: ModuleNotFoundError, module: str) -> bool:
+    """Whether an import failed because the module, or a package it would be in, is not in this tree -- then it
+    holds nothing. A module that is there and fails to load is broken, and said."""
+    return bool(exc.name) and (exc.name == module or module.startswith(exc.name + "."))
+
+
+def _holding_appends() -> Any:
+    """The update store's process-wide append lock (``note_updates_store.holding_appends``), held while a deletion
+    commits its tombstone: every update appended before it is in the tail the deletion then prunes, and every one
+    after it finds the note dead. Nothing to hold in a tree without the update store."""
+    try:
+        from opti_oignon.notes.note_updates_store import holding_appends
+    except ModuleNotFoundError as exc:
+        if _absent(exc, "opti_oignon.notes.note_updates_store"):
+            return nullcontext()
+        raise
+    return holding_appends()
+
+
+# The attachments a peer's tombstone took off this device's manifest are kept, by note, in ``awaited_blob`` until the
+# sync journal's verdict -- in the file, so a restart does not lose them: their blobs are forgotten once the tombstone
+# is journalled (it won here) or the note is deleted here, kept while neither -- it lost, and the version that won
+# may name them again.
+_SELECT_AWAITED = "SELECT attachment_id FROM awaited_blob WHERE note_id = ? AND user_id = ? ORDER BY attachment_id"
+_DELETE_AWAITED = "DELETE FROM awaited_blob WHERE note_id = ? AND user_id = ?"
+_INSERT_AWAITED = "INSERT OR IGNORE INTO awaited_blob (note_id, attachment_id, user_id) VALUES (?, ?, ?)"
 
 
 def _now() -> str:
@@ -401,6 +466,8 @@ class NotesStore:
         conn.row_factory = sqlite3.Row
         # WAL is set outside any transaction (right after connect).
         conn.execute("PRAGMA journal_mode=WAL")
+        # What a deletion frees is overwritten, never left in the file's free pages.
+        conn.execute("PRAGMA secure_delete = ON")
         return conn
 
     @contextmanager
@@ -448,6 +515,12 @@ class NotesStore:
                     ON attachment(user_id);
                 CREATE INDEX IF NOT EXISTS idx_attachment_note
                     ON attachment(note_id);
+                CREATE TABLE IF NOT EXISTS awaited_blob (
+                    note_id TEXT NOT NULL,
+                    attachment_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL DEFAULT 'local',
+                    PRIMARY KEY (note_id, attachment_id)
+                );
                 """
             )
             # The per-item mobile-allowed flag for phone-class
@@ -522,6 +595,9 @@ class NotesStore:
         """Insert a note and return its record."""
         uid = effective_user_id(user_id, self._single_user_mode)
         rid = note_id or uuid.uuid4().hex
+        if ":" in rid:
+            # A note's updates are journalled as ``note_id:seq``: an id with a colon would share another's.
+            raise ValueError(f"a note id cannot hold ':': {rid!r}")
         ts = _now()
         tags_value = tags if tags is not None else "[]"
         record = NoteRecord(
@@ -647,21 +723,390 @@ class NotesStore:
         return record
 
     def delete_note(self, note_id: str, *, user_id: str | None = None) -> bool:
-        """Tombstone delete: set deleted=1 so the deletion syncs (CRDT-safe)."""
+        """Tombstone delete that keeps no words (``forget_note``); whether a live note died. What could not be
+        forgotten is logged, and the next sweep finishes it."""
+        died, left = self.forget_note(note_id, user_id=user_id)
+        if left:
+            logger.warning("the note %s deleted; not forgotten yet: %s", note_id, "; ".join(left))
+        return died
+
+    def forget_note(
+        self, note_id: str, *, user_id: str | None = None, sweep: bool = True
+    ) -> tuple[bool, list[str]]:
+        """Delete a note so that nothing it held stays: whether a live note died, and what could not be forgotten.
+
+        One transaction, no update appended while it commits (``_holding_appends``), leaves the tombstone sync
+        needs -- the id, the user, ``deleted = 1`` and its times, the title, body, tags and pin emptied (a dead note
+        is blanked the same) -- and empties the derived text and thumbnails of the note's attachments. After the
+        commit: the sync journal's versions of the note and every update of its body erased, the update tail and
+        checkpoint pruned, each attachment's blob overwritten and removed before its row, the log emptied, then the
+        sweep of every dead note's residue; then the tombstone published, as before, when a live note died -- or
+        when the note was dead here while the journal still holds a version of it alive (a peer's tombstone that
+        lost): this deletion is the user's own, and its tombstone out-clocks that version. A step after the commit
+        that fails is named in the list and logged, the deletion standing: the next sweep finishes it.
+        ``sweep=False`` leaves the sweep to a caller deleting many (the wipe).
+        """
         uid = effective_user_id(user_id, self._single_user_mode)
         ts = _now()
+        with _holding_appends(), self._lock, self._conn() as conn:
+            died = int(conn.execute(_KILL_NOTE, (ts, note_id, uid)).rowcount) > 0
+            if not died:
+                conn.execute(_BLANK_DEAD_NOTE, (note_id, uid))
+            conn.execute(_BLANK_NOTE_ATTACHMENTS, (note_id, uid))
+        left: list[str] = []
+        states = self._journal_states([note_id], left)
+        state = states.get(note_id) if states is not None else None
+        disputed = not died and state == "live"
+        # A deletion here whose tombstone the journal never took: the peers are told now.
+        owed = not died and state == "owed"
+        # The journal's versions go only when this deletion's tombstone follows them: a note already dead here keeps
+        # the tombstone the journal holds -- erased, no peer that had not pulled it would ever learn the deletion.
+        left += self._forget_after(note_id, uid, versions=died or disputed)
+        left += self._forget_awaited(note_id, uid)
+        if sweep:
+            left += self.sweep_dead_notes(user_id=uid)
+        if died or disputed or owed:
+            left += self._tell_peers(note_id, ts)
+        return died, left
+
+    def forget_tombstoned(self, note_id: str, *, user_id: str | None = None) -> list[str]:
+        """A note whose tombstone the sync journal now holds -- this device's own, or a peer's that won here -- if it
+        is dead in this store: its row blanked, its attachments' text emptied, then its updates in the journal, its
+        update tail, its attachments' blobs and rows, and the blobs a peer's tombstone took off its manifest
+        (``_forget_after``; the journal's tombstone stays); what could not be forgotten, named. A live note -- a
+        version that won after the tombstone -- is not touched; a store whose file is not there holds none, and is
+        not created. Hook-free (no publish): the journal asks it once its append is done."""
+        if not self._db_path.exists():
+            return []
+        uid = effective_user_id(user_id, self._single_user_mode)
+        # No update appended while the note's death is read and its row blanked: one appended before is in the
+        # tail forgotten below, one after finds the note dead (``_holding_appends``).
+        with _holding_appends(), self._lock, self._conn() as conn:
+            row = conn.execute(_SELECT_DELETED, (note_id, uid)).fetchone()
+            if row is None or not row["deleted"]:
+                return []
+            conn.execute(_BLANK_DEAD_NOTE, (note_id, uid))
+            conn.execute(_BLANK_NOTE_ATTACHMENTS, (note_id, uid))
+        return self._forget_after(note_id, uid, versions=False) + self._forget_awaited(note_id, uid)
+
+    @staticmethod
+    def _journal_states(note_ids: list[str], left: list[str]) -> dict[str, str] | None:
+        """What the sync journal holds of each of these notes (``change_feed.note_states``: ``tombstone``, ``live``,
+        ``owed``, ``none``, ``absent``); None when it cannot be read, said in ``left``. A tree without the journal
+        holds nothing: ``absent``."""
+        try:
+            from opti_oignon.veilid.change_feed import note_states
+
+            return note_states(note_ids)
+        except ModuleNotFoundError as exc:
+            if _absent(exc, "opti_oignon.veilid.change_feed"):
+                return {note_id: "absent" for note_id in note_ids}
+            left.append(f"sync journal (not read: {type(exc).__name__})")
+        except Exception as exc:  # noqa: BLE001 - what stays is said
+            logger.warning("the sync journal could not be read for the dead notes: %s", exc)
+            left.append(f"sync journal (not read: {type(exc).__name__})")
+        return None
+
+    def _tell_peers(self, note_id: str, ts: str) -> list[str]:
+        """Publish the note's tombstone; when the journal, which exists, does not hold it after -- the framework
+        absent, or the publication failed --, the peers were not told: said, and owed (``note_states``), so the next
+        deletion or the sweep publishes it."""
+        _sync_publish_note(note_id, None, deleted=True, updated_at=ts)
+        after = self._journal_states([note_id], [])
+        if after is None or after.get(note_id) in ("tombstone", "absent"):
+            return []
+        return [f"paired devices (not told of the note {note_id}'s deletion: the sync journal did not take its "
+                "tombstone; the next deletion or wipe tells them)"]
+
+    def _forget_after(self, note_id: str, uid: str, *, versions: bool) -> list[str]:
+        """What a note's death leaves outside its row, forgotten: its versions (``versions``: this device's own
+        deletion, whose tombstone is minted after) and its updates in the sync journal, its update tail, its
+        attachments' blobs then their rows, the log; each step that fails named. A store whose module this tree
+        does not have holds nothing of the note; one whose file is not there holds none, and is not created."""
+        left: list[str] = []
+        try:
+            from opti_oignon.veilid.change_feed import forget_note as _forget_in_feed
+
+            _forget_in_feed(note_id, versions=versions)
+        except ModuleNotFoundError as exc:
+            if not _absent(exc, "opti_oignon.veilid.change_feed"):
+                left.append(f"sync journal (not forgotten: {type(exc).__name__})")
+        except Exception as exc:  # noqa: BLE001 - what stays is said
+            logger.warning("note %s deleted; the sync journal could not forget it: %s", note_id, exc)
+            left.append(f"sync journal (not forgotten: {type(exc).__name__})")
+        left += self._forget_updates([note_id], uid)
         with self._lock, self._conn() as conn:
-            cur = conn.execute(
-                "UPDATE note SET deleted = 1, updated_at = ? "
-                "WHERE id = ? AND user_id = ? AND deleted = 0",
-                (ts, note_id, uid),
-            )
-            changed = int(cur.rowcount)
-        # Journal the tombstone, best-effort, only when a live row
-        # actually flipped (tombstone-wins downstream; a repeat is a no-op).
-        if changed > 0:
-            _sync_publish_note(note_id, None, deleted=True, updated_at=ts)
-        return changed > 0
+            attachments = [str(r[0]) for r in conn.execute(_SELECT_NOTE_ATTACHMENTS, (note_id, uid)).fetchall()]
+        left += self._forget_attachments(attachments, uid)
+        self._empty_log()
+        return left
+
+    def _forget_updates(self, note_ids: list[str], uid: str) -> list[str]:
+        """The update tails and checkpoints of these dead notes pruned, through the update store beside this one;
+        each that fails named."""
+        if not note_ids or not (self._db_path.parent / _NOTE_UPDATES_FILENAME).exists():
+            return []
+        try:
+            from opti_oignon.notes.note_updates_store import NoteUpdatesStore
+
+            updates = NoteUpdatesStore(root=self._db_path.parent, single_user_mode=self._single_user_mode)
+        except ModuleNotFoundError as exc:
+            if _absent(exc, "opti_oignon.notes.note_updates_store"):
+                return []
+            return [f"note updates (not pruned: {type(exc).__name__})"]
+        except Exception as exc:  # noqa: BLE001 - what stays is said
+            logger.warning("the note updates store could not be opened to prune dead notes: %s", exc)
+            return [f"note updates (not pruned: {type(exc).__name__})"]
+        left = []
+        for note_id in note_ids:
+            try:
+                updates.forget_dead_note(note_id, user_id=uid)
+            except Exception as exc:  # noqa: BLE001 - what stays is said
+                logger.warning("the update tail of the dead note %s could not be pruned: %s", note_id, exc)
+                left.append(f"note updates of {note_id} (not pruned: {type(exc).__name__})")
+        return left
+
+    def _forget_awaited(self, note_id: str, uid: str) -> list[str]:
+        """The blobs a peer's tombstone took off the note's manifest here (``awaited_blob``), overwritten and removed
+        now that the note is deleted for good, and their ids let go; what could not be, named and kept."""
+        with self._lock, self._conn() as conn:
+            awaited = [str(r[0]) for r in conn.execute(_SELECT_AWAITED, (note_id, uid)).fetchall()]
+        if not awaited:
+            return []
+        left = self._forget_blobs(awaited)
+        if not left:
+            with self._lock, self._conn() as conn:
+                conn.execute(_DELETE_AWAITED, (note_id, uid))
+        return left
+
+    def _forget_blobs(self, attachment_ids: list[str]) -> list[str]:
+        """The blobs of attachments whose rows are already gone (a peer's tombstone dropped them), overwritten and
+        removed, unless a row names one again; each that could not be, named."""
+        if not attachment_ids:
+            return []
+        try:
+            from opti_oignon.notes.blob_store import forget_blob
+        except ModuleNotFoundError as exc:
+            if _absent(exc, "opti_oignon.notes.blob_store"):
+                return []
+            return [f"note attachments' blobs (not removed: {type(exc).__name__})"]
+        with self._lock, self._conn() as conn:
+            named = {str(r[0]) for r in conn.execute("SELECT id FROM attachment").fetchall()}
+        left = []
+        for aid in attachment_ids:
+            if aid in named:
+                continue
+            try:
+                forget_blob(self._db_path.parent, aid)
+            except Exception as exc:  # noqa: BLE001 - what stays is said
+                logger.warning("the blob %s of a dead note could not be removed: %s", aid, exc)
+                left.append(f"note attachment {aid} (blob not removed: {type(exc).__name__})")
+        return left
+
+    def _forget_attachments(self, attachment_ids: list[str], uid: str) -> list[str]:
+        """Each attachment's blob overwritten and removed, then its row; one whose blob could not be keeps its row,
+        named, for the next sweep."""
+        if not attachment_ids:
+            return []
+        try:
+            from opti_oignon.notes.blob_store import forget_blob
+        except ModuleNotFoundError as exc:
+            if not _absent(exc, "opti_oignon.notes.blob_store"):
+                return [f"note attachments (not removed: {type(exc).__name__})"]
+            forget_blob = None
+        left = []
+        for aid in attachment_ids:
+            try:
+                if forget_blob is not None:
+                    forget_blob(self._db_path.parent, aid)
+                with self._lock, self._conn() as conn:
+                    conn.execute(_DELETE_ATTACHMENT_ROW, (aid, uid))
+            except Exception as exc:  # noqa: BLE001 - what stays is said
+                logger.warning("the attachment %s of a dead note could not be removed: %s", aid, exc)
+                left.append(f"note attachment {aid} (not removed: {type(exc).__name__})")
+        return left
+
+    def sweep_dead_notes(self, *, user_id: str | None = None) -> list[str]:
+        """Forget what every dead note still holds -- a tombstone with words (a deletion made before these rules),
+        attachments, an update tail, updates in the sync journal -- unless the journal still holds a version of it
+        alive: a peer's tombstone that landed here and then lost, the note alive everywhere else, is never taken for
+        a deletion (it waits for the user's own, or for a version that brings it back). What could not be forgotten,
+        named; a journal that cannot be read leaves every dead note as it is, said. A live note is never touched.
+        Idempotent and cheap when nothing is left; each deletion runs it, so what an older or an interrupted
+        deletion left goes at the next one."""
+        uid = effective_user_id(user_id, self._single_user_mode)
+        with self._lock, self._conn() as conn:
+            dead = [str(r[0]) for r in conn.execute(_SELECT_DEAD_IDS, (uid,)).fetchall()]
+        if not dead:
+            return []
+        left: list[str] = []
+        states = self._journal_states(dead, left)
+        if states is None:
+            return left
+        settled = [note_id for note_id in dead if states.get(note_id) != "live"]
+        # What an earlier deletion could not tell the peers, told now.
+        for note_id in settled:
+            if states.get(note_id) == "owed":
+                left += self._tell_peers(note_id, _now())
+        if not settled:
+            return left
+        attachments: list[str] = []
+        with self._lock, self._conn() as conn:
+            for note_id in settled:
+                conn.execute(_BLANK_DEAD_NOTE, (note_id, uid))
+                conn.execute(_BLANK_NOTE_ATTACHMENTS, (note_id, uid))
+                attachments += [str(r[0]) for r in conn.execute(_SELECT_NOTE_ATTACHMENTS, (note_id, uid)).fetchall()]
+        try:
+            from opti_oignon.veilid.change_feed import forget_dead_notes
+
+            forget_dead_notes(settled)
+        except ModuleNotFoundError as exc:
+            if not _absent(exc, "opti_oignon.veilid.change_feed"):
+                left.append(f"sync journal (dead notes not forgotten: {type(exc).__name__})")
+        except Exception as exc:  # noqa: BLE001 - what stays is said
+            logger.warning("the sync journal could not forget the dead notes: %s", exc)
+            left.append(f"sync journal (dead notes not forgotten: {type(exc).__name__})")
+        held = self._updated_notes(uid)
+        if held is None:
+            left.append("note updates (dead notes not pruned: the store could not be read)")
+        else:
+            left += self._forget_updates(sorted(held & set(settled)), uid)
+        left += self._forget_attachments(attachments, uid)
+        for note_id in settled:
+            left += self._forget_awaited(note_id, uid)
+        self._empty_log()
+        return left
+
+    def live_ids(self, *, user_id: str | None = None) -> list[str]:
+        """Every live note's id, oldest first."""
+        uid = effective_user_id(user_id, self._single_user_mode)
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT id FROM note WHERE user_id = ? AND deleted = 0 ORDER BY created_at, id",
+                (uid,),
+            ).fetchall()
+        return [str(r[0]) for r in rows]
+
+    def counts(self, *, user_id: str | None = None) -> dict[str, int]:
+        """What the wipe's preview counts: the live notes, their attachments, the notes dead here that the sync
+        journal holds alive (``disputed``: hidden here, alive on the paired devices -- the wipe deletes them too; None
+        when the journal cannot be read), and the dead notes (whose tombstones stay, and whose residue the wipe
+        forgets)."""
+        uid = effective_user_id(user_id, self._single_user_mode)
+        with self._lock, self._conn() as conn:
+            live = conn.execute(
+                "SELECT COUNT(*) FROM note WHERE user_id = ? AND deleted = 0", (uid,)
+            ).fetchone()[0]
+            dead = conn.execute(
+                "SELECT COUNT(*) FROM note WHERE user_id = ? AND deleted = 1", (uid,)
+            ).fetchone()[0]
+            attachments = conn.execute(
+                "SELECT COUNT(*) FROM attachment WHERE user_id = ? AND note_id IN "
+                "(SELECT id FROM note WHERE user_id = ? AND deleted = 0)",
+                (uid, uid),
+            ).fetchone()[0]
+        disputed = self.disputed_ids(user_id=uid)
+        return {"notes": int(live), "attachments": int(attachments),
+                "disputed": len(disputed) if disputed is not None else None, "deleted_notes": int(dead)}
+
+    def fingerprint(self, *, user_id: str | None = None) -> str:
+        """Four hexadecimal characters drawn from every live note's id and its attachments' ids, and from the
+        disputed notes' ids: the wipe's phrase carries them, so a note or an attachment that came or went since its
+        preview -- the count unchanged -- refuses the wipe."""
+        uid = effective_user_id(user_id, self._single_user_mode)
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT note.id, attachment.id FROM note LEFT JOIN attachment "
+                "ON attachment.note_id = note.id AND attachment.user_id = note.user_id "
+                "WHERE note.user_id = ? AND note.deleted = 0 ORDER BY note.id, attachment.id",
+                (uid,),
+            ).fetchall()
+        disputed = self.disputed_ids(user_id=uid)
+        seen = "\n".join([f"{r[0]}:{r[1] or ''}" for r in rows]
+                         + ([f"{note_id}:disputed" for note_id in disputed] if disputed is not None else ["unread"]))
+        return hashlib.sha256(seen.encode("utf-8")).hexdigest()[:4]
+
+    def disputed_ids(self, *, user_id: str | None = None) -> list[str] | None:
+        """The notes dead here that the sync journal still holds alive -- a peer's tombstone that landed and then
+        lost: the wipe deletes them as the user's own deletion does, publishing a tombstone that out-clocks the
+        version alive. None when the journal cannot be read: never taken for none."""
+        uid = effective_user_id(user_id, self._single_user_mode)
+        with self._lock, self._conn() as conn:
+            dead = [str(r[0]) for r in conn.execute(_SELECT_DEAD_IDS, (uid,)).fetchall()]
+        if not dead:
+            return []
+        states = self._journal_states(dead, [])
+        if states is None:
+            return None
+        return [note_id for note_id in dead if states.get(note_id) == "live"]
+
+    def forget_orphan_blobs(self, *, before: float | None = None) -> list[str]:
+        """Every blob in the folder beside this store that no attachment row names, overwritten and removed -- what a
+        deletion made before these rules, or a peer's tombstone, left -- each that could not be, named. The wipe runs
+        it once every note is dead, with ``before`` its own start: a blob written since -- an upload in flight, its
+        row not yet written -- is not one."""
+        folder = self._db_path.parent / _BLOB_DIRNAME
+        if not folder.is_dir():
+            return []
+        with self._lock, self._conn() as conn:
+            named = {str(r[0]) for r in conn.execute("SELECT id FROM attachment").fetchall()}
+        try:
+            from opti_oignon.notes.blob_store import forget_blob
+        except ModuleNotFoundError as exc:
+            if _absent(exc, "opti_oignon.notes.blob_store"):
+                return []
+            return [f"note attachments' blobs (not removed: {type(exc).__name__})"]
+        left = []
+        stems: dict[str, list[Path]] = {}
+        for path in sorted(folder.iterdir()):
+            name = path.name
+            stem = name[:-len(_BLOB_SUFFIX)] if name.endswith(_BLOB_SUFFIX) else (
+                name[:-len(_BLOB_SUFFIX + ".tmp")] if name.endswith(_BLOB_SUFFIX + ".tmp") else None)
+            if stem and stem not in named:
+                stems.setdefault(stem, []).append(path)
+        for stem, paths in stems.items():
+            try:
+                # A blob or its partial file written since the wipe began is an upload in flight.
+                if before is not None and any(p.stat().st_mtime >= before for p in paths if p.exists()):
+                    continue
+                forget_blob(self._db_path.parent, stem)
+            except Exception as exc:  # noqa: BLE001 - what stays is said
+                logger.warning("the blob %s no note names could not be removed: %s", stem, exc)
+                left.append(f"note attachment {stem} (blob not removed: {type(exc).__name__})")
+        return left
+
+    def _updated_notes(self, uid: str) -> set[str] | None:
+        """The notes the update store beside this one holds anything of; None when it cannot be read."""
+        if not (self._db_path.parent / _NOTE_UPDATES_FILENAME).exists():
+            return set()
+        try:
+            from opti_oignon.notes.note_updates_store import NoteUpdatesStore
+
+            return NoteUpdatesStore(root=self._db_path.parent,
+                                    single_user_mode=self._single_user_mode).notes_with_updates(user_id=uid)
+        except ModuleNotFoundError as exc:
+            return set() if _absent(exc, "opti_oignon.notes.note_updates_store") else None
+        except Exception as exc:  # noqa: BLE001 - what stays is said
+            logger.warning("the note updates store could not be read for the dead notes: %s", exc)
+            return None
+
+    def _empty_log(self) -> None:
+        """Empty the write-ahead log after a deletion: its older frames still hold what the deletion blanked. Never
+        waits: a read in progress keeps the log, said, until the next deletion."""
+        try:
+            conn = _safe_connect(self._db_path, check_same_thread=False)
+            try:
+                conn.execute("PRAGMA busy_timeout = 0")
+                busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+            logger.warning("notes: a note deleted; the write-ahead log could not be emptied (%s: %s)",
+                           type(exc).__name__, exc)
+            return
+        if busy:
+            logger.warning("notes: a note deleted; a read in progress keeps the write-ahead log, whose older frames "
+                           "hold what the deletion blanked, until the next deletion")
 
     def apply_synced_note(
         self,
@@ -691,52 +1136,35 @@ class NotesStore:
             regress it.
 
         A ``deleted`` record tombstones (``deleted = 1``), CRDT-safe, never a
-        hard delete, so the deletion converges and tombstone-wins downstream.
+        hard delete, so the deletion converges and tombstone-wins downstream --
+        and it forgets as this device's own deletion does (``forget_note``),
+        hook-free: the row blanked, the attachments, blobs, update tail and the
+        journal's updates of the note gone; the peer's tombstone itself is
+        journalled after, by the round. A version that brings a dead note back
+        (an edit that won under last-writer-wins) lands as a creation: its body
+        seeded from the payload, the one here being gone.
         Idempotent (INSERT/UPDATE by id) and fail-secure (False on a malformed
         payload or any write error, never raising into the round). Scoped to the
         local user via the ``effective_user_id`` pattern; the note id is the
         record id (the note payload does not carry it).
         """
         try:
-            if not isinstance(note_id, str) or not note_id:
+            if not isinstance(note_id, str) or not note_id or ":" in note_id:
+                # A note's updates are journalled as ``note_id:seq``: an id with a colon would share another's.
                 return False
             if not deleted and not isinstance(payload, dict):
                 return False
             uid = effective_user_id(None, self._single_user_mode)
             ts = updated_at if isinstance(updated_at, str) and updated_at else _now()
+            if deleted:
+                return self._apply_synced_tombstone(note_id, uid, ts)
             with self._lock, self._conn() as conn:
-                exists = (
-                    conn.execute(
-                        "SELECT 1 FROM note WHERE id = ? AND user_id = ?",
-                        (note_id, uid),
-                    ).fetchone()
-                    is not None
-                )
-
-                if deleted:
-                    if exists:
-                        conn.execute(
-                            "UPDATE note SET deleted = 1, updated_at = ? "
-                            "WHERE id = ? AND user_id = ?",
-                            (ts, note_id, uid),
-                        )
-                    else:
-                        # Record the tombstone even for a note never seen here,
-                        # so a later out-of-order non-tombstone cannot silently
-                        # resurrect it; mobile_allowed stays the secure default.
-                        conn.execute(
-                            "INSERT INTO note "
-                            "(id, user_id, title, body_crdt, tags, pinned, "
-                            "created_at, updated_at, deleted) "
-                            "VALUES (?, ?, '', x'', '[]', 0, ?, ?, 1)",
-                            (note_id, uid, ts, ts),
-                        )
-                    # A tombstoned note drops its attachment manifest too.
-                    conn.execute(
-                        "DELETE FROM attachment WHERE note_id = ? AND user_id = ?",
-                        (note_id, uid),
-                    )
-                    return True
+                held = conn.execute(
+                    "SELECT deleted FROM note WHERE id = ? AND user_id = ?",
+                    (note_id, uid),
+                ).fetchone()
+                exists = held is not None and not held["deleted"]
+                forgotten = held is not None and bool(held["deleted"])
 
                 title = payload.get("title")
                 if not isinstance(title, str):
@@ -748,8 +1176,8 @@ class NotesStore:
 
                 if exists:
                     # Metadata only: body_crdt (CRDT, owned by NOTE_UPDATE) and
-                    # mobile_allowed (N9-D3) are deliberately untouched. deleted
-                    # is cleared so a later edit resurrects a tombstoned note.
+                    # mobile_allowed (N9-D3) are deliberately untouched. A dead
+                    # note comes back through the creation branch below.
                     conn.execute(
                         "UPDATE note SET title = ?, tags = ?, pinned = ?, "
                         "deleted = 0, updated_at = ? WHERE id = ? AND user_id = ?",
@@ -766,14 +1194,23 @@ class NotesStore:
                             body = base64.b64decode(body_b64)
                         except Exception:
                             body = b""
-                    # mobile_allowed omitted -> schema default 0 (secure OFF).
-                    conn.execute(
-                        "INSERT INTO note "
-                        "(id, user_id, title, body_crdt, tags, pinned, "
-                        "created_at, updated_at, deleted) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
-                        (note_id, uid, title, body, tags, pinned, created_at, ts),
-                    )
+                    if forgotten:
+                        # A dead note brought back by a version that won: as a creation, its body seeded -- the
+                        # deletion left none here; mobile_allowed untouched (N9-D3).
+                        conn.execute(
+                            "UPDATE note SET title = ?, body_crdt = ?, tags = ?, pinned = ?, "
+                            "created_at = ?, deleted = 0, updated_at = ? WHERE id = ? AND user_id = ?",
+                            (title, body, tags, pinned, created_at, ts, note_id, uid),
+                        )
+                    else:
+                        # mobile_allowed omitted -> schema default 0 (secure OFF).
+                        conn.execute(
+                            "INSERT INTO note "
+                            "(id, user_id, title, body_crdt, tags, pinned, "
+                            "created_at, updated_at, deleted) "
+                            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0)",
+                            (note_id, uid, title, body, tags, pinned, created_at, ts),
+                        )
 
                 # Reconcile the eager vault manifest to the authoritative set:
                 # UPSERT each entry (no blob bytes -- fetched on demand -- and
@@ -788,7 +1225,8 @@ class NotesStore:
                         continue
                     aid = a.get("id")
                     kind = a.get("kind")
-                    if not isinstance(aid, str) or not aid:
+                    if not isinstance(aid, str) or not aid or "/" in aid or "\\" in aid or aid in (".", ".."):
+                        # An attachment's id names its blob's file: one that is no plain file name is refused.
                         continue
                     if kind not in ATTACHMENT_KINDS:
                         continue
@@ -832,6 +1270,7 @@ class NotesStore:
                             thumb,
                         ),
                     )
+                released: list[str] = []
                 for r in conn.execute(
                     "SELECT id FROM attachment WHERE note_id = ? AND user_id = ?",
                     (note_id, uid),
@@ -841,7 +1280,16 @@ class NotesStore:
                             "DELETE FROM attachment WHERE id = ? AND user_id = ?",
                             (r[0], uid),
                         )
-                return True
+                        released.append(str(r[0]))
+                # The attachments a losing tombstone took off the manifest that this version names no more.
+                released += [str(r[0]) for r in conn.execute(_SELECT_AWAITED, (note_id, uid)).fetchall()
+                             if r[0] not in seen]
+                conn.execute(_DELETE_AWAITED, (note_id, uid))
+            # An attachment the version no longer names keeps no words here: its blob goes with its row.
+            left = self._forget_blobs(released)
+            if left:
+                logger.warning("a note's version landed; not forgotten yet: %s", "; ".join(left))
+            return True
         except Exception:
             logger.warning(
                 "veilid sync apply failed for a note (no domain change)",
@@ -874,6 +1322,33 @@ class NotesStore:
         )
 
     # Notes -- the per-item mobile-allowed flag
+
+    def _apply_synced_tombstone(self, note_id: str, uid: str, ts: str) -> bool:
+        """A peer's tombstone, landed before the sync journal's verdict (the round writes a store first): the flag,
+        or a tombstone recorded for a note never seen here, so a later out-of-order non-tombstone cannot silently
+        resurrect it; the attachment manifest dropped, its ids kept (``awaited_blob``) until the verdict. Nothing else:
+        the tombstone may lose to a version made here after it. Once the journal holds it -- it won --
+        ``forget_tombstoned`` forgets the note; while it does not, the sweep leaves the note as it is. Hook-free (no
+        publish). mobile_allowed keeps the secure default."""
+        with self._lock, self._conn() as conn:
+            dropped = [str(r[0]) for r in conn.execute(_SELECT_NOTE_ATTACHMENTS, (note_id, uid)).fetchall()]
+            killed = conn.execute(_FLAG_SYNCED_NOTE, (ts, note_id, uid)).rowcount
+            if not killed:
+                conn.execute(
+                    "INSERT INTO note "
+                    "(id, user_id, title, body_crdt, tags, pinned, "
+                    "created_at, updated_at, deleted) "
+                    "VALUES (?, ?, '', x'', '[]', 0, ?, ?, 1)",
+                    (note_id, uid, ts, ts),
+                )
+            # A tombstoned note drops its attachment manifest too; the ids are kept for the verdict.
+            conn.execute(
+                "DELETE FROM attachment WHERE note_id = ? AND user_id = ?",
+                (note_id, uid),
+            )
+            for aid in dropped:
+                conn.execute(_INSERT_AWAITED, (note_id, aid, uid))
+        return True
 
     def set_mobile_allowed(
         self, note_id: str, allowed: bool, *, user_id: str | None = None
@@ -1121,3 +1596,13 @@ def get_notes_store() -> NotesStore:
 def reset_notes_store() -> None:
     global _store
     _store = None
+
+
+def forget_tombstoned(note_id: str) -> list[str]:
+    """The sync journal now holds the note's tombstone: the process's notes store, if it opened one, forgets what it
+    still holds of the note when it is dead there (``NotesStore.forget_tombstoned``); a store not opened in this
+    process is not asked -- its next sweep does it."""
+    store = _store
+    if store is None:
+        return []
+    return store.forget_tombstoned(note_id)

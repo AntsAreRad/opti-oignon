@@ -207,6 +207,24 @@ def _get_knowledge_base_searches() -> Any:
         return None
 
 
+def _absent(error: ModuleNotFoundError, module: str) -> bool:
+    """Whether an import failed because the module, or a package it would be in, is not in this tree -- then it holds
+    nothing; a module that is there and fails to load is broken, and its caller names it."""
+    return bool(error.name) and (error.name == module or module.startswith(error.name + "."))
+
+
+def _get_notes_store() -> Any:
+    """The notes store: every note, its attachments' manifest and their derived text, the whole install's (built
+    single-user). None when this tree has no notes; one that is there and cannot be loaded or opened raises."""
+    try:
+        from opti_oignon.notes.notes_store import get_notes_store
+    except ModuleNotFoundError as e:
+        if _absent(e, "opti_oignon.notes.notes_store"):
+            return None
+        raise
+    return get_notes_store()
+
+
 def _single_user() -> bool:
     """Whether the install runs for one user, by the auth manager's own rule -- multi-user when it cannot be read.
     Then every install-wide store is that one user's, and the wipe removes it."""
@@ -270,8 +288,8 @@ def _get_run_journal() -> Any:
 _RAG_USER_PREFIX = "user_"
 
 # Every store the package keeps is classified in ``store_inventory`` (what it holds, what the wipe does with it),
-# which a census keeps complete against the code: the three lists below are its derivation, in its order, and a
-# contract holds them equal to it. They are written out here so that loading the wipe loads nothing else.
+# which a census keeps complete against the code: the lists below are its derivation, in its order, and contracts
+# hold them equal to it. They are written out here so that loading the wipe loads nothing else.
 #
 # Stores a wipe does not remove for the user it is asked for: named in the answer, so it never implies more than it
 # did. In single-user mode, for the install's one user, those of the next list leave it.
@@ -340,11 +358,32 @@ WIPE_SINGLE_USER = (
     "the knowledge base's search log (the queries, not user-scoped)",
 )
 
+# Stores the wipe removes only when the request names them, by the word it uses: in single-user mode, for the
+# install's one user, after the preview's phrase is repeated (``wipe_preview``). Named as not covered otherwise.
+WIPE_WHEN_NAMED = {
+    "notes": (
+        "notes and their updates",
+        "note attachments (voice, images)",
+    ),
+}
+
+# Stores every wipe removes for the user it is asked for, in any mode: what the preview says goes.
+WIPE_REMOVED = (
+    "run journal (opt-in record of agent runs)",
+    "facts and their vectors (the vector store's namespace of the facts)",
+    "pending writes (proposals waiting for the user)",
+    "settings and encryption key salts",
+    "plugin settings",
+    "plugin reviews",
+)
+
 # Stores the export leaves out though the wipe covers them. The run journal
 # keeps the user's typed words sealed under the retention they consented to:
 # an export would be a copy outside both. The wipe removes it whole.
 EXPORT_NOT_COVERED = (
     "run journal (opt-in record of agent runs; wiped with the user's data, never exported)",
+    "note attachments' bytes (each attachment's kind, size, hash and derived text are exported; its bytes are "
+    "downloaded from its note)",
 )
 
 # Stores deliberately RETAINED on a per-user wipe. Audit trails are accountability records; erasing them on request
@@ -355,6 +394,104 @@ WIPE_RETAINED_BY_DESIGN = (
     "admin audit log (accountability trail)",
     "audit chain (tamper-evident security trail)",
 )
+
+
+# ---------------------------------------------------------------------------
+# The wipe's request: what it removes only when named
+# ---------------------------------------------------------------------------
+
+# What the preview says to the user about the paired devices, word for word in the panel.
+NOTES_NOTICE = ("Each note's deletion is published to your paired devices, which forget it too when they next sync; "
+                "one the sync journal cannot take now is named, and published at the next deletion. "
+                "Export your data first to keep a copy.")
+# Said beside it when the notes hidden here cannot be counted.
+NOTES_UNREAD_NOTICE = ("The sync journal cannot be read: the notes hidden here that a paired device still shows are "
+                       "not counted, and a wipe now would leave them.")
+
+
+class WipeRefused(Exception):
+    """A wipe, or its preview, refused before anything is removed: ``status`` is what the route answers (409: not for
+    this install or this name, or the preview's counts have moved; 422: a word the wipe does not know, or the phrase
+    missing; 503: what the request names cannot be read), ``reason`` says why."""
+
+    def __init__(self, status: int, reason: str) -> None:
+        super().__init__(reason)
+        self.status = status
+        self.reason = reason
+
+
+def _named(remove: Any) -> tuple[str, ...]:
+    """The words a request names, each once, sorted; a word the wipe does not remove on request refuses (422)."""
+    words = tuple(sorted({str(word).strip() for word in (remove or ()) if str(word).strip()}))
+    unknown = [word for word in words if word not in WIPE_WHEN_NAMED]
+    if unknown:
+        raise WipeRefused(422, f"the wipe removes nothing on request called {', '.join(unknown)}; it knows "
+                               f"{', '.join(sorted(WIPE_WHEN_NAMED))}")
+    return words
+
+
+def _for_the_one_user(user_id: str, words: tuple[str, ...]) -> bool:
+    """Whether the wipe is for a single-user install's one user; a request that names content refuses (409)
+    otherwise: that content is the install's, never one name's among others."""
+    single = _single_user() and _the_one_user(user_id)
+    if words and not single:
+        raise WipeRefused(409, f"{', '.join(words)}: the install's, removed only for a single-user install's one "
+                               "user")
+    return single
+
+
+def _counted(words: tuple[str, ...]) -> dict[str, dict[str, int]]:
+    """What each named word holds now, as the preview counts it; one that cannot be read refuses (503)."""
+    counts: dict[str, dict[str, int]] = {}
+    if "notes" in words:
+        try:
+            store = _get_notes_store()
+            counts["notes"] = ({**store.counts(), "code": store.fingerprint()} if store is not None
+                               else {"notes": 0, "attachments": 0, "disputed": 0, "deleted_notes": 0, "code": ""})
+        except Exception as e:  # noqa: BLE001 - said, and nothing is removed
+            raise WipeRefused(503, f"the notes cannot be read: {type(e).__name__}; nothing removed") from e
+    return counts
+
+
+def _phrase(counts: dict[str, dict[str, Any]]) -> str:
+    """The phrase the user repeats to confirm, binding what the preview counted: ``remove 12 notes a3f9`` -- the
+    count the user reads, and four characters drawn from the notes and attachments counted, so a note that came
+    while another went, the count unchanged, refuses too."""
+    parts = []
+    if "notes" in counts:
+        # The notes the wipe deletes: those shown here, and those hidden here that a paired device still shows.
+        n = counts["notes"]["notes"] + (counts["notes"].get("disputed") or 0)
+        parts.append(f"{n} note" + ("" if n == 1 else "s") + (f" {counts['notes']['code']}"
+                                                             if counts["notes"].get("code") else ""))
+    return "remove " + " and ".join(parts)
+
+
+def wipe_preview(user_id: str, remove: Any = ()) -> dict[str, Any]:
+    """What a wipe of ``user_id`` would remove and leave, with ``remove`` naming the content it removes only on
+    request: the labels of each, the counts of what is named, the phrase the wipe asks back, and what the paired
+    devices are told. Reads only. Refuses (``WipeRefused``) as the wipe itself would."""
+    words = _named(remove)
+    single = _for_the_one_user(user_id, words)
+    removed = [*WIPE_REMOVED, *(WIPE_SINGLE_USER if single else ()),
+               *(label for word in words for label in WIPE_WHEN_NAMED[word])]
+    preview: dict[str, Any] = {
+        "user_id": user_id,
+        "single_user": single,
+        "remove": list(words),
+        "removed": removed,
+        "left": [label for label in WIPE_NOT_COVERED if label not in removed],
+        "retained_by_design": list(WIPE_RETAINED_BY_DESIGN),
+        "on_request": {word: list(labels) for word, labels in WIPE_WHEN_NAMED.items()} if single else {},
+    }
+    if words:
+        counts = _counted(words)
+        preview["counts"] = counts
+        preview["phrase"] = _phrase(counts)
+        if "notes" in words:
+            preview["notice"] = NOTES_NOTICE
+            if counts["notes"].get("disputed") is None:
+                preview["notice"] += " " + NOTES_UNREAD_NOTICE
+    return preview
 
 
 def user_collection_name(user_id: str, collection_name: str) -> str:
@@ -419,6 +556,11 @@ class UserDataExporter:
     def export(self, user_id: str) -> dict[str, Any]:
         """Export all data for a user.
 
+        For a single-user install's one user, the export carries what the wipe removes of the install's stores --
+        every conversation with its messages, every note with its updates and its attachments' manifest -- so the
+        copy offered before a wipe holds what it deletes. ``failed`` names each part that could not be read; its
+        list in the export is then empty, never taken for an empty store.
+
         Args:
             user_id: The user whose data to export.
 
@@ -426,18 +568,29 @@ class UserDataExporter:
             Dict containing all user data, suitable for JSON serialization.
         """
         export_time = time.time()
+        single = _single_user() and _the_one_user(user_id)
+        failed: list[str] = []
+        carried = ["conversations (store not user-scoped)", "artifacts (stored in conversation metadata)",
+                   *WIPE_WHEN_NAMED["notes"]] if single else []
+        left = [label for label in [*WIPE_NOT_COVERED, *EXPORT_NOT_COVERED] if label not in carried]
+        if not single:
+            left.remove(EXPORT_NOT_COVERED[1])
         data: dict[str, Any] = {
             "export_metadata": {
                 "user_id": user_id,
                 "exported_at": export_time,
                 # 1.1: adds plugin_reviews and retained_by_design.
                 # 1.2: adds pending_writes.
-                "format_version": "1.2",
-                "not_covered": [*WIPE_NOT_COVERED, *EXPORT_NOT_COVERED],
+                # 1.3: adds notes, the one user's conversations, and failed.
+                "format_version": "1.3",
+                "not_covered": left,
                 # Audit trails survive a wipe by design.
                 "retained_by_design": list(WIPE_RETAINED_BY_DESIGN),
+                "failed": failed,
             },
-            "conversations": self._export_conversations(user_id),
+            "conversations": (self._export_every_conversation(failed) if single
+                              else self._export_conversations(user_id)),
+            "notes": self._export_notes(failed) if single else [],
             "memories": self._export_memories(user_id),
             "rag_collections": self._export_rag(user_id),
             "plugin_configs": self._export_plugin_configs(user_id),
@@ -497,6 +650,120 @@ class UserDataExporter:
         except Exception as e:
             logger.warning("Failed to export conversations for %s: %s", user_id, e)
             return []
+
+    @staticmethod
+    def _export_every_conversation(failed: list[str]) -> list[dict[str, Any]]:
+        """Single-user mode, the one user: every conversation, each with its messages, as the app reads them
+        (decrypted). One that cannot be read is named in ``failed``, the others kept."""
+        mgr = _get_conversation_manager()
+        if mgr is None:
+            return []
+        ids: list[str] = []
+        seen: set[str] = set()
+        try:
+            # Page by page, until a page comes short; an id seen twice (a conversation that moved up meanwhile) once.
+            offset, page = 0, 200
+            while True:
+                listed = mgr.list_conversations(limit=page, offset=offset) or []
+                for item in listed:
+                    conv_id = item.get("id") if isinstance(item, dict) else getattr(item, "id", None)
+                    if conv_id and conv_id not in seen:
+                        seen.add(conv_id)
+                        ids.append(conv_id)
+                if len(listed) < page:
+                    break
+                offset += page
+        except Exception as e:  # noqa: BLE001 - said
+            logger.warning("The conversations could not be listed for the export: %s", e)
+            failed.append(f"conversations (not exported: {type(e).__name__})")
+            return []
+        # The store answers an empty page when it cannot read one, and pages move under a conversation updated
+        # meanwhile: what it counts and the listing did not reach is named.
+        try:
+            total = (mgr.get_stats() or {}).get("total_conversations")
+        except Exception as e:  # noqa: BLE001 - said
+            total = type(e).__name__
+        if not isinstance(total, int):
+            # The store answers an empty count when it cannot read itself: never taken for none.
+            failed.append(f"conversations (not counted{f': {total}' if total else ''}; the listing may be short)")
+            total = len(ids)
+        if total > len(ids):
+            failed.append(f"conversations ({total - len(ids)} of {total} not listed, not exported)")
+        out = []
+        for conv_id in ids:
+            try:
+                conv = mgr.get_conversation(conv_id)
+                if conv is None:
+                    # Gone since the listing, or unreadable: the store answers both with nothing.
+                    failed.append(f"conversation {conv_id} (not exported: not read)")
+                    continue
+                out.append(conv.to_dict() if hasattr(conv, "to_dict") else conv)
+            except Exception as e:  # noqa: BLE001 - said
+                logger.warning("The conversation %s could not be read for the export: %s", conv_id, e)
+                failed.append(f"conversation {conv_id} (not exported: {type(e).__name__})")
+        return out
+
+    @staticmethod
+    def _export_notes(failed: list[str]) -> list[dict[str, Any]]:
+        """Single-user mode, the one user: every live note -- its title, its body as text (and as the stored bytes,
+        base64), its tags, pin and times, its updates (base64, in order) and its attachments' manifest with their
+        derived text; the attachments' bytes stay in the app (named). One that cannot be read is named in
+        ``failed``."""
+        try:
+            store = _get_notes_store()
+            if store is None:
+                return []
+            ids = store.live_ids()
+        except Exception as e:  # noqa: BLE001 - said
+            logger.warning("The notes could not be read for the export: %s", e)
+            failed.append(f"notes and their updates (not exported: {type(e).__name__})")
+            return []
+        updates = None
+        try:
+            from opti_oignon.notes.note_updates_store import get_note_updates_store
+            updates = get_note_updates_store()
+        except ModuleNotFoundError as e:
+            if not _absent(e, "opti_oignon.notes.note_updates_store"):
+                failed.append(f"notes and their updates (updates not exported: {type(e).__name__})")
+        except Exception as e:  # noqa: BLE001 - said
+            failed.append(f"notes and their updates (updates not exported: {type(e).__name__})")
+        import base64
+
+        out = []
+        for note_id in ids:
+            try:
+                note = store.get_note(note_id)
+                if note is None or note.deleted:
+                    continue
+                body = bytes(note.body_crdt or b"")
+                entry = {
+                    "id": note.id,
+                    "title": note.title,
+                    "body_text": body.decode("utf-8", errors="replace"),
+                    "body_b64": base64.b64encode(body).decode("ascii"),
+                    "tags": note.tags,
+                    "pinned": bool(note.pinned),
+                    "created_at": note.created_at,
+                    "updated_at": note.updated_at,
+                    "attachments": [
+                        {"id": a.id, "kind": a.kind, "mime": a.mime, "bytes": int(a.byte_size),
+                         "content_hash": a.content_hash, "created_at": a.created_at,
+                         "transcript_text": a.transcript_text, "caption_text": a.caption_text,
+                         "ocr_text": a.ocr_text}
+                        for a in store.list_attachments(note_id)
+                    ],
+                }
+                if updates is not None:
+                    entry["updates"] = [
+                        {"seq": u.seq, "update_b64": base64.b64encode(bytes(u.update_blob)).decode("ascii"),
+                         "author_device": u.author_device, "created_at": u.created_at}
+                        for u in updates.list_updates(note_id)
+                    ]
+                out.append(entry)
+            except Exception as e:  # noqa: BLE001 - said
+                logger.warning("The note %s could not be read for the export: %s", note_id, e)
+                failed.append(f"note {note_id} (not exported: {type(e).__name__})")
+        return out
 
     def _export_memories(self, user_id: str) -> list[dict[str, Any]]:
         """Export user memories.
@@ -623,17 +890,36 @@ class UserDataDeleter:
         self,
         user_id: str,
         admin_id: str | None = None,
+        *,
+        remove: Any = (),
+        confirm: str | None = None,
     ) -> dict[str, Any]:
         """Delete all data for a user.
 
         Args:
             user_id: The user whose data to delete.
             admin_id: Optional admin who initiated the deletion.
+            remove: The content removed only on request, by its words (``WIPE_WHEN_NAMED``): in single-user mode,
+                for the install's one user.
+            confirm: The phrase ``wipe_preview`` gave for ``remove``, repeated: it binds what was counted, and a
+                count that moved since refuses.
 
         Returns:
             Dict summarizing what was deleted.
+
+        Raises:
+            WipeRefused: before anything is removed, when ``remove`` names a word the wipe does not know (422), is
+                not for a single-user install's one user (409), comes without the phrase (422) or with one the
+                counts no longer give (409), or names content that cannot be read (503).
         """
-        single = _single_user() and _the_one_user(user_id)
+        words = _named(remove)
+        single = _for_the_one_user(user_id, words)
+        if words:
+            if not confirm:
+                raise WipeRefused(422, f"{', '.join(words)} named without the preview's phrase: nothing removed")
+            if str(confirm).strip() != _phrase(_counted(words)):
+                raise WipeRefused(409, "the phrase is not the one the counts give now -- what the preview counted "
+                                       "has changed: preview again; nothing removed")
         # The stores removed for the user that could not be, each named in the answer with why; each step guarded,
         # so a store that cannot be opened stops none of the others.
         failed: list[str] = []
@@ -657,6 +943,8 @@ class UserDataDeleter:
             "pending_writes": _guarded(failed, "pending writes",
                                        lambda: self._delete_pending_writes(user_id, failed=failed), 0),
             "run_journal": journal,
+            # The content removed on request, by its word: how many of each.
+            "content_removed": {},
             # Stores the per-user wipe cannot cover today.
             "not_covered": list(WIPE_NOT_COVERED),
             # Audit trails survive the wipe by design.
@@ -675,6 +963,12 @@ class UserDataDeleter:
                 failed_here.append(old)
             results["not_covered"] = [label for label in results["not_covered"]
                                       if label not in WIPE_SINGLE_USER] + failed_here
+            if "notes" in words:
+                notes, left_notes = _guarded(failed, "notes and their updates", self._remove_notes, (0, None))
+                if left_notes is not None:
+                    results["content_removed"]["notes"] = notes
+                    results["not_covered"] = [label for label in results["not_covered"]
+                                              if label not in WIPE_WHEN_NAMED["notes"]] + left_notes
         results["not_covered"] += failed
 
         # Log to admin audit
@@ -690,6 +984,42 @@ class UserDataDeleter:
 
         logger.info("Deleted all data for user %s", user_id)
         return results
+
+    @staticmethod
+    def _remove_notes() -> tuple[int, list[str]]:
+        """Single-user mode, the notes named: every note forgotten through its deletion (``NotesStore.forget_note``:
+        no words left here, its tombstone published, so the paired devices forget it too), then what every dead
+        note still held (``sweep_dead_notes``), then the blobs no row names; how many notes, and what could not be
+        removed, named. A note that lands while the wipe runs goes with the others; one still arriving after three
+        passes is named. A tree without notes holds none."""
+        store = _get_notes_store()
+        if store is None:
+            return 0, []
+        started = time.time()
+        removed, left = 0, []
+        for _ in range(3):
+            ids = store.live_ids()
+            if not ids:
+                break
+            for note_id in ids:
+                died, rest = store.forget_note(note_id, sweep=False)
+                removed += int(died)
+                left += rest
+        still = store.live_ids()
+        if still:
+            left.append(f"notes and their updates ({len(still)} arrived while the wipe ran, left)")
+        # A note dead here that the journal holds alive (a peer's tombstone that lost) is the user's too, counted.
+        hidden = store.disputed_ids()
+        if hidden is None:
+            left.append("notes and their updates (those hidden here that a paired device still shows, not removed: "
+                        "the sync journal could not be read)")
+        for note_id in hidden or []:
+            _died, rest = store.forget_note(note_id, sweep=False)
+            removed += 1
+            left += rest
+        left += store.sweep_dead_notes()
+        left += store.forget_orphan_blobs(before=started)
+        return removed, list(dict.fromkeys(left))
 
     def _delete_pending_writes(self, user_id: str, *, failed: list[str] | None = None) -> int:
         """Delete the user's pending writes, so a proposal left waiting cannot bring wiped words back; a failure is

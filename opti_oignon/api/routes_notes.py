@@ -287,9 +287,10 @@ def delete_note(
     store: Any = Depends(_notes_store_dep),
     current_user: dict = Depends(_get_current_user),
 ) -> dict:
-    """Soft-delete (tombstone) so the deletion syncs (CRDT-safe)."""
+    """Delete a note so that it keeps no words (``NotesStore.forget_note``): its tombstone syncs (CRDT-safe), and
+    ``not_forgotten`` names what could not be removed yet, which the next deletion's sweep finishes."""
     user_id = current_user.get("sub")
-    ok = store.delete_note(note_id, user_id=user_id)
+    ok, left = store.forget_note(note_id, user_id=user_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Note not found")
-    return {"deleted": True, "id": note_id}
+    return {"deleted": True, "id": note_id, "not_forgotten": left}

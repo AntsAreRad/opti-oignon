@@ -247,7 +247,7 @@ def delete_attachment(
     blobs: Any = Depends(_blob_store_dep),
     current_user: dict = Depends(_get_current_user),
 ) -> AttachmentDeleteResponse:
-    """Delete an attachment: the encrypted blob first, then the manifest row.
+    """Delete an attachment: the encrypted blob first, overwritten, then the manifest row.
 
     Per-user: a missing or cross-user id is a 404. The blob is removed before the
     manifest so a missing-key blob store cannot leave a dangling manifest.
@@ -256,6 +256,6 @@ def delete_attachment(
     record = store.get_attachment(attachment_id, user_id=user_id)
     if record is None:
         raise HTTPException(status_code=404, detail="Attachment not found")
-    blobs.delete(attachment_id)
+    blobs.forget(attachment_id)
     store.delete_attachment(attachment_id, user_id=user_id)
     return AttachmentDeleteResponse(deleted=True, id=attachment_id)

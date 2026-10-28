@@ -3480,6 +3480,61 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] A deleted note keeps no words, here or on the paired
+  devices, and the account wipe removes the notes when the request names
+  them. Deleting a note only set its flag: the row kept its title, body
+  and tags, every attachment kept its transcript, caption and OCR text
+  and its blob, the whole history of its body's edits stayed beside it,
+  and the sync journal kept serving those edits to every paired device --
+  an edit is never a tombstone, so no deletion took it out. A paired
+  device that received the deletion kept the same. Now a note's deletion
+  leaves a bare tombstone (the id, the flag and its times) and removes the
+  attachments with their text, each blob overwritten before it is
+  removed, the history of the note's edits and its checkpoint, and the
+  journal's versions and edits of the note; the freed pages are
+  overwritten and the logs emptied, and an edit appended while the
+  deletion commits waits for it, then goes with the rest; deleting a note
+  already dead keeps the tombstone the journal holds. A paired device's
+  deletion does the same once its journal holds the tombstone -- once it
+  won there; text typed there in the meantime goes with the note. A
+  tombstone that loses to a later change of the note's title, tags or pin
+  only hides the note, as before: no sweep takes such a note for a deleted
+  one, and the attachments it took off the note are kept, by id, until a
+  deletion wins; an attachment a winning version no longer names, or a
+  paired device removed, keeps no blob here, and an attachment id that is
+  no plain file name is refused. What a step could not remove is named
+  (`not_forgotten` in the deletion's answer) and the next deletion's sweep
+  finishes it, as it finishes what deletions made before this left -- the
+  first start erases nothing; a deletion the sync journal could not take
+  (sync off, the journal locked) is named as not told to the paired
+  devices, and the next deletion, sweep or wipe publishes it. A note a paired device's later edit brings back arrives with
+  its body. In single-user mode, for the install's one user, the account
+  wipe removes every note when the request names them (`remove=notes`)
+  and repeats the phrase its preview gives (`GET
+  /api/users/{user_id}/data/wipe-preview?remove=notes`, which counts
+  them, the notes hidden here that a paired device still shows included:
+  `remove 12 notes a3f9`, the four characters drawn from the notes and
+  attachments counted); notes or attachments that came or went since,
+  a missing phrase, another name or another mode refuse it before
+  anything is removed. Each note's deletion is published, so the paired
+  devices forget the notes too when they next sync; with the sync journal
+  unreadable, the notes hidden here are not counted, the preview says so,
+  and the wipe names them as left. Without the request,
+  the notes are left and named, as before. The account export now carries
+  what that wipe removes -- every note with its edits and its attachments'
+  text (their bytes stay in the app, named), and for the one user every
+  conversation with its messages -- and names each part it could not read,
+  conversations the store counts and its listing did not reach, or a count
+  it could not read, included
+  (`format_version` 1.3). The settings show the user their data ("Your
+  data"): the export first, what a wipe removes and leaves, the notes
+  chosen apart, and the phrase typed before the wipe. Not yet: a copy that
+  loses to this device's version under last-writer-wins -- a paired
+  device's journal served again after its file was remade, or an edit
+  made there before the deletion arrived -- is still written into the
+  store before the journal refuses it, and brings a deleted note,
+  conversation or fact back, or hides a note the journal keeps alive.
+
 - [SECURITY] The account wipe's answer names every store it leaves of an
   inventory a census keeps complete, and in single-user mode the wipe
   also empties the stores that only keep copies of the user's words. Its lists, said to be completed against

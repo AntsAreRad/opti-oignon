@@ -36,7 +36,9 @@ order never sends a record's clock back; a tombstone erases it all the same. Wha
 is erased is overwritten (``secure_delete``), never left in the file's free pages.
 A conversation's deletion also erases every version of it before its commit
 (``forget_record``), so its words leave this device even when the tombstone
-cannot be appended after. ``compact()`` erases what older builds left superseded,
+cannot be appended after. A note's deletion erases its versions and every update
+of its body (``forget_note``), which no tombstone ever takes out; the sweep of the
+dead notes erases what older builds left of them (``forget_dead_notes``). ``compact()`` erases what older builds left superseded,
 by the same rule (``tend``, at boot), plus an optional every-N-appends trigger
 (``compact_every``, off by default); like journalling it is local-disk maintenance,
 permitted in any mode, never gated.
@@ -70,6 +72,7 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -218,6 +221,16 @@ _DELETE_ALL = f"DELETE FROM {_safe_table(TABLE_NAME)}"
 # existing (kind, record_id) index; a read-only query, no schema change.
 _SELECT_MAX_CLOCK = (
     f"SELECT MAX(clock) FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ?"
+)
+
+# A note's updates are the records ``note_id:seq``: the keys from ``note_id:`` up to, not including, ``note_id;``
+# (the character after the colon), a range the (kind, record_id) index serves.
+_DELETE_RANGE = (
+    f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id >= ? AND record_id < ?"
+)
+_SELECT_IDS = f"SELECT DISTINCT record_id FROM {_safe_table(TABLE_NAME)} WHERE kind = ?"
+_SELECT_LATEST = (
+    f"SELECT deleted FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ? ORDER BY seq DESC LIMIT 1"
 )
 
 # The transparent supersession rule -- delete any row superseded
@@ -415,7 +428,8 @@ class ChangeFeed:
             # The trigger ticks after the commit, under the lock;
             # the sequence is captured first and returned whatever the trigger does.
             self._maybe_autocompact(conn, 1)
-            return seq
+        _tombstones_journalled([record])
+        return seq
 
     def record_many(self, records: Iterable[SyncRecord]) -> list[int]:
         """Append several record versions in one transaction; sequences in order.
@@ -460,6 +474,7 @@ class ChangeFeed:
             if any(r.deleted for r in recs):
                 self._empty_log(conn)
             self._maybe_autocompact(conn, len(recs))
+        _tombstones_journalled(recs)
         return seqs
 
     def _empty_log(self, conn: sqlite3.Connection) -> None:
@@ -866,6 +881,76 @@ class ChangeFeed:
                 self._empty_log(conn)
         return gone
 
+    def forget_note_updates(self, note_id: str) -> int:
+        """Erase every update of one note (the records ``note_id:seq``), overwritten, and empty the log; how many rows
+        went. A note's deletion asks it, its own and a peer's: an update is never a tombstone, so nothing else takes
+        a dead note's increments of its body out of the journal, which serves them on. No floor is kept: an update
+        of a dead note is refused where it lands, and never journalled again. A journal whose file is not there
+        holds none, and is not created to be asked; one that cannot be written raises."""
+        if self._connection is None and not self._resolve_db_path().exists():
+            return 0
+        with self._lock:
+            conn = self._conn()
+            try:
+                gone = int(conn.execute(_DELETE_RANGE, (RecordKind.NOTE_UPDATE.value, note_id + ":",
+                                                        note_id + ";")).rowcount or 0)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            if gone:
+                self._empty_log(conn)
+        return gone
+
+    def forget_dead_notes(self, note_ids: Iterable[str]) -> int:
+        """Of these notes, all dead here and none of them held alive by this journal (``note_states``):
+        erase every update the journal holds, overwritten, and empty the log; how many rows went. A note's own
+        version is never erased here: a tombstone tells the peers, and a version alive is the journal's verdict
+        over a store that took a losing tombstone. The sweep of the dead notes asks it, for what a deletion made
+        before these rules, or interrupted, left. A journal whose file is not there holds none, and is not created
+        to be asked; one that cannot be written raises."""
+        dead = set(note_ids)
+        if not dead or (self._connection is None and not self._resolve_db_path().exists()):
+            return 0
+        update = RecordKind.NOTE_UPDATE.value
+        with self._lock:
+            conn = self._conn()
+            try:
+                updated = {rid.rpartition(":")[0] for (rid,) in conn.execute(_SELECT_IDS, (update,)).fetchall()}
+                gone = 0
+                for note_id in sorted(updated & dead):
+                    gone += int(conn.execute(_DELETE_RANGE, (update, note_id + ":", note_id + ";")).rowcount or 0)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            if gone:
+                self._empty_log(conn)
+        return gone
+
+    def note_states(self, note_ids: Iterable[str]) -> dict[str, str]:
+        """What this journal holds of each of these notes: ``tombstone`` (its deletion, told to the peers), ``live``
+        (a version that is not a tombstone), ``owed`` (nothing but the floor a deletion here left: its versions
+        erased, its tombstone never journalled -- the peers were not told), ``none``; ``absent`` for every note when
+        the journal's file is not there (sync never used here), which is not created to be asked."""
+        wanted = list(dict.fromkeys(note_ids))
+        if not wanted:
+            return {}
+        if self._connection is None and not self._resolve_db_path().exists():
+            return {note_id: "absent" for note_id in wanted}
+        note = RecordKind.NOTE.value
+        states: dict[str, str] = {}
+        with self._lock:
+            conn = self._conn()
+            for note_id in wanted:
+                row = conn.execute(_SELECT_LATEST, (note, note_id)).fetchone()
+                if row is not None:
+                    states[note_id] = "tombstone" if row[0] else "live"
+                    continue
+                floor = conn.execute(_SELECT_FLOOR, (note, note_id)).fetchone()
+                states[note_id] = "owed" if floor and floor[0] else "none"
+        return states
+
     def tend(self) -> int:
         """Erase the versions older builds left superseded, overwritten, and empty the log; how many rows went. A
         journal whose file is not there holds none, and is not created to be asked."""
@@ -926,6 +1011,52 @@ def forget_conversation(conversation_id: str) -> int:
 def forget_record(kind: RecordKind | str, record_id: str) -> int:
     """An erasure of every version of one record in the process journal (``ChangeFeed.forget_record``)."""
     return get_change_feed().forget_record(kind, record_id)
+
+
+def forget_note(note_id: str, *, versions: bool = True) -> int:
+    """A note's deletion's erasure in the process journal: every update of the note, and with ``versions`` every
+    version of the note itself, its clock kept as the floor the tombstone minted after out-clocks (``forget_record``;
+    a peer's tombstone, about to be journalled, asks without); how many rows. Raises when the journal cannot be
+    written."""
+    feed = get_change_feed()
+    gone = feed.forget_note_updates(note_id)
+    if versions:
+        gone += feed.forget_record(RecordKind.NOTE, note_id)
+    return gone
+
+
+def forget_dead_notes(note_ids: Iterable[str]) -> int:
+    """The sweep of the dead notes in the process journal (``ChangeFeed.forget_dead_notes``)."""
+    return get_change_feed().forget_dead_notes(note_ids)
+
+
+def note_states(note_ids: Iterable[str]) -> dict[str, str]:
+    """What the process journal holds of each of these notes (``ChangeFeed.note_states``)."""
+    return get_change_feed().note_states(note_ids)
+
+
+def _tombstones_journalled(records: Iterable[SyncRecord]) -> None:
+    """After an append: for each note tombstone just journalled -- this device's own, or a peer's that won here --
+    the notes store of this process, if this process loaded it, forgets what it still holds of the note
+    (``notes_store.forget_tombstoned``). Asked once the journal's lock is let go; it never raises into the append,
+    which stands: what could not be forgotten is said, and the store's next sweep finishes it."""
+    dead = [r.record_id for r in records if r.deleted and r.kind == RecordKind.NOTE]
+    if not dead:
+        return
+    held = sys.modules.get("opti_oignon.notes.notes_store")
+    forget = getattr(held, "forget_tombstoned", None) if held is not None else None
+    if not callable(forget):
+        return
+    for note_id in dead:
+        try:
+            left = forget(note_id)
+        except Exception as exc:  # noqa: BLE001 - the append stands; what stays is said
+            logger.warning("change feed: the tombstone of the note %s journalled; the notes store could not forget "
+                           "it (%s: %s)", note_id, type(exc).__name__, exc)
+            continue
+        if left:
+            logger.warning("change feed: the tombstone of the note %s journalled; not forgotten yet: %s", note_id,
+                           "; ".join(left))
 
 
 def tend() -> int:

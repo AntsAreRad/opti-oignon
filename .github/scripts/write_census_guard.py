@@ -425,8 +425,9 @@ STORES = {
     "notes": _store(
         "opti_oignon/notes/notes_store.py", classes=("NotesStore",), accesses=("get_notes_store",),
         writes=("add_note", "update_note", "delete_note", "add_attachment", "update_attachment",
-                "delete_attachment", "apply_synced_note"),
-        quiet=("delete_note", "delete_attachment"),
+                "delete_attachment", "apply_synced_note", "forget_note", "sweep_dead_notes", "forget_tombstoned"),
+        functions=("forget_tombstoned",),
+        quiet=("delete_note", "delete_attachment", "forget_note", "sweep_dead_notes", "forget_tombstoned"),
         aside={"set_mobile_allowed": "a note's permission flag for the phone; it carries no content"},
         reason="the user's notes and their attachments' text, which the agent reads",
     ),
@@ -658,6 +659,8 @@ EXEMPT = {
         "gesture", "the user adopts a fact of memory, its text named by its digest, on the command line"),
     ("opti_oignon/conversation.py", "conversation"): ("script", "the module's self-test, run only as a program"),
     ("opti_oignon/conversation_wipe.py", "conversation"): ("quiet", "the wipe deletes conversations"),
+    ("opti_oignon/veilid/change_feed.py", "notes"): (
+        "quiet", "a note's tombstone journalled forgets what the notes store still kept of the dead note"),
     ("opti_oignon/conversation.py", "branches"): (
         "quiet", "a deletion forgets the branches of the conversation it deletes"),
     ("opti_oignon/conversation.py", "projects"): (
@@ -725,6 +728,7 @@ EXEMPT = {
     ("opti_oignon/user_data_manager.py", "facts_canonical"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "facts_vectors"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "legacy"): ("quiet", "the user's own erasure"),
+    ("opti_oignon/user_data_manager.py", "notes"): ("quiet", "the user's own erasure"),
 }
 
 # The sites each exemption argued in prose covers, by function and method. No

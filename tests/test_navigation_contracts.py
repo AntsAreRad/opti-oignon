@@ -1105,7 +1105,7 @@ _PLACEMENT = {
         "telemetry", "telemetry-history", "profiler", "performance-dashboard")},
     **{g: ("workshop", "network") for g in (
         "proxy", "remote-access", "search-kill-switch", "device-sync")},
-    **{g: ("workshop", "backup") for g in ("backup-restore", "fine-tune")},
+    **{g: ("workshop", "backup") for g in ("backup-restore", "fine-tune", "your-data")},
 }
 # These four may instead be embedded in the observability group, whose
 # panel renders them.
@@ -1118,7 +1118,7 @@ def test_nv7_every_settings_group_is_placed_exactly_once():
     catalog = _catalog()
     groups = _groups(catalog)
     ids = [group["id"] for group in groups]
-    assert len(ids) == len(set(ids)) == 51, f"the catalog holds its 51 groups once each: {len(ids)}"
+    assert len(ids) == len(set(ids)) == 52, f"the catalog holds its 52 groups once each: {len(ids)}"
     assert set(ids) == set(_PLACEMENT), (
         f"the placement table and the catalog name the same groups: "
         f"unplaced {sorted(set(ids) - set(_PLACEMENT))}, unknown {sorted(set(_PLACEMENT) - set(ids))}"
@@ -1163,7 +1163,7 @@ def test_nv7_every_settings_group_is_placed_exactly_once():
                 problems.append(f"{group['id']} is embedded in {group['embeddedIn']}, which has no page")
     assert not problems, "\n".join(problems)
     assert counts["use"] == 11 and counts["retired"] == 1, counts
-    assert counts["workshop"] + counts["embedded"] == 39, counts
+    assert counts["workshop"] + counts["embedded"] == 40, counts
 
 
 # ---------------------------------------------------------------------------

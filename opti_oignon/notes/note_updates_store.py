@@ -230,6 +230,20 @@ def _sync_publish_note_update(
         )
 
 
+# One append and one deletion's commit at a time, process-wide: an append checks its note live, inserts and
+# publishes while no deletion of a note can commit (``notes_store.forget_note`` holds it for its commit), so the
+# deletion's forgetting, after its commit, finds every update appended before it, and an append after it finds the
+# note dead. Re-entrant: the landing of a sync round may append while it holds it.
+_APPENDS = threading.RLock()
+
+
+@contextmanager
+def holding_appends() -> Iterator[None]:
+    """Hold the process-wide append lock (``_APPENDS``)."""
+    with _APPENDS:
+        yield
+
+
 class NoteUpdateRefused(Exception):
     """A section-5 refusal at the append seam (or a guarded prune).
 
@@ -299,6 +313,8 @@ class NoteUpdatesStore:
         conn.row_factory = sqlite3.Row
         # WAL is set outside any transaction (right after connect).
         conn.execute("PRAGMA journal_mode=WAL")
+        # What a dead note's prune frees is overwritten, never left in the file's free pages.
+        conn.execute("PRAGMA secure_delete = ON")
         return conn
 
     @contextmanager
@@ -409,6 +425,19 @@ class NoteUpdatesStore:
         uid = effective_user_id(user_id, self._single_user_mode)
         if update_blob is None:
             self._refuse("update blob missing (cannot be persisted)", note_id)
+        with _APPENDS:
+            return self._append_held(note_id, update_blob, uid, author_device, seq, sync_publish)
+
+    def _append_held(
+        self,
+        note_id: str,
+        update_blob: bytes,
+        uid: str,
+        author_device: str | None,
+        seq: int | None,
+        sync_publish: bool,
+    ) -> NoteUpdateRecord:
+        """``append_update``'s check, insert and publication, under the append lock."""
         try:
             live = bool(self._parent_lookup(note_id, uid))
         except Exception:
@@ -618,6 +647,70 @@ class NoteUpdatesStore:
                 (uid, note_id),
             )
         return pruned
+
+
+    def forget_dead_note(
+        self, note_id: str, *, user_id: str | None = None
+    ) -> int:
+        """Delete the whole update tail and the checkpoint of a note its deletion just made dead, overwritten, and
+        empty the log; how many update rows went.
+
+        The note's deletion asks it after its commit, and the sweep of the dead notes for what earlier deletions
+        left: unlike ``prune_for_tombstone``, a parent that is still live, or whose liveness cannot be read, raises
+        (``NoteUpdateRefused``) -- the deletion says what it could not forget, never takes a refusal for an empty
+        tail.
+        """
+        uid = effective_user_id(user_id, self._single_user_mode)
+        try:
+            live = bool(self._parent_lookup(note_id, uid))
+        except Exception:
+            self._refuse("parent liveness indeterminable", note_id)
+        if live:
+            self._refuse("the parent note is still live", note_id)
+        with self._lock:
+            with self._conn() as conn:
+                cur = conn.execute(
+                    "DELETE FROM note_update WHERE user_id = ? AND note_id = ?",
+                    (uid, note_id),
+                )
+                pruned = int(cur.rowcount)
+                gone = conn.execute(
+                    "DELETE FROM note_checkpoint "
+                    "WHERE user_id = ? AND note_id = ?",
+                    (uid, note_id),
+                ).rowcount
+            if pruned or gone:
+                self._empty_log()
+        return pruned
+
+    def notes_with_updates(self, *, user_id: str | None = None) -> set[str]:
+        """The notes this store holds an update or a checkpoint of (the sweep of the dead notes reads it)."""
+        uid = effective_user_id(user_id, self._single_user_mode)
+        with self._lock, self._conn() as conn:
+            rows = conn.execute(
+                "SELECT note_id FROM note_update WHERE user_id = ? "
+                "UNION SELECT note_id FROM note_checkpoint WHERE user_id = ?",
+                (uid, uid),
+            ).fetchall()
+        return {str(r[0]) for r in rows}
+
+    def _empty_log(self) -> None:
+        """Empty the write-ahead log after a prune: its older frames still hold the updates it erased. Never waits:
+        a read in progress keeps the log, said, until the next prune."""
+        try:
+            conn = _safe_connect(self._db_path, check_same_thread=False)
+            try:
+                conn.execute("PRAGMA busy_timeout = 0")
+                busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+            finally:
+                conn.close()
+        except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+            logger.warning("note updates: a dead note pruned; the write-ahead log could not be emptied (%s: %s)",
+                           type(exc).__name__, exc)
+            return
+        if busy:
+            logger.warning("note updates: a dead note pruned; a read in progress keeps the write-ahead log, whose "
+                           "older frames hold what the prune erased, until the next prune")
 
 
 # Module-level singleton with a reset for test isolation (the lesson:

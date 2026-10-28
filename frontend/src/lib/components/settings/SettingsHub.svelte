@@ -126,6 +126,7 @@
 		KeyCeremonyPanel: () => import('$lib/components/settings/KeyCeremonyPanel.svelte'),
 		AuditChainPanel: () => import('$lib/components/settings/AuditChainPanel.svelte'),
 		BackupRestorePanel: () => import('$lib/components/settings/BackupRestorePanel.svelte'),
+		YourDataPanel: () => import('$lib/components/settings/YourDataPanel.svelte'),
 		FineTunePanel: () => import('$lib/components/settings/FineTunePanel.svelte')
 	};
 
