@@ -108,14 +108,24 @@ never raise the note's own version: typed after a deletion, it goes with the
 note. A note's edits are records of their own that are never tombstones, which
 is why each deletion erases them by name. A deletion whose tombstone the journal
 cannot take -- sync off, the journal locked -- says so, and the next deletion or
-sweep publishes it. A known limit: a record is written into its store as it
-lands, before the journal's reconciliation runs, so a copy that loses to this
-device's version -- a paired device's whole journal served again after its file
-was remade, or an edit it made before the deletion arrived -- can bring a
-deleted note, conversation or fact back into the store while the journal keeps
-the tombstone, and a tombstone that loses hides a note the journal keeps alive.
-Delete it again once the devices have synced; landing by the journal's verdict
-is planned.
+sweep publishes it.
+
+A paired device is the user's own, and what it sends is trusted; its order is
+the journal's. A received note, conversation, fact or skill is written into its
+store only when the journal takes it: higher by last-writer-wins than this
+device's version and than every other version of it in the same batch, and
+above the clock a deletion here erased. A copy that loses is never written: a
+paired device's whole journal served again after its file was remade brings
+nothing deleted here back, an edit made there before the deletion arrived lands
+only if it wins the tie-break the journal applies, and a deletion older than an
+edit made here destroys nothing. The version the journal already holds is not
+written again, so an edit made here that the journal could not take yet stays.
+The losing copy still reaches the reconciliation, which keeps a concurrent
+divergence in its conflict log; a winner its store cannot take is dropped with
+the losers of its record, so the journal and the store agree. A journal that
+cannot be read lets no store be written, a note's edits included; a skill
+approved later from the panel is written into the skills behind the same rule,
+and one this device cannot store still waits for the approval.
 
 A device journals every change it makes in a per-device change feed, an
 append-only SQLite log under the data directory. A peer asks for the delta since a

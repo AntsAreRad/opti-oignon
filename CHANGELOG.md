@@ -3480,6 +3480,48 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] A sync round writes a version a paired device sent into its
+  store only when this device's journal keeps it. Every received note,
+  conversation, fact and skill was written into its store first, and only
+  then did the journal's last-writer-wins choose the version it keeps, so
+  a copy that lost was already written: a paired device's whole journal
+  served again after its file was remade brought a note, a conversation
+  or a fact deleted here back, with its words, while the journal kept the
+  tombstone; a deletion older than an edit made here erased the
+  conversation and its messages, hard-deleted the fact and hid the note
+  the journal kept alive; an older version overwrote a newer one; of
+  several versions in one batch, the last written stayed; a peer's
+  deletion of a conversation that won the tie-break at the clock held here
+  erased it, and its own erasure of the journal's versions left a floor the
+  tombstone could not pass, so the deletion was never journalled nor told
+  onward; the version the journal holds, served again, overwrote an edit
+  made here that the journal could not take yet; a skill approved later
+  from the panel was journalled and never written. Now each landing first
+  asks the journal's verdict (`reconcile.received_wins`, the merge's own
+  order, one pure function): a version is written only when the merge
+  journals it -- above this device's version and at least every other
+  version of the record in the batch, above the clock a deletion here
+  erased, and not the one the journal already holds. A version that loses
+  is never written and still reaches the merge, which keeps a concurrent
+  divergence in its conflict log; a winner its store refuses takes its
+  record's losers out with it, so the journal keeps what the store keeps;
+  a journal that cannot be read lets no store be written, a note's edits
+  included. A peer's deletion of a conversation erases the journal's
+  versions of it with its words and keeps their floor under the
+  tombstone's clock, so the tombstone journalled next passes it, and the
+  journal is read again before the other landers judge, the conversation's
+  forgetting having journalled the tombstones of what other stores drew
+  from it. A skill approved from the panel lands behind the same verdict;
+  one this device's skills cannot take is journalled nowhere and still
+  waits, and the panel says so. An injected sink stands behind it too. The doctrine, written: a paired device is the
+  user's own and is trusted, and the order of what it sends is settled by
+  last-writer-wins. The write
+  census counts the four landings gated behind the verdict (`sync.order`)
+  and `veilid/sync_engine.py` owes nothing; its two over-counted sites (the
+  peer store typed as a notes and a facts store by a shared local name) are
+  gone with the names. lw1-lw13 in the new
+  `tests/test_landing_verdict_contracts.py`.
+
 - [SECURITY] A deleted project keeps no words, a removed file is no
   longer retrieved, and the account wipe removes the projects when the
   request names them. Deleting a project removed its folder and its rows,

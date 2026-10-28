@@ -158,6 +158,13 @@
 					`Not applied: ${d.kind} ${d.record_id} no longer verifies against ` +
 						`the current trust state; it was removed`
 				);
+			} else if (!result.approved) {
+				// This device's store could not take it: nothing journalled, and
+				// the entry still waits for an approval.
+				toastError(
+					`Not written: ${d.kind} ${d.record_id} could not be stored here; ` +
+						`it still waits for your approval`
+				);
 			} else {
 				toastSuccess(
 					`Approved ${d.kind} ${d.record_id}: ${result.applied} applied` +

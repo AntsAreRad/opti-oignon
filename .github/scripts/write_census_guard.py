@@ -611,6 +611,12 @@ GATES = {
         "terminal client reaches a Core write",
         ("opti_oignon/cli/session.py",),
     ),
+    "sync.order": Gate(
+        "verdict", "opti_oignon/veilid/reconcile.py", "received_wins", ("lw1", "lw2", "lw4", "lw9"),
+        "a version a paired device sends -- the user's own, on their own devices -- is written into its store only "
+        "when the journal keeps it, by its own last-writer-wins: never one that loses to this device's, to another "
+        "of the batch, or to a deletion made here",
+    ),
 }
 
 # (module, store) -> the gates its sites pass.
@@ -623,6 +629,10 @@ GATED = {
     ("opti_oignon/pending_writes.py", "facts"): ("review.endorsement", "review.acceptance", "review.recovery"),
     ("opti_oignon/pending_writes.py", "notes"): ("review.endorsement", "review.acceptance", "review.recovery"),
     ("opti_oignon/pending_writes.py", "skills"): ("review.endorsement", "review.acceptance", "review.recovery"),
+    ("opti_oignon/veilid/sync_engine.py", "conversation"): ("sync.order",),
+    ("opti_oignon/veilid/sync_engine.py", "facts_canonical"): ("sync.order",),
+    ("opti_oignon/veilid/sync_engine.py", "notes"): ("sync.order",),
+    ("opti_oignon/veilid/sync_engine.py", "skills"): ("sync.order",),
 }
 
 _TRANSCRIPT = "the conversation's own messages, written as they happen and read back by role, each with its origin"
@@ -833,17 +843,6 @@ LEDGER = {
     "opti_oignon/rag_dashboard.py": {
         "seal": "b9de3eddf8a464e346f7f33bd2a87af85671f595ac763b8a2f39db6b8bcbcd0f",
         "owes": {"documents": 2},
-    },
-    # A synced fact, note or skill lands as its peer sent it: the gate that
-    # admitted it there travels with nothing. One more site of facts and of
-    # notes is an over-count the census owns, not a debt of the module: the
-    # engine reads ``getattr(self._store, "_root")`` on its peer store, typed
-    # a facts and notes store because module-level helpers bind a local of the
-    # same name to those stores (names are not scoped). A typing that scopes a
-    # parameter to its own function would take them off.
-    "opti_oignon/veilid/sync_engine.py": {
-        "seal": "eed2e0e669ae6fe9725272b8304c8047278670c2a97e9583bf7318bcb6c839f2",
-        "owes": {"conversation": 1, "facts_canonical": 2, "notes": 2, "skills": 1},
     },
 }
 

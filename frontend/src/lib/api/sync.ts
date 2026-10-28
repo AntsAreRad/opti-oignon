@@ -139,6 +139,10 @@ export interface DeferredReview extends DeferredRecord {
 export interface DeferredApproveResult {
 	kind: string;
 	record_id: string;
+	/**
+	 * False, refused false, reason 'unwritten': this device's store could not take it, and it
+	 * still waits for an approval.
+	 */
 	approved: boolean;
 	/** True when re-verification against the current trust state refused. */
 	refused: boolean;

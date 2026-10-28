@@ -96,10 +96,12 @@ from opti_oignon.veilid.protocol import (
     parse_record_batch,
     respond_to_request,
 )
+from opti_oignon.veilid.reconcile import received_wins
 from opti_oignon.veilid.records import (
     RecordKind,
     SyncRecord,
     decode_record,
+    key_of,
     new_record,
 )
 from opti_oignon.veilid.review import gate_arguments
@@ -114,6 +116,20 @@ FEATURE_AVAILABLE = True
 # way an agent's manage_skills write is. Conversation and memory records are user
 # data and apply without a gate.
 SENSITIVE_KINDS: frozenset[str] = frozenset({RecordKind.SKILL.value})
+
+# The kinds a round writes into a store as full versions, each behind the
+# journal's verdict (``received_wins``): a version that loses is never written.
+# A note's update is its own record, written once, and lands by its append seam.
+LANDED_KINDS: frozenset[str] = frozenset({
+    RecordKind.CONVERSATION.value,
+    RecordKind.NOTE.value,
+    RecordKind.MEMORY_CANONICAL.value,
+    RecordKind.SKILL.value,
+})
+
+# What this device's journal holds of the keys a leg brings: the latest version
+# of each key, and the floor a deletion here left it.
+Standing = tuple[dict[tuple[str, str], SyncRecord], dict[tuple[str, str], int]]
 
 # The per-round leg bound. A round loops internally, consuming one
 # bounded chunk per leg and threading each chunk's high-water into the next
@@ -324,10 +340,10 @@ def _default_note_gate() -> Any | None:
         from opti_oignon.notes import notes_store as _ns
     except Exception:
         return None
-    store = getattr(_ns, "_store", None)
-    if store is None:
+    notes_held = getattr(_ns, "_store", None)
+    if notes_held is None:
         return None
-    reader = getattr(store, "is_mobile_allowed", None)
+    reader = getattr(notes_held, "is_mobile_allowed", None)
     return reader if callable(reader) else None
 
 
@@ -444,6 +460,7 @@ def _default_conversation_sink() -> Any | None:
                     record.payload,
                     deleted=record.deleted,
                     updated_at=record.updated_at,
+                    clock=record.clock,
                 )
             )
         except Exception:
@@ -472,8 +489,8 @@ def _default_note_sink() -> Any | None:
         from opti_oignon.notes import notes_store as _ns
     except Exception:
         return None
-    store = getattr(_ns, "_store", None)
-    apply = getattr(store, "apply_synced_note", None)
+    notes_held = getattr(_ns, "_store", None)
+    apply = getattr(notes_held, "apply_synced_note", None)
     if not callable(apply):
         return None
 
@@ -513,8 +530,8 @@ def _default_memory_canonical_sink() -> Any | None:
         from opti_oignon.memory import canonical_store as _cs
     except Exception:
         return None
-    store = getattr(_cs, "_store", None)
-    apply = getattr(store, "apply_synced_memory_canonical", None)
+    facts_held = getattr(_cs, "_store", None)
+    apply = getattr(facts_held, "apply_synced_memory_canonical", None)
     if not callable(apply):
         return None
 
@@ -1579,8 +1596,38 @@ class SyncEngine:
                 )
         return appliable, deferred
 
+    def _standing(self, records_in: list[SyncRecord]) -> Standing:
+        """What the journal holds of each key a leg brings to a store.
+
+        Read once per leg, before the first landing, from the same journal the
+        merge reads: the latest version of each key of a landed kind, and the
+        floor a deletion here left it. A journal that cannot be read raises
+        here, before anything is written. Read again after a conversation's
+        deletion lands: its forgetting writes into the journal (the facts drawn
+        from it, their tombstones).
+        """
+        if not records_in:
+            return {}, {}
+        wanted = {key_of(r) for r in records_in if r.kind.value in LANDED_KINDS}
+        # Read even for a leg that brings only a note's updates: what cannot be
+        # read here lets nothing be written, an update included.
+        feed = self._resolve_feed()
+        held = {
+            key_of(r): r for r in feed.current_records() if key_of(r) in wanted
+        }
+        floors: dict[tuple[str, str], int] = {}
+        floor_of = getattr(feed, "clock_floor", None)
+        if callable(floor_of):
+            for kind, record_id in wanted:
+                floors[(kind, record_id)] = int(floor_of(kind, record_id))
+        return held, floors
+
     def _land_conversations(
-        self, records_in: list[SyncRecord], *, peer_id: str
+        self,
+        records_in: list[SyncRecord],
+        *,
+        peer_id: str,
+        standing: Standing,
     ) -> list[SyncRecord]:
         """Materialise verified CONVERSATION records into the conversation store.
 
@@ -1596,12 +1643,29 @@ class SyncEngine:
         DROPS the record -- not materialised, not journalled, not served (a
         record that cannot be persisted must not converge). Other kinds pass
         through untouched.
+
+        Every lander asks the journal's verdict first (``received_wins``, over
+        ``standing``): a version that loses -- to this device's, to another the
+        batch brings, or at the floor a deletion here left -- is never written.
+        It goes on to the merge, which keeps a concurrent divergence in its
+        conflict log and journals nothing; a winner the store refuses takes the
+        losers of its key out with it, so the journal keeps what the store does.
         """
         kept: list[SyncRecord] = []
+        refused: set[tuple[str, str]] = set()
+        held, floors = standing
         sink: Any | None = None
         sink_resolved = False
         for r in records_in:
             if r.kind.value != RecordKind.CONVERSATION.value:
+                kept.append(r)
+                continue
+            key = key_of(r)
+            if not received_wins(
+                r, held.get(key), floor=floors.get(key, 0), rivals=records_in
+            ):
+                # It loses to this device's version, or to another the batch
+                # brings: never written; the merge judges it as it does.
                 kept.append(r)
                 continue
             if not sink_resolved:
@@ -1621,6 +1685,7 @@ class SyncEngine:
             if ok:
                 kept.append(r)
                 continue
+            refused.add(key)
             logger.warning(
                 "sync: refused a conversation at the landing seam "
                 "(id=%s origin=%s): not materialised, not served",
@@ -1632,10 +1697,14 @@ class SyncEngine:
                 peer_id=peer_id,
                 id=r.record_id,
             )
-        return kept
+        return [r for r in kept if key_of(r) not in refused]
 
     def _land_notes(
-        self, records_in: list[SyncRecord], *, peer_id: str
+        self,
+        records_in: list[SyncRecord],
+        *,
+        peer_id: str,
+        standing: Standing,
     ) -> list[SyncRecord]:
         """Materialise verified NOTE records into the notes store.
 
@@ -1650,10 +1719,20 @@ class SyncEngine:
         not affect convergence.
         """
         kept: list[SyncRecord] = []
+        refused: set[tuple[str, str]] = set()
+        held, floors = standing
         sink: Any | None = None
         sink_resolved = False
         for r in records_in:
             if r.kind.value != RecordKind.NOTE.value:
+                kept.append(r)
+                continue
+            key = key_of(r)
+            if not received_wins(
+                r, held.get(key), floor=floors.get(key, 0), rivals=records_in
+            ):
+                # It loses to this device's version, or to another the batch
+                # brings: never written; the merge judges it as it does.
                 kept.append(r)
                 continue
             if not sink_resolved:
@@ -1673,6 +1752,7 @@ class SyncEngine:
             if ok:
                 kept.append(r)
                 continue
+            refused.add(key)
             logger.warning(
                 "sync: refused a note at the landing seam "
                 "(id=%s origin=%s): not materialised, not served",
@@ -1684,10 +1764,14 @@ class SyncEngine:
                 peer_id=peer_id,
                 id=r.record_id,
             )
-        return kept
+        return [r for r in kept if key_of(r) not in refused]
 
     def _land_memory_canonical(
-        self, records_in: list[SyncRecord], *, peer_id: str
+        self,
+        records_in: list[SyncRecord],
+        *,
+        peer_id: str,
+        standing: Standing,
     ) -> list[SyncRecord]:
         """Materialise verified MEMORY_CANONICAL records into the canonical store.
 
@@ -1700,10 +1784,20 @@ class SyncEngine:
         user data -- it lands ungated, on the same seam as conversation/note.
         """
         kept: list[SyncRecord] = []
+        refused: set[tuple[str, str]] = set()
+        held, floors = standing
         sink: Any | None = None
         sink_resolved = False
         for r in records_in:
             if r.kind.value != RecordKind.MEMORY_CANONICAL.value:
+                kept.append(r)
+                continue
+            key = key_of(r)
+            if not received_wins(
+                r, held.get(key), floor=floors.get(key, 0), rivals=records_in
+            ):
+                # It loses to this device's version, or to another the batch
+                # brings: never written; the merge judges it as it does.
                 kept.append(r)
                 continue
             if not sink_resolved:
@@ -1723,6 +1817,7 @@ class SyncEngine:
             if ok:
                 kept.append(r)
                 continue
+            refused.add(key)
             logger.warning(
                 "sync: refused a canonical memory fact at the landing seam "
                 "(id=%s origin=%s): not materialised, not served",
@@ -1734,10 +1829,14 @@ class SyncEngine:
                 peer_id=peer_id,
                 id=r.record_id,
             )
-        return kept
+        return [r for r in kept if key_of(r) not in refused]
 
     def _land_skills(
-        self, records_in: list[SyncRecord], *, peer_id: str
+        self,
+        records_in: list[SyncRecord],
+        *,
+        peer_id: str,
+        standing: Standing,
     ) -> list[SyncRecord]:
         """Materialise verified, APPROVED SKILL records into the skill registry.
 
@@ -1752,10 +1851,20 @@ class SyncEngine:
         (fail-secure). Other kinds pass through untouched.
         """
         kept: list[SyncRecord] = []
+        refused: set[tuple[str, str]] = set()
+        held, floors = standing
         sink: Any | None = None
         sink_resolved = False
         for r in records_in:
             if r.kind.value != RecordKind.SKILL.value:
+                kept.append(r)
+                continue
+            key = key_of(r)
+            if not received_wins(
+                r, held.get(key), floor=floors.get(key, 0), rivals=records_in
+            ):
+                # It loses to this device's version, or to another the batch
+                # brings: never written; the merge judges it as it does.
                 kept.append(r)
                 continue
             if not sink_resolved:
@@ -1775,6 +1884,7 @@ class SyncEngine:
             if ok:
                 kept.append(r)
                 continue
+            refused.add(key)
             logger.warning(
                 "sync: refused a skill at the landing seam "
                 "(id=%s origin=%s): not materialised, not served",
@@ -1786,7 +1896,7 @@ class SyncEngine:
                 peer_id=peer_id,
                 id=r.record_id,
             )
-        return kept
+        return [r for r in kept if key_of(r) not in refused]
 
     def _land_note_updates(
         self, records_in: list[SyncRecord], *, peer_id: str
@@ -2042,25 +2152,45 @@ class SyncEngine:
             # Land note_update records through the store BEFORE the
             # feed journal (sections 3 and 5); a refused update never enters
             # the feed and is therefore never served onward.
+            # What the journal holds of the keys this leg brings, read once,
+            # before anything is written: a journal that cannot be read lets
+            # no store be written. Every lander of a full version writes it
+            # only when the journal's verdict keeps it (``received_wins``).
+            standing = self._standing(appliable)
             appliable = self._land_note_updates(appliable, peer_id=peer_id)
             # Materialise CONVERSATION winners into the domain
             # store on the same seam, BEFORE the feed journal -- a refused
             # conversation never enters the feed and is never served onward.
-            appliable = self._land_conversations(appliable, peer_id=peer_id)
+            appliable = self._land_conversations(
+                appliable, peer_id=peer_id, standing=standing
+            )
+            if any(
+                r.kind.value == RecordKind.CONVERSATION.value and r.deleted
+                for r in appliable
+            ):
+                # A conversation's deletion forgets what other stores drew from
+                # it, and their tombstones enter the journal: read it again.
+                standing = self._standing(appliable)
             # Materialise NOTE existence + metadata into the
             # notes store on the same seam (the body converges via NOTE_UPDATE).
-            appliable = self._land_notes(appliable, peer_id=peer_id)
+            appliable = self._land_notes(
+                appliable, peer_id=peer_id, standing=standing
+            )
             # SYN-01 (Direction D): materialise MEMORY_CANONICAL winners into
             # the canonical store on the same post-gate seam, BEFORE the feed
             # journal -- a refused fact never enters the feed and is never
             # served onward. Canonical memory is user data: it lands ungated,
             # alongside conversation/note.
-            appliable = self._land_memory_canonical(appliable, peer_id=peer_id)
+            appliable = self._land_memory_canonical(
+                appliable, peer_id=peer_id, standing=standing
+            )
             # SYN-01 (Direction D): materialise approved SKILL winners into the
             # registry on the same post-gate seam. SKILL is sensitive, so the
             # partition above has ALREADY deferred any unapproved skill to the
             # ledger -- only gate-approved skills remain in ``appliable`` here.
-            appliable = self._land_skills(appliable, peer_id=peer_id)
+            appliable = self._land_skills(
+                appliable, peer_id=peer_id, standing=standing
+            )
             filtered = RecordBatch(
                 device=batch.device,
                 high_water=batch.high_water,
@@ -2179,7 +2309,11 @@ class SyncEngine:
         seam keeps its shape without a second prompt and without the record
         dedup-silencing against its own entry. The apply is a benign
         single-record batch (high_water 0, the PRT-01 idiom): watermarks never
-        move here. The entry is removed on every terminal outcome.
+        move here. The approved skill is written into the registry as a round
+        writes one, behind the journal's verdict, before it is journalled; one
+        the registry cannot take is not journalled, and its entry waits
+        (``reason`` ``unwritten``). The entry is removed on every other terminal
+        outcome.
 
         Raises :class:`DeferredNotFound` for an unknown key. Returns a
         structured summary: ``approved`` (the record entered the apply),
@@ -2246,6 +2380,33 @@ class SyncEngine:
             approval_manager=None,
             ledger_reentry=True,
         )
+        # The approved skill lands as a round's would, behind the same
+        # verdict: written into the registry only when the journal keeps it.
+        landed = self._land_skills(
+            appliable, peer_id=entry.peer_id, standing=self._standing(appliable)
+        )
+        if len(landed) < len(appliable):
+            # The registry could not take it: nothing is journalled, and the
+            # entry waits for the next approval.
+            _audit(
+                "sync_deferred_approve_unwritten",
+                kind=kind,
+                id=record_id,
+                peer_id=entry.peer_id,
+                device=entry.origin_device,
+            )
+            return {
+                "kind": kind,
+                "record_id": record_id,
+                "approved": False,
+                "refused": False,
+                "reason": "unwritten",
+                "applied": 0,
+                "conflicts": 0,
+                "rejected": 0,
+                "unverified": int(unverified),
+            }
+        appliable = landed
         batch = RecordBatch(
             device=record.device,
             high_water=0,

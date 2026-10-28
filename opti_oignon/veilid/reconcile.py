@@ -27,6 +27,11 @@ returns the same set with an empty conflict log, because each key then has a sin
 candidate. Tombstones win like any other version, so a deletion converges across
 devices rather than being silently resurrected.
 
+The same order decides what a round writes into a store: :func:`received_wins` lets a
+received version land only when it is the one the journal keeps, so a copy that loses
+-- an older version served again, a deletion older than an edit here -- never reaches
+the store the journal refuses it for.
+
 This module is pure: it consumes already-decoded records (the defensive parsing is
 records.decode_*), performs no I/O, opens no socket, and imports only the record
 encoding, so it collects and runs anywhere. The Daily-only boundary lives at the
@@ -100,6 +105,44 @@ def choose_winner(candidates: Iterable[SyncRecord]) -> SyncRecord:
     if not ordered:
         raise ValueError("choose_winner requires at least one candidate")
     return max(ordered, key=_selection_key)
+
+
+def received_wins(
+    received: SyncRecord,
+    held: SyncRecord | None,
+    *,
+    floor: int = 0,
+    rivals: Iterable[SyncRecord] = (),
+) -> bool:
+    """Whether a received version may be written into its store: the journal takes it.
+
+    The gate of every landing of a sync round, asked before the store is written,
+    never after: the journal's own last-writer-wins decides, as the merge does
+    (:func:`choose_winner`), and the version wins exactly when the merge journals
+    it. A version at or below ``floor`` -- the highest clock a deletion on this
+    device erased -- is the deleted one coming back, and loses. One the journal
+    holds already, at the same clock with the same content, is not written again:
+    the store took it when the journal did, and what the store holds since -- an
+    edit made here that the journal could not take yet -- stays. Any other wins when
+    its ordering key is above that of the version ``held`` here and at least that of
+    every one of ``rivals`` with the same key -- the other versions of the record
+    the same batch brings, one at or below the floor being below it too. A paired
+    device is the user's own and is trusted; what it sends is ordered by the clock,
+    never judged. Pure, like the merge.
+    """
+    if received.clock <= floor:
+        return False
+    if held is not None and (held.clock, held.content_hash) == (
+        received.clock,
+        received.content_hash,
+    ):
+        return False
+    key = key_of(received)
+    ours = _selection_key(received)
+    for other in rivals:
+        if key_of(other) == key and _selection_key(other) > ours:
+            return False
+    return held is None or _selection_key(held) < ours
 
 
 def _retained_losers(

@@ -137,8 +137,8 @@ _KILL_NOTE = (
     "UPDATE note SET title = '', body_crdt = x'', tags = '[]', pinned = 0, "
     "deleted = 1, updated_at = ? WHERE id = ? AND user_id = ? AND deleted = 0"
 )
-# A peer's tombstone, landed before the sync journal's verdict: the flag alone. What the note held is forgotten
-# once the tombstone is journalled -- it won here (``forget_tombstoned``) -- and kept while it is not: it may lose.
+# A peer's tombstone that won the sync journal's verdict, landed before the journal takes it: the flag alone. What
+# the note held is forgotten once the tombstone is journalled (``forget_tombstoned``), and kept while it is not.
 _FLAG_SYNCED_NOTE = "UPDATE note SET deleted = 1, updated_at = ? WHERE id = ? AND user_id = ?"
 _BLANK_DEAD_NOTE = (
     "UPDATE note SET title = '', body_crdt = x'', tags = '[]', pinned = 0 "
@@ -1324,12 +1324,13 @@ class NotesStore:
     # Notes -- the per-item mobile-allowed flag
 
     def _apply_synced_tombstone(self, note_id: str, uid: str, ts: str) -> bool:
-        """A peer's tombstone, landed before the sync journal's verdict (the round writes a store first): the flag,
-        or a tombstone recorded for a note never seen here, so a later out-of-order non-tombstone cannot silently
-        resurrect it; the attachment manifest dropped, its ids kept (``awaited_blob``) until the verdict. Nothing else:
-        the tombstone may lose to a version made here after it. Once the journal holds it -- it won --
-        ``forget_tombstoned`` forgets the note; while it does not, the sweep leaves the note as it is. Hook-free (no
-        publish). mobile_allowed keeps the secure default."""
+        """A peer's tombstone that won the sync journal's verdict, landed before the journal takes it: the flag, or a
+        tombstone recorded for a note never seen here, so a later out-of-order non-tombstone cannot silently
+        resurrect it; the attachment manifest dropped, its ids kept (``awaited_blob``) until the journal holds it.
+        Nothing else: the journal may not take it (unreadable, its write failing), and a note dead here before 192
+        may be one whose tombstone lost. Once the journal holds it ``forget_tombstoned`` forgets the note; while it
+        does not, the sweep leaves the note as it is. Hook-free (no publish). mobile_allowed keeps the secure
+        default."""
         with self._lock, self._conn() as conn:
             dropped = [str(r[0]) for r in conn.execute(_SELECT_NOTE_ATTACHMENTS, (note_id, uid)).fetchall()]
             killed = conn.execute(_FLAG_SYNCED_NOTE, (ts, note_id, uid)).rowcount

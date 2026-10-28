@@ -21,6 +21,7 @@ Features:
 Author: Leon
 """
 
+import functools
 import hashlib
 import json
 import logging
@@ -897,10 +898,10 @@ def _forget_coding_session(conv_id: str) -> int:
     return held.forget_conversation(conv_id) if held is not None else 0
 
 
-def _forget_sync_feed(conv_id: str) -> int:
+def _forget_sync_feed(conv_id: str, *, below: int | None = None) -> int:
     from opti_oignon.veilid.change_feed import forget_conversation
 
-    return forget_conversation(conv_id)
+    return forget_conversation(conv_id, below=below)
 
 
 def _forget_sandbox_audit(conv_id: str) -> int:
@@ -970,9 +971,13 @@ def _ask(conv_id: str, store: str, module: str, forget: Callable[[str], int]) ->
     return None
 
 
-def _forget_derived(conv_id: str) -> list[str]:
+def _forget_derived(conv_id: str, *, below: int | None = None) -> list[str]:
     """Forget what every store keeping the conversation's words holds of it, after the onion and before the
     conversation store's own write; the modules of the stores that forgot.
+
+    A peer's deletion names its tombstone's clock (``below``): the sync journal erases the conversation's versions
+    and keeps their floor under that clock, so the tombstone the round journals next passes it -- one that won at the
+    clock of the version it beat included -- and a version older than it, served again, still loses.
 
     Each store forgets in its own transaction, in the order of ``_FORGETTERS``, and from then on refuses, in this
     process, anything new about the conversation: a write already on its way is refused at the write, under the
@@ -987,6 +992,8 @@ def _forget_derived(conv_id: str) -> list[str]:
     for store, module, forget, words in _FORGETTERS:
         if not words:
             continue
+        if below is not None and forget is _forget_sync_feed:
+            forget = functools.partial(_forget_sync_feed, below=below)
         failure = _ask(conv_id, store, module, forget)
         if failure is None:
             forgotten.append(store)
@@ -2029,6 +2036,7 @@ class ConversationManager:
         *,
         deleted: bool = False,
         updated_at: str = "",
+        clock: int | None = None,
     ) -> bool:
         """Materialise a synced conversation record into the local store (SYN-01 apply).
 
@@ -2055,6 +2063,10 @@ class ConversationManager:
         rather than journalling unapplied state). The conversations/messages
         tables are flat (no per-row user column), so the store path itself is
         the scope; ``payload['user_id']`` is informational here.
+
+        A deletion's ``clock`` -- the tombstone's, which the round handed --
+        keeps the sync journal's floor under it (``_forget_derived``), so the
+        tombstone, journalled right after, passes it.
         """
         try:
             conv = payload.get("conversation") if isinstance(payload, dict) else None
@@ -2077,7 +2089,7 @@ class ConversationManager:
                         if _holds(conn, conv_id):
                             try:
                                 _forget_onion(conv_id)
-                                forgotten = _forget_derived(conv_id)
+                                forgotten = _forget_derived(conv_id, below=clock)
                             except ConversationNotForgotten as exc:
                                 # Not applied, the conversation kept: the round
                                 # drops a record this returns False for,

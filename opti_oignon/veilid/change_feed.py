@@ -853,15 +853,16 @@ class ChangeFeed:
                 conn.execute("VACUUM")
         return deleted
 
-    def forget_record(self, kind: RecordKind | str, record_id: str) -> int:
+    def forget_record(self, kind: RecordKind | str, record_id: str, *, below: int | None = None) -> int:
         """Erase every version of one record, overwritten, and empty the log; how many rows went.
 
         A deletion asks it before its commit, so the record's words leave this device even when its tombstone
         cannot be appended after (the peers are then not told). The highest clock erased stays as the key's floor,
         in the same transaction: ``current_clock`` honours it, so the tombstone minted after out-clocks every version
-        a peer may hold, and an incoming version at or below it loses (``protocol._apply_batch``). A journal whose
-        file is not there holds none, and is not created to be asked; one that cannot be written raises, and the
-        deletion refuses.
+        a peer may hold, and an incoming version at or below it loses (``protocol._apply_batch``). A peer's deletion
+        asks with its tombstone's clock as ``below``: the floor stays under it, so the tombstone the round journals
+        next passes it, even one that won at the clock of the version it erased. A journal whose file is not there
+        holds none, and is not created to be asked; one that cannot be written raises, and the deletion refuses.
         """
         if self._connection is None and not self._resolve_db_path().exists():
             return 0
@@ -871,8 +872,11 @@ class ChangeFeed:
             try:
                 top = conn.execute(_SELECT_MAX_CLOCK, (k, record_id)).fetchone()
                 gone = int(conn.execute(_DELETE_RECORD, (k, record_id)).rowcount or 0)
-                if top and top[0] is not None:
-                    conn.execute(_RAISE_FLOOR, (k, record_id, int(top[0])))
+                floor = int(top[0]) if top and top[0] is not None else 0
+                if below is not None:
+                    floor = min(floor, int(below) - 1)
+                if floor > 0:
+                    conn.execute(_RAISE_FLOOR, (k, record_id, floor))
                 conn.commit()
             except Exception:
                 conn.rollback()
@@ -1002,10 +1006,11 @@ def set_change_feed(feed: ChangeFeed | None) -> None:
         _feed = feed
 
 
-def forget_conversation(conversation_id: str) -> int:
+def forget_conversation(conversation_id: str, *, below: int | None = None) -> int:
     """A deletion's erasure of every version of the conversation in the process journal, before its commit
-    (``ChangeFeed.forget_record``); how many rows. Raises when the journal cannot be written."""
-    return get_change_feed().forget_record(RecordKind.CONVERSATION, conversation_id)
+    (``ChangeFeed.forget_record``; a peer's, with its tombstone's clock as ``below``); how many rows. Raises when the
+    journal cannot be written."""
+    return get_change_feed().forget_record(RecordKind.CONVERSATION, conversation_id, below=below)
 
 
 def forget_record(kind: RecordKind | str, record_id: str) -> int:
