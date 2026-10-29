@@ -11,7 +11,8 @@ here:
   ``<root>/<category>/<name>/SKILL.md``; a usage counter lives in a
   ``_usage.json`` sidecar next to the skill, so an unchanged SKILL.md is never
   rewritten just to bump a count; old versions are archived under
-  ``<root>/<category>/<name>/.versions/`` for audit; and drafts (proposals
+  ``<root>/<category>/<name>/.versions/`` while the skill lives, and its
+  deletion takes them with it (``forget_skill``); and drafts (proposals
   awaiting human approval) are kept apart under ``<root>/.drafts/`` so a draft
   never shadows a live skill. The registry is read / list / search / view /
   view_ref plus the raw CRUD the gated tool drives. It is local and
@@ -32,7 +33,8 @@ Veilid sync: the registry's write seams publish
 to the change feed AFTER the domain commit -- for this file store the commit
 is the completed file write -- through ``_sync_publish_skill``. Every
 published-tree write (``_write`` with ``draft=False``) journals the new full
-state; a published ``delete`` journals a tombstone. Drafts are device-local
+state; a published ``delete`` erases the skill's versions first, then journals a tombstone that names the
+skill, so a paired device forgets it too. Drafts are device-local
 and journal nothing (only the human-approved published tree syncs; syncing a
 draft would propagate unapproved executable surface to peers, against the
 ``RecordKind.SKILL`` posture in ``veilid/producers.py``). The ``_usage.json``
@@ -88,6 +90,7 @@ import json
 import logging
 import os
 import re
+import stat
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -145,6 +148,16 @@ _HEX = frozenset("0123456789abcdef")
 
 # Directory names never treated as a category when scanning the registry.
 _RESERVED_DIRS = frozenset({VERSIONS_DIR, DRAFTS_DIR, "__pycache__"})
+# What the registry writes beside a skill's file, which a deletion before this build could leave.
+_RESIDUE = frozenset({VERSIONS_DIR, USAGE_FILENAME, APPROVED_FILENAME, ORIGIN_FILENAME})
+
+
+def _residue(entry: Path) -> bool:
+    """Whether an entry of a skill's folder is one the registry writes there: its history, its counter, its marks,
+    or a write's temporary file (``_write_atomic``); never a link."""
+    if entry.is_symlink():
+        return False
+    return entry.name in _RESIDUE or (entry.name.startswith(f".{SKILL_FILENAME}.") and entry.name.endswith(".tmp"))
 
 # Filesystem hygiene: only these characters survive a path segment.
 _SEGMENT_RE = re.compile(r"[^a-z0-9_-]+")
@@ -344,6 +357,11 @@ def text_digest(text: Any) -> str:
     return hashlib.sha256(_as_str(text).encode("utf-8")).hexdigest()
 
 
+class SkillNotForgotten(RuntimeError):
+    """A deletion refused while the skill's text stays: nothing that lets it be listed was removed, or what was
+    removed is said; it is listed, and deleting it again finishes it."""
+
+
 class SkillRefused(LookupError):
     """A write named by a digest that the registry refuses; nothing was written.
 
@@ -368,6 +386,141 @@ def _write_atomic(path: Path, data: bytes) -> None:
         os.replace(temporary, path)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+# What a deletion's answer, and the account wipe's, call what it could not remove (``store_inventory``).
+_SKILLS_LABEL = "skills (written by the user or accepted from the agent)"
+_OFFERS_LABEL = "skills a paired device offered (waiting for this device's approval)"
+# What a deletion says of a link it removed: the link goes, never what it leads to.
+_LINK = "a link: what it led to is left"
+
+
+def _overwrite_and_remove(path: Path, said: list | None = None) -> bool:
+    """Overwrite a file's bytes in place, then remove it; whether it was there. A filesystem that writes in place no
+    longer holds them; a copy-on-write filesystem, a snapshot or a backup may. A link is refused, never followed.
+
+    A file another link also names -- a backup made of links, say -- is removed without its overwrite: those bytes
+    are the other copy's too. One this process may not write is made writable first, being the process's own; one
+    that stays unwritable is removed without its overwrite. Each removal without its overwrite is said: in ``said``
+    when it is given, in the log otherwise."""
+    # Never blocks: a FIFO with no reader refuses the open rather than wait for one.
+    nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    reason = None
+    try:
+        fd = os.open(path, os.O_WRONLY | nofollow)
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        try:
+            fd, reason = _made_writable(path, nofollow)
+        except FileNotFoundError:
+            return False
+    if fd is not None:
+        try:
+            held = os.fstat(fd)
+            if not stat.S_ISREG(held.st_mode):
+                reason = "not a regular file"
+            elif held.st_nlink > 1:
+                reason = "other links hold its bytes"
+            else:
+                left = held.st_size
+                block = b"\0" * 65536
+                while left > 0:
+                    left -= os.write(fd, block[:min(len(block), left)])
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+    os.unlink(path)
+    if reason is not None:
+        if said is None:
+            logger.warning("a file removed without its overwrite (%s)", reason)
+        else:
+            said.append(reason)
+    return True
+
+
+def _made_writable(path: Path, nofollow: int) -> tuple:
+    """(a descriptor that writes ``path``, None) once the file is made readable and writable by its owner -- it is
+    this process's own --, or (None, why) when it cannot be; only a regular file no other link names is changed."""
+    try:
+        held = os.lstat(path)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        return None, type(exc).__name__
+    if not stat.S_ISREG(held.st_mode):
+        return None, "not a regular file"
+    if held.st_nlink > 1:
+        return None, "other links hold its bytes"
+    try:
+        os.chmod(path, stat.S_IMODE(held.st_mode) | stat.S_IRUSR | stat.S_IWUSR)
+        return os.open(path, os.O_WRONLY | nofollow), None
+    except OSError as exc:
+        return None, type(exc).__name__
+
+
+def _forget_entry(path: Path, said: list) -> None:
+    """Overwrite and remove one file; remove a link, never followed, a folder with what it holds, or anything else
+    that is not a regular file. A link removed, and a file removed without its overwrite, said in ``said``."""
+    if path.is_symlink():
+        os.unlink(path)
+        said.append(_LINK)
+    elif path.is_dir():
+        _forget_folder(path, said)
+    elif not path.is_file():
+        os.unlink(path)
+    else:
+        _overwrite_and_remove(path, said)
+
+
+def _forget_folder(folder: Path, said: list) -> None:
+    """Overwrite and remove every file under ``folder``, then its folders and itself: a link is removed, never
+    followed; a link removed, and a file removed without its overwrite, said in ``said``. Each entry is tried; the
+    first that fails raises once the others are done. A folder that is not there holds none."""
+    if not os.path.lexists(folder):
+        return
+    if folder.is_symlink():
+        os.unlink(folder)
+        said.append(_LINK)
+        return
+    if not folder.is_dir():
+        os.unlink(folder)
+        return
+    first: OSError | None = None
+    for top, dirs, files in os.walk(folder, topdown=False, followlinks=False):
+        for name in files:
+            try:
+                _forget_entry(Path(top) / name, said)
+            except OSError as exc:
+                first = first or exc
+        for name in dirs:
+            path = Path(top) / name
+            try:
+                if path.is_symlink():
+                    os.unlink(path)
+                    said.append(_LINK)
+                else:
+                    os.rmdir(path)
+            except OSError as exc:
+                first = first or exc
+    try:
+        os.rmdir(folder)
+    except OSError as exc:
+        first = first or exc
+    if first is not None:
+        raise first
+
+
+def _absent(error: ImportError, module: str) -> bool:
+    """Whether an import failed because the module, or a package it would be in, is not in this tree -- then it holds
+    nothing; a module that is there and fails to load is broken, and raises."""
+    return (isinstance(error, ModuleNotFoundError) and bool(error.name)
+            and (error.name == module or module.startswith(error.name + ".")))
+
+
+def _sync_absent(error: ImportError) -> bool:
+    """Whether an import of the sync journal, the ledger or their records failed because they are not in this tree."""
+    return any(_absent(error, f"opti_oignon.veilid.{name}") for name in ("change_feed", "deferred_ledger", "records"))
 
 
 # Default root resolution (lazy / guarded)
@@ -470,14 +623,176 @@ def _skill_payload(skill: Skill) -> dict[str, Any]:
     return {"user_id": _sync_owner_id(), "skill": nested}
 
 
+def _tombstone_payload(category: str, name: str) -> dict[str, Any]:
+    """A deletion's payload: the skill it deletes, named as its key names it, and nothing of its text -- a paired
+    device lands it by that name (one built before this, by the key alone)."""
+    return {"user_id": _sync_owner_id(), "skill": {"category": category, "name": name}}
+
+
+def _keyed(record_id: Any) -> tuple[str, str] | None:
+    """The category and the name a skill's key names, when it is one: two segments the sanitiser keeps as they are,
+    joined as ``_skill_sync_key`` joins them; None otherwise."""
+    if not isinstance(record_id, str):
+        return None
+    category, sep, name = record_id.partition("/")
+    if not sep or _safe_segment(category, "") != category or _safe_segment(name, "") != name:
+        return None
+    return (category, name) if _skill_sync_key(category, name) == record_id else None
+
+
+# The stores a deletion asks beside the registry's folder, by the names their modules spell: each is asked only when
+# its file is there, in the folder the registry's own lies in -- a registry rooted elsewhere has none of them.
+_JOURNAL_FILE = "veilid_change_feed.db"
+_LEDGER_FILE = "veilid_deferred.db"
+_QUEUE_FILE = "pending_writes.db"
+
+
+def _forget_in_journal(key: str, data: Path) -> list[str]:
+    """Erase every version of a skill in the sync journal, overwritten, before its deletion is done
+    (``change_feed.forget_record``): its words leave this device even when its tombstone cannot be journalled after,
+    and the highest clock erased stays the key's floor, which the tombstone minted after outclocks. A journal whose
+    file is not in ``data`` holds none, and nothing is loaded to be asked. A journal that is there and cannot be
+    written -- or that this process cannot load, its module broken or absent -- raises: the deletion refuses, the
+    skill listed, since nothing else would ever erase what it holds."""
+    if not (data / _JOURNAL_FILE).exists():
+        return []
+    from opti_oignon.veilid.change_feed import forget_record
+    from opti_oignon.veilid.records import RecordKind
+
+    with _SYNC_LOCK:
+        forget_record(RecordKind.SKILL, key)
+    return []
+
+
+def _journal_state(key: str, data: Path) -> str | None:
+    """What the sync journal holds of a skill (``change_feed.record_states``: ``tombstone``, ``live``, ``owed``,
+    ``none``); ``absent`` when its file is not in ``data``, or in a tree without it; None when it cannot be read."""
+    if not (data / _JOURNAL_FILE).exists():
+        return "absent"
+    try:
+        from opti_oignon.veilid.change_feed import record_states
+        from opti_oignon.veilid.records import RecordKind
+    except ImportError as exc:
+        return "absent" if _sync_absent(exc) else None
+    try:
+        return record_states(RecordKind.SKILL, [key]).get(key)
+    except Exception:  # noqa: BLE001 - not read is said by the caller
+        logger.warning("the sync journal could not be read for a deleted skill", exc_info=True)
+        return None
+
+
+def _owed_keys(data: Path) -> list[str]:
+    """The skills whose deletion here erased their versions and whose tombstone the sync journal never took
+    (``change_feed.owed``); none when its file is not in ``data``, or in a tree without it. A journal that cannot be
+    read raises."""
+    if not (data / _JOURNAL_FILE).exists():
+        return []
+    try:
+        from opti_oignon.veilid.change_feed import owed
+        from opti_oignon.veilid.records import RecordKind
+    except ImportError as exc:
+        if _sync_absent(exc):
+            return []
+        raise
+    return owed(RecordKind.SKILL)
+
+
+def _forget_offers(key: str, data: Path, below: int, beaten_by: Any = None) -> list[str]:
+    """Forget what the deferred ledger holds of a deleted skill -- a paired device's offer its deletion outclocks,
+    strictly below ``below``, or at that clock beaten by its tombstone ``beaten_by``; what stays, named. A ledger
+    whose file is not in ``data`` holds none, and nothing is loaded to be asked."""
+    if not (data / _LEDGER_FILE).exists():
+        return []
+    try:
+        from opti_oignon.veilid.deferred_ledger import forget_offers
+        from opti_oignon.veilid.records import RecordKind
+    except ImportError as exc:
+        return [] if _sync_absent(exc) else [f"{_OFFERS_LABEL} (not read: {type(exc).__name__})"]
+    try:
+        forget_offers(RecordKind.SKILL.value, key, below=below, beaten_by=beaten_by)
+    except Exception as exc:  # noqa: BLE001 - what stays is said
+        logger.warning("the deferred ledger could not forget a deleted skill's offers: %s", type(exc).__name__)
+        return [f"{_OFFERS_LABEL} (not removed: {type(exc).__name__}; the wipe removes them)"]
+    return []
+
+
+def _tombstone_of(key: str) -> Any:
+    """The tombstone the sync journal holds for a skill now, or None: none, or one that cannot be read. Asked only of
+    a journal that is there."""
+    try:
+        from opti_oignon.veilid.change_feed import get_change_feed
+        from opti_oignon.veilid.records import RecordKind
+
+        held = get_change_feed().latest(RecordKind.SKILL, key)
+    except Exception:  # noqa: BLE001 - an unread tombstone beats nothing: no offer at its clock is forgotten on it
+        logger.debug("the sync journal's tombstone could not be read for a deleted skill", exc_info=True)
+        return None
+    return held if held is not None and held.deleted else None
+
+
+def _clock_now(key: str) -> int:
+    """The highest clock the sync journal holds for a skill, its floor included; 0 when there is none to read. Asked
+    only of a journal that is there."""
+    try:
+        from opti_oignon.veilid.change_feed import get_change_feed
+        from opti_oignon.veilid.records import RecordKind
+
+        return int(get_change_feed().current_clock(RecordKind.SKILL, key))
+    except Exception:  # noqa: BLE001 - an unread clock outclocks nothing: no offer is forgotten on it
+        logger.debug("the sync journal's clock could not be read for a deleted skill", exc_info=True)
+        return 0
+
+
+def _proposal_key(arguments: Any) -> str | None:
+    """The key of the skill a proposal names, or None for arguments that name none."""
+    if not isinstance(arguments, dict):
+        return None
+    category, name = arguments.get("category"), arguments.get("name")
+    if not isinstance(category, str) or not isinstance(name, str) or not category or not name:
+        return None
+    return _skill_sync_key(category, name)
+
+
+def _forget_proposals(category: str, name: str, *, data: Path, present: Any = None) -> list[str]:
+    """Forget the review queue's decided proposals of a deleted skill -- declined, or accepted and written; one still
+    pending is listed for a decision --, or with ``present`` (the keys of the skills here) the edits and deletions of
+    every skill not here, decided since its deletion -- a proposal of a new skill, which was never one or went with
+    its own deletion, stays --; what stays, named. A queue whose file is not in ``data`` holds none, and nothing is
+    loaded to be asked."""
+    if not (data / _QUEUE_FILE).exists():
+        return []
+    key = _skill_sync_key(category, name)
+
+    def names(action: str, status: str, arguments: dict) -> bool:
+        named = _proposal_key(arguments)
+        if present is None:
+            return named == key
+        return named is not None and named not in present and action != "add"
+
+    try:
+        from opti_oignon.pending_writes import forget_decided
+    except ImportError as exc:
+        if _absent(exc, "opti_oignon.pending_writes"):
+            return []
+        return [f"pending writes (the skill's decided proposals not read: {type(exc).__name__})"]
+    try:
+        forget_decided("skills", names)
+    except Exception as exc:  # noqa: BLE001 - what stays is said
+        logger.warning("the review queue could not forget a deleted skill's proposals: %s", type(exc).__name__)
+        return [f"pending writes (the skill's decided proposals not removed: {type(exc).__name__}; the wipe removes "
+                "them)"]
+    return []
+
+
 def _sync_publish_skill(
     skill_id: str,
     payload_fn: Callable[[], dict[str, Any] | None] | None = None,
     *,
     deleted: bool = False,
     updated_at: str = "",
-) -> None:
-    """Journal a skill change for Veilid sync, best-effort (SYN-01).
+) -> str:
+    """Journal a skill change for Veilid sync, best-effort (SYN-01); ``journalled``, ``absent`` (no framework),
+    ``skipped`` (no state to publish) or ``failed``.
 
     Called by the registry's write seams AFTER the domain commit -- for this
     file store the commit is the completed file write (``_write``) or unlink
@@ -499,6 +814,9 @@ def _sync_publish_skill(
     - Applying a RECEIVED skill is the sensitive action, gated at the engine
       (``sync_engine.SENSITIVE_KINDS`` / ``_gate_records``); producing one
       locally is not.
+    - A tombstone's payload, when ``payload_fn`` gives one, names the skill it
+      deletes and nothing of its text (``_tombstone_payload``): a paired device
+      lands it by that name.
 
     Clock discipline: next = the highest clock journalled for the key, plus
     one (an unseen key yields 0, so the first clock is 1). ``_SYNC_LOCK``
@@ -510,7 +828,7 @@ def _sync_publish_skill(
             from opti_oignon.veilid.guard import veilid_available
 
             if not veilid_available():
-                return
+                return "absent"
             payload: dict[str, Any] | None = None
             if not deleted:
                 payload = payload_fn() if payload_fn is not None else None
@@ -522,7 +840,9 @@ def _sync_publish_skill(
                         "sync publish skipped for skill %s: no state available",
                         skill_id,
                     )
-                    return
+                    return "skipped"
+            elif payload_fn is not None:
+                payload = payload_fn()
             from opti_oignon.veilid.records import RecordKind
             from opti_oignon.veilid.sync_engine import get_sync_engine
 
@@ -535,12 +855,14 @@ def _sync_publish_skill(
                 deleted=deleted,
                 updated_at=updated_at,
             )
+            return "journalled"
     except Exception:
         logger.warning(
             "veilid sync publish failed for skill %s (write unaffected)",
             skill_id,
             exc_info=True,
         )
+        return "failed"
 
 
 # The registry
@@ -640,6 +962,23 @@ class SkillRegistry:
     def exists(self, name: str, category: str, *, draft: bool = False) -> bool:
         path = self._skill_path(category, name, draft=draft)
         return path is not None and path.is_file()
+
+    def _every_skill_file(self, base: Path) -> Iterator[Path]:
+        """Every ``<base>/<category>/<name>/SKILL.md``, a category the listing hides (one the sanitiser keeps,
+        beginning with ``_``) included: what a deletion, the wipe and the export must reach; never a reserved
+        folder nor a link."""
+        if not base.is_dir():
+            return
+        for cat_dir in sorted(base.iterdir()):
+            if (not cat_dir.is_dir() or cat_dir.is_symlink() or cat_dir.name in _RESERVED_DIRS
+                    or cat_dir.name.startswith(".")):
+                continue
+            for name_dir in sorted(cat_dir.iterdir()):
+                if not name_dir.is_dir() or name_dir.is_symlink() or name_dir.name in _RESERVED_DIRS:
+                    continue
+                skill_file = name_dir / SKILL_FILENAME
+                if skill_file.is_file():
+                    yield skill_file
 
     def _iter_skill_files(self, base: Path) -> Iterator[Path]:
         """Yield every ``<base>/<category>/<name>/SKILL.md`` under a base dir."""
@@ -783,19 +1122,21 @@ class SkillRegistry:
         path = self._skill_path(skill.category, skill.name, draft=draft)
         if path is None:
             raise ValueError("refusing to write skill outside the registry root")
-        _write_atomic(path, data if data is not None else skill.to_markdown().encode("utf-8"))
-        if not draft:
-            self._note_local_write(path, adopt=adopt)
-            # The completed file write IS the domain commit
-            # for this file store; publish the new full state after it. The
-            # payload closes over the skill already in hand (zero extra
-            # reads) and is built inside the hook's guard. Draft writes are
-            # device-local and journal nothing.
-            _sync_publish_skill(
-                _skill_sync_key(skill.category, skill.name),
-                lambda: _skill_payload(skill),
-                updated_at=skill.updated_at,
-            )
+        # Under the write lock: a deletion's sweep never takes the folder a write is making for its file.
+        with self._locked():
+            _write_atomic(path, data if data is not None else skill.to_markdown().encode("utf-8"))
+            if not draft:
+                self._note_local_write(path, adopt=adopt)
+                # The completed file write IS the domain commit
+                # for this file store; publish the new full state after it. The
+                # payload closes over the skill already in hand (zero extra
+                # reads) and is built inside the hook's guard. Draft writes are
+                # device-local and journal nothing.
+                _sync_publish_skill(
+                    _skill_sync_key(skill.category, skill.name),
+                    lambda: _skill_payload(skill),
+                    updated_at=skill.updated_at,
+                )
         return skill
 
     def add(
@@ -938,37 +1279,284 @@ class SkillRegistry:
         return published
 
     def delete(self, name: str, category: str, *, draft: bool = False) -> bool:
-        """Remove a skill. A published skill's final version is archived first;
-        its ``.versions`` history is retained for audit. Returns False when the
-        target does not exist."""
-        existing = self.get(name, category, draft=draft)
-        if existing is None:
+        """Remove a skill, forgotten (:meth:`forget_skill`); False when the target does not exist, or when its
+        deletion refused, said in the log."""
+        try:
+            return self.forget_skill(name, category, draft=draft)
+        except SkillNotForgotten as refused:
+            logger.warning("a skill deletion refused: %s", refused)
             return False
+
+    def forget_skill(self, name: str, category: str, *, draft: bool = False, sweep: bool = True,
+                     left: list | None = None) -> bool:
+        """Forget a skill, or a draft: whether its file was there. What it keeps elsewhere goes with it, so no word
+        of it stays on this device, and its deletion reaches the paired devices.
+
+        Under the registry's write lock: a published skill's versions in the sync journal erased first, the floor
+        they leave kept (``_forget_in_journal``; one that cannot be erased is named, and its tombstone erases them
+        after); then every entry of its folder -- its history, its counter, its
+        marks, a write's leftover -- overwritten and removed, its file last, the folder after, and its category's when
+        it is left empty; for a published skill, its decided proposals in the review queue, its tombstone, which
+        names it (``_tombstone_payload``), and a paired device's offer that tombstone outclocks; then, with ``sweep``,
+        what deletions before this one left (:meth:`sweep_orphans`). An entry that cannot be removed while the file
+        stays refuses (:class:`SkillNotForgotten`): the skill is listed, and deleting it again finishes it. What else stays is named in ``left``: the peers not told, a queue or a ledger
+        that could not be reached, a file removed without its overwrite. A draft's deletion is device-local: no
+        journal, no tombstone."""
+        said: list = [] if left is None else left
         cat = _safe_segment(category, "general")
         nm = _safe_segment(name, "untitled-skill")
-        if not draft:
-            self._archive(cat, nm, existing)
-        path = self._skill_path(category, name, draft=draft)
-        if path is None:
+        path = self._skill_path(cat, nm, draft=draft)
+        if path is None or not self.root.is_dir():
             return False
+        key = _skill_sync_key(cat, nm)
+        with self._locked():
+            there = path.is_file() or path.is_symlink()
+            # A folder made outside the registry under a name it does not keep (``Ops``): a skill the registry never
+            # wrote, journalled or proposed under its key, forgotten as a draft is, here only.
+            local = None if there else self._unkept(category, name, draft=draft)
+            if local is not None:
+                path, there, draft = local, True, True
+                cat, nm = category, name
+            if there or os.path.lexists(path.parent):
+                if there and not draft:
+                    try:
+                        said += _forget_in_journal(key, self.root.parent)
+                    except Exception as exc:  # noqa: BLE001 - refused, nothing removed
+                        raise SkillNotForgotten(
+                            f"'{cat}/{nm}' was not deleted: the sync journal could not erase its versions "
+                            f"({type(exc).__name__}); it stays listed, delete it again") from exc
+                self._forget_folder_of(path, said, listed=there)
+            if there:
+                _audit("delete", name=nm, category=cat, draft=draft)
+                if not draft:
+                    said += _forget_proposals(cat, nm, data=self.root.parent)
+                    said += self._tell_peers(cat, nm, key)
+            if sweep:
+                said += self.sweep_orphans()
+        said[:] = list(dict.fromkeys(said))
+        return there
+
+    def _unkept(self, category: str, name: str, *, draft: bool) -> Path | None:
+        """The file of a skill folder made outside the registry under names it does not keep -- not its own slugs --,
+        within its root, when it is there; None otherwise."""
+        if _safe_segment(category, "") == category and _safe_segment(name, "") == name:
+            return None
+        if not all(part and "/" not in part and "\\" not in part and part not in (".", "..") and "\x00" not in part
+                   for part in (category, name)):
+            return None
+        base = self._drafts_root if draft else self.root
+        path = base / category / name / SKILL_FILENAME
+        if not self._within_root(path.parent) or not (path.is_file() and not path.parent.is_symlink()):
+            return None
+        return path
+
+    def _forget_folder_of(self, path: Path, said: list, *, listed: bool) -> None:
+        """Overwrite and remove what a skill's folder holds, its file ``path`` last, then the folder, and its
+        category's folder when nothing else is left in it. While the file is there (``listed``), an entry that cannot
+        be removed refuses before the file goes: the skill stays listed."""
+        folder = path.parent
+        first: OSError | None = None
         try:
-            path.unlink(missing_ok=True)
-            usage = path.parent / USAGE_FILENAME
-            usage.unlink(missing_ok=True)
-            if not draft:
-                # The digests approved here named bytes that are gone.
-                (path.parent / APPROVED_FILENAME).unlink(missing_ok=True)
-        except Exception:  # pragma: no cover - defensive
-            return False
-        _audit("delete", name=nm, category=cat, draft=draft)
-        if not draft:
-            # A published deletion is the converged tombstone.
-            # A draft deletion -- including publish()'s internal cleanup of
-            # the promoted draft -- is device-local and journals nothing.
-            _sync_publish_skill(
-                _skill_sync_key(cat, nm), deleted=True, updated_at=_now()
-            )
-        return True
+            entries = sorted(folder.iterdir())
+        except FileNotFoundError:
+            entries = []
+        for entry in entries:
+            if entry.name == SKILL_FILENAME:
+                continue
+            try:
+                _forget_entry(entry, said)
+            except OSError as exc:
+                first = first or exc
+        label = f"{folder.parent.name}/{folder.name}"
+        if first is not None and listed:
+            raise SkillNotForgotten(f"'{label}' was not deleted: its history or its marks could not all be removed "
+                                    f"({type(first).__name__}); it stays listed, delete it again")
+        if listed:
+            try:
+                _forget_entry(path, said)
+            except OSError as exc:
+                raise SkillNotForgotten(f"'{label}' was not deleted: its file could not be removed "
+                                        f"({type(exc).__name__}); it stays listed, delete it again") from exc
+        try:
+            os.rmdir(folder)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            said.append(f"{_SKILLS_LABEL} (the folder of '{label}' left: {type(first or exc).__name__}; the next "
+                        "deletion sweeps it)")
+            return
+        try:
+            os.rmdir(folder.parent)
+        except OSError:
+            pass  # another skill of the category is there
+
+    def _tell_peers(self, category: str, name: str, key: str) -> list[str]:
+        """Publish a deleted skill's tombstone, which names it; when the journal, which exists, does not hold it
+        after -- the framework absent, or the publication failed --, the peers were not told: said, and owed, so
+        the next deletion or the wipe publishes it (:meth:`sweep_orphans`). A paired device's offer the tombstone
+        outclocks is forgotten either way."""
+        _sync_publish_skill(key, lambda: _tombstone_payload(category, name), deleted=True, updated_at=_now())
+        data = self.root.parent
+        state = _journal_state(key, data)
+        said: list[str] = []
+        if state is None:
+            said.append(f"paired devices (not checked whether told of the skill '{category}/{name}''s deletion: the "
+                        "sync journal could not be read)")
+        elif state not in ("tombstone", "absent", "none"):
+            said.append(f"paired devices (not told of the skill '{category}/{name}''s deletion: the sync journal did "
+                        "not take its tombstone; the next deletion or wipe tells them)")
+        # The journal's clock is now the tombstone's, or the floor its versions left: an offer below it is dead, and one
+        # at the tombstone's clock that the tombstone beats. A journal that is not there is not made to be asked.
+        if state in ("tombstone", "owed", "live"):
+            clock = _clock_now(key)
+            if clock:
+                if state == "tombstone":
+                    said += _forget_offers(key, data, clock, _tombstone_of(key))
+                else:
+                    said += _forget_offers(key, data, clock + 1)
+        return said
+
+    def _orphan_folders(self) -> list[Path]:
+        """The folders of the published tree and of the drafts that hold no skill file and nothing but what the
+        registry itself writes beside one (``_residue``) -- what deletions before this build left: a history, a
+        counter, a mark, a dead write's temporary file. A folder holding anything else is no skill's residue, and is
+        left. Asked under the registry's lock, which every write holds while it makes its folder and its temporary
+        file: none is being written."""
+        found = []
+        for base in (self.root, self._drafts_root):
+            if not base.is_dir():
+                continue
+            for cat_dir in sorted(base.iterdir()):
+                if (not cat_dir.is_dir() or cat_dir.is_symlink() or cat_dir.name in _RESERVED_DIRS
+                        or cat_dir.name.startswith(".")):
+                    continue
+                for name_dir in sorted(cat_dir.iterdir()):
+                    if not name_dir.is_dir() or name_dir.is_symlink() or name_dir.name in _RESERVED_DIRS:
+                        continue
+                    if os.path.lexists(name_dir / SKILL_FILENAME):
+                        continue
+                    if any(not _residue(entry) for entry in name_dir.iterdir()):
+                        continue
+                    found.append(name_dir)
+        return found
+
+    def sweep_orphans(self) -> list[str]:
+        """Finish what deletions before this one left: every folder that holds no skill file, overwritten and
+        removed with what it holds (``_orphan_folders``), and every tombstone the sync journal owes
+        (``change_feed.owed``: a deletion here erased the skill's versions and the journal never took its tombstone)
+        published, when no skill of that key is here; what stays, named. A registry whose folder is not there holds
+        none, and is not made to be asked."""
+        if not self.root.is_dir():
+            return []
+        said: list[str] = []
+        with self._locked():
+            try:
+                orphans = self._orphan_folders()
+            except OSError as exc:
+                orphans = []
+                said.append(f"{_SKILLS_LABEL} (what deletions before this left not read: {type(exc).__name__})")
+            for folder in orphans:
+                try:
+                    _forget_folder(folder, said)
+                except OSError as exc:
+                    said.append(f"{_SKILLS_LABEL} (the folder of '{folder.parent.name}/{folder.name}' left: "
+                                f"{type(exc).__name__}; the next deletion sweeps it)")
+                    continue
+                try:
+                    os.rmdir(folder.parent)
+                except OSError:
+                    pass  # another skill of the category is there
+            try:
+                owed = _owed_keys(self.root.parent)
+            except Exception as exc:  # noqa: BLE001 - what stays is said
+                owed = []
+                said.append(f"paired devices (the tombstones the sync journal owes not read: {type(exc).__name__})")
+            for key in owed:
+                named = _keyed(key)
+                if named is None:
+                    continue
+                path = self._skill_path(named[0], named[1], draft=False)
+                if path is None or os.path.lexists(path):
+                    continue
+                said += self._tell_peers(named[0], named[1], key)
+            # The decided proposals of a skill no longer here: one decided after the skill's deletion.
+            try:
+                present = {_skill_sync_key(path.parent.parent.name, path.parent.name)
+                           for path in self._every_skill_file(self.root)}
+            except OSError as exc:
+                said.append(f"pending writes (the decided proposals of deleted skills not read: "
+                            f"{type(exc).__name__})")
+            else:
+                said += _forget_proposals("", "", data=self.root.parent, present=present)
+        return list(dict.fromkeys(said))
+
+    def skill_keys(self) -> list[tuple[str, str, bool]]:
+        """Every skill and draft here, as ``(category, name, draft)``, by its file: one whose text cannot be read is
+        listed all the same."""
+        return [(path.parent.parent.name, path.parent.name, base is self._drafts_root)
+                for base in (self.root, self._drafts_root) for path in self._every_skill_file(base)]
+
+    def counts(self) -> dict[str, int]:
+        """What a wipe of the skills removes, counted: the skills and drafts, and the versions their histories
+        keep."""
+        published = list(self._every_skill_file(self.root))
+        drafts = list(self._every_skill_file(self._drafts_root))
+        versions = 0
+        for path in published:
+            history = path.parent / VERSIONS_DIR
+            if history.is_dir() and not history.is_symlink():
+                versions += sum(1 for entry in history.iterdir() if entry.is_file())
+        return {"skills": len(published) + len(drafts), "published": len(published), "drafts": len(drafts),
+                "versions": versions}
+
+    def fingerprint(self) -> str:
+        """Four hexadecimal characters drawn from every skill and draft counted -- where it lies and the digest of
+        its bytes --, so one that came while another went, the count unchanged, changes them; empty when there is
+        none."""
+        digest = hashlib.sha256()
+        seen = False
+        for base in (self.root, self._drafts_root):
+            for path in self._every_skill_file(base):
+                seen = True
+                try:
+                    held = hashlib.sha256(path.read_bytes()).hexdigest()
+                except OSError:
+                    held = "unread"
+                digest.update(f"{base is self._drafts_root}/{path.parent.parent.name}/{path.parent.name}/{held}\n"
+                              .encode())
+        return digest.hexdigest()[:4] if seen else ""
+
+    def export_all(self) -> tuple[list[dict[str, Any]], list[str]]:
+        """Every skill and draft, its place, status and text, and for a skill the versions its history keeps; and
+        what could not be read, named, never taken for none."""
+        exported: list[dict[str, Any]] = []
+        missing: list[str] = []
+        for category, name, draft in self.skill_keys():
+            path = self._skill_path(category, name, draft=draft)
+            try:
+                text = path.read_bytes().decode("utf-8") if path is not None else ""
+            except (OSError, UnicodeDecodeError) as exc:
+                missing.append(f"skills (the skill '{category}/{name}' not exported: {type(exc).__name__})")
+                continue
+            meta, _body = _parse_frontmatter(text)
+            item: dict[str, Any] = {"category": category, "name": name,
+                                    "status": STATUS_DRAFT if draft else STATUS_PUBLISHED,
+                                    "version": meta.get("version", ""), "source": meta.get("source", ""),
+                                    "created_at": meta.get("created_at", ""), "updated_at": meta.get("updated_at", ""),
+                                    "markdown": text, "versions": []}
+            history = path.parent / VERSIONS_DIR if path is not None else None
+            if not draft and history is not None and history.is_dir() and not history.is_symlink():
+                for entry in sorted(history.iterdir()):
+                    if not entry.is_file() or entry.is_symlink():
+                        continue
+                    try:
+                        item["versions"].append({"file": entry.name,
+                                                 "markdown": entry.read_bytes().decode("utf-8")})
+                    except (OSError, UnicodeDecodeError) as exc:
+                        missing.append(f"skills (a version of '{category}/{name}' not exported: "
+                                       f"{type(exc).__name__})")
+            exported.append(item)
+        return exported, missing
 
     def apply_synced_skill(
         self,
@@ -1004,18 +1592,26 @@ class SkillRegistry:
         cannot be marked as received is not written, and the bytes land
         unadopted until they are shown and adopted here.
 
-        A ``deleted`` record unlinks the published skill (and its usage
-        sidecar); the ``.versions`` history is device-local audit and is left
-        in place (no archive on a remote tombstone). Fail-secure: a malformed
-        payload, a key mismatch, an out-of-root path, or any write error
-        returns False and never raises into the round.
+        A ``deleted`` record forgets the skill as a deletion here does
+        (:meth:`forget_skill`'s folder: its file, its history, its counter, its
+        marks, overwritten and removed) with its decided proposals; the round
+        journals the tombstone after, which erases its versions. A tombstone
+        names the skill; one from a build before this names nothing, and lands
+        by its key alone. A skill that is not here lands its tombstone all the
+        same, so it is served on. Fail-secure: a malformed payload, a key
+        mismatch, an out-of-root path, or any write error returns False and
+        never raises into the round -- a tombstone whose forgetting stopped
+        halfway is not journalled, and lands again at the next round.
         """
         try:
             if not isinstance(payload, dict):
                 return False
             skill = payload.get("skill")
             if not isinstance(skill, dict):
-                return False
+                named = _keyed(record_id) if deleted and not skill else None
+                if named is None:
+                    return False
+                skill = {"category": named[0], "name": named[1]}
             category = skill.get("category")
             name = skill.get("name")
             if (
@@ -1036,9 +1632,15 @@ class SkillRegistry:
                 # one here: an approval of the bytes they replace is retired,
                 # so those bytes, sent back later, are shown and named again.
                 if deleted:
-                    (path.parent / APPROVED_FILENAME).unlink(missing_ok=True)
-                    path.unlink(missing_ok=True)
-                    (path.parent / USAGE_FILENAME).unlink(missing_ok=True)
+                    said: list = []
+                    there = path.is_file() or path.is_symlink()
+                    if there or os.path.lexists(path.parent):
+                        self._forget_folder_of(path, said, listed=there)
+                    if there:
+                        cat, nm = _safe_segment(category, "general"), _safe_segment(name, "untitled-skill")
+                        said += _forget_proposals(cat, nm, data=self.root.parent)
+                    for what in said:
+                        logger.warning("a paired device's deletion of skill %s: %s", record_id, what)
                     return True
                 markdown = skill.get("markdown")
                 if not isinstance(markdown, str) or not markdown:
@@ -1341,13 +1943,14 @@ class SkillRegistry:
         _audit("publish", name=nm, category=cat, version=skill.version, source=draft.source, digest=sha256)
         return skill
 
-    def delete_named(self, name: str, category: str, *, draft: bool, sha256: str) -> bool:
-        """Delete the draft, or the published skill, whose text ``sha256`` names, and nothing else.
+    def delete_named(self, name: str, category: str, *, draft: bool, sha256: str, left: list | None = None) -> bool:
+        """Delete the draft, or the published skill, whose text ``sha256`` names, and nothing else, forgotten
+        (:meth:`forget_skill`, what stays named in ``left``).
 
         Refused (:class:`SkillRefused`), nothing deleted, when there is no
         such skill (``missing``) or its text is no longer the one the digest
-        names (``changed``). A published skill's final version is archived
-        first, as :meth:`delete` does.
+        names (``changed``); refused (:class:`SkillNotForgotten`) when its
+        forgetting cannot remove its text, the skill listed.
         """
         with self._locked():
             current = self.get(name, category, draft=draft)
@@ -1356,7 +1959,7 @@ class SkillRegistry:
                 raise SkillRefused("missing", f"no {kind} '{category}/{name}' to delete")
             if current.digest() != _as_str(sha256):
                 raise SkillRefused("changed", f"'{category}/{name}' is not the text the digest names")
-            return self.delete(name, category, draft=draft)
+            return self.forget_skill(name, category, draft=draft, left=left)
 
     def adopt(self, name: str, category: str, digest_prefix: str) -> str | None:
         """Adopt the bytes on disk of a published skill not admitted here, named by their digest.

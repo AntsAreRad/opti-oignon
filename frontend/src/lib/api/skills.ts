@@ -83,14 +83,23 @@ export async function publishSkill(category: string, name: string, sha256: strin
 	return apiPost<Skill>(`${ref(category, name)}/publish`, { sha256 });
 }
 
-/** Delete exactly the draft or the published skill named, by the digest of its text shown. */
+/** What a deletion answers: whether it deleted, and what it could not finish, when there is any -- the paired
+ * devices not told, a store not reached. */
+export interface SkillDeleted {
+	deleted: boolean;
+	not_forgotten?: string[];
+}
+
+/** Delete exactly the draft or the published skill named, by the digest of its text shown; it goes with its history,
+ * and its deletion is published to the paired devices. */
 export async function deleteSkill(
 	category: string,
 	name: string,
 	status: SkillStatus,
 	sha256: string
-): Promise<{ deleted: boolean }> {
+): Promise<SkillDeleted> {
 	const query = `status=${encodeURIComponent(status)}&sha256=${encodeURIComponent(sha256)}`;
+	// What it could not finish rides beside the flag, when there is any.
 	return apiDelete<{ deleted: boolean }>(`${ref(category, name)}?${query}`);
 }
 

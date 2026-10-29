@@ -254,6 +254,31 @@ def _get_notes_store() -> Any:
     return get_notes_store()
 
 
+def _get_skill_registry() -> Any:
+    """The skills' registry: every skill and draft, the whole install's (no user scope). None when this tree has no
+    skills; one that is there and cannot be loaded raises. Getting it makes no folder."""
+    try:
+        from opti_oignon.agent.skills import get_skill_registry
+    except ModuleNotFoundError as e:
+        if _absent(e, "opti_oignon.agent.skills"):
+            return None
+        raise
+    return get_skill_registry()
+
+
+def _forgotten_offers() -> list[str]:
+    """Every skill a paired device offered and this device has not approved, forgotten from the deferred ledger,
+    overwritten, its log emptied, when its file is there; none in a tree without the ledger."""
+    try:
+        from opti_oignon.veilid.deferred_ledger import forget_offers
+    except ModuleNotFoundError as e:
+        if _absent(e, "opti_oignon.veilid.deferred_ledger"):
+            return []
+        raise
+    forget_offers("skill")
+    return []
+
+
 def _get_project_store() -> Any:
     """The projects store: every project, its files and outputs, the whole install's (no user scope). None when this
     tree has no projects; one that is there and cannot be loaded raises."""
@@ -363,11 +388,12 @@ WIPE_NOT_COVERED = (
     "code execution outputs (the files a conversation's code wrote, kept by no conversation)",
     "sandbox exports (the files copied out of a sandbox)",
     "skills (written by the user or accepted from the agent)",
+    "skills a paired device offered (waiting for this device's approval)",
     "the garden (allium; no wipe of its own yet)",
     "plugin-owned data stores (plugin-local DBs)",
     "plugin logs (not checked for words)",
     "settings files the user writes (presets, custom pipelines, benchmark profiles, their backups)",
-    "sync: paired devices, skills a peer offered, and every record's latest version in the change feed",
+    "sync: paired devices, and every record's latest version in the change feed",
     "the onion's counters (counts only)",
     "context ledger (what each window held, counted)",
     "performance metrics store",
@@ -416,6 +442,10 @@ WIPE_WHEN_NAMED = {
         "the knowledge base's injection audit (the flagged chunks' text)",
         "knowledge-base ingest jobs",
     ),
+    "skills": (
+        "skills (written by the user or accepted from the agent)",
+        "skills a paired device offered (waiting for this device's approval)",
+    ),
 }
 
 # Stores every wipe removes for the user it is asked for, in any mode: what the preview says goes.
@@ -463,6 +493,11 @@ PROJECTS_NOTICE = ("The export carries each project, its instructions and what w
 # What the preview says to the user when the knowledge base is named.
 KNOWLEDGE_NOTICE = ("The export carries each collection of the knowledge base, its documents and their chunks' text; "
                     "the files they were read from are not kept by the app: keep your own copies.")
+# What the preview says to the user when the skills are named.
+SKILLS_NOTICE = ("Each skill's deletion is published to your paired devices, which forget it too when they next sync; "
+                 "one the sync journal cannot take now is named, and published at the next deletion. The skills a "
+                 "paired device offered and you have not approved go too. The export carries each skill and the "
+                 "versions its history keeps.")
 # Said beside it when the notes hidden here cannot be counted.
 NOTES_UNREAD_NOTICE = ("The sync journal cannot be read: the notes hidden here that a paired device still shows are "
                        "not counted, and a wipe now would leave them.")
@@ -523,6 +558,13 @@ def _counted(words: tuple[str, ...]) -> dict[str, dict[str, int]]:
                                    else {"collections": 0, "documents": 0, "chunks": 0, "code": ""})
         except Exception as e:  # noqa: BLE001 - said, and nothing is removed
             raise WipeRefused(503, f"the knowledge base cannot be read: {type(e).__name__}; nothing removed") from e
+    if "skills" in words:
+        try:
+            registry = _get_skill_registry()
+            counts["skills"] = ({**registry.counts(), "code": registry.fingerprint()} if registry is not None
+                                else {"skills": 0, "published": 0, "drafts": 0, "versions": 0, "code": ""})
+        except Exception as e:  # noqa: BLE001 - said, and nothing is removed
+            raise WipeRefused(503, f"the skills cannot be read: {type(e).__name__}; nothing removed") from e
     return counts
 
 
@@ -544,6 +586,10 @@ def _phrase(counts: dict[str, dict[str, Any]]) -> str:
         n = counts["knowledge"]["documents"]
         parts.append(f"{n} knowledge-base document" + ("" if n == 1 else "s")
                      + (f" {counts['knowledge']['code']}" if counts["knowledge"].get("code") else ""))
+    if "skills" in counts:
+        n = counts["skills"]["skills"]
+        parts.append(f"{n} skill" + ("" if n == 1 else "s")
+                     + (f" {counts['skills']['code']}" if counts["skills"].get("code") else ""))
     return "remove " + " and ".join(parts)
 
 
@@ -577,6 +623,8 @@ def wipe_preview(user_id: str, remove: Any = ()) -> dict[str, Any]:
             notices.append(PROJECTS_NOTICE)
         if "knowledge" in words:
             notices.append(KNOWLEDGE_NOTICE)
+        if "skills" in words:
+            notices.append(SKILLS_NOTICE)
         preview["notice"] = " ".join(notices)
     return preview
 
@@ -661,7 +709,7 @@ class UserDataExporter:
         # The projects' index is drawn from their files, which are carried: it is not.
         carried = ["conversations (store not user-scoped)", "artifacts (stored in conversation metadata)",
                    *WIPE_WHEN_NAMED["notes"], *WIPE_WHEN_NAMED["projects"][:2],
-                   WIPE_WHEN_NAMED["knowledge"][0]] if single else []
+                   WIPE_WHEN_NAMED["knowledge"][0], WIPE_WHEN_NAMED["skills"][0]] if single else []
         left = [label for label in [*WIPE_NOT_COVERED, *EXPORT_NOT_COVERED] if label not in carried]
         if not single:
             left = [label for label in left if label not in EXPORT_NOT_COVERED[1:]]
@@ -672,7 +720,7 @@ class UserDataExporter:
                 # 1.1: adds plugin_reviews and retained_by_design.
                 # 1.2: adds pending_writes.
                 # 1.3: adds notes, the one user's conversations, and failed.
-                # 1.4: adds projects, and the knowledge base (a key added, none changed).
+                # 1.4: adds projects, the knowledge base and the skills (keys added, none changed).
                 "format_version": "1.4",
                 "not_covered": left,
                 # Audit trails survive a wipe by design.
@@ -684,6 +732,7 @@ class UserDataExporter:
             "notes": self._export_notes(failed) if single else [],
             "projects": self._export_projects(failed) if single else [],
             "knowledge": self._export_knowledge(failed) if single else [],
+            "skills": self._export_skills(failed) if single else [],
             "memories": self._export_memories(user_id),
             "rag_collections": self._export_rag(user_id),
             "plugin_configs": self._export_plugin_configs(user_id),
@@ -857,6 +906,22 @@ class UserDataExporter:
                 logger.warning("The note %s could not be read for the export: %s", note_id, e)
                 failed.append(f"note {note_id} (not exported: {type(e).__name__})")
         return out
+
+    @staticmethod
+    def _export_skills(failed: list[str]) -> list[dict[str, Any]]:
+        """Single-user mode, the one user: every skill and draft, its place, status and text, and for a skill the
+        versions its history keeps. One that cannot be read is named in ``failed``, never taken for an empty one."""
+        try:
+            registry = _get_skill_registry()
+            if registry is None:
+                return []
+            exported, missing = registry.export_all()
+        except Exception as e:  # noqa: BLE001 - said
+            logger.warning("The skills could not be read for the export: %s", type(e).__name__)
+            failed.append(f"skills (not exported: {type(e).__name__})")
+            return []
+        failed.extend(missing)
+        return exported
 
     @staticmethod
     def _export_knowledge(failed: list[str]) -> list[dict[str, Any]]:
@@ -1132,6 +1197,12 @@ class UserDataDeleter:
                     results["content_removed"]["knowledge"] = documents
                     results["not_covered"] = [label for label in results["not_covered"]
                                               if label not in WIPE_WHEN_NAMED["knowledge"]] + left_knowledge
+            if "skills" in words:
+                skills, left_skills = _guarded(failed, "skills", self._remove_skills, (0, None))
+                if left_skills is not None:
+                    results["content_removed"]["skills"] = skills
+                    results["not_covered"] = [label for label in results["not_covered"]
+                                              if label not in WIPE_WHEN_NAMED["skills"]] + left_skills
         results["not_covered"] += failed
 
         # Log to admin audit
@@ -1278,6 +1349,59 @@ class UserDataDeleter:
                 left += step()
             except Exception as e:  # noqa: BLE001 - named, and what went is still counted
                 logger.warning("The wipe's step of the knowledge base (%s) failed: %s", what, type(e).__name__)
+                left.append(f"{label} (not {what}: {type(e).__name__})")
+        return removed, list(dict.fromkeys(left))
+
+    @staticmethod
+    def _remove_skills() -> tuple[int, list[str]]:
+        """Single-user mode, the skills named: every skill and draft forgotten through its deletion
+        (``SkillRegistry.forget_skill``: its folder overwritten with its history, its versions in the sync journal
+        erased, its decided proposals, its tombstone published, so the paired devices forget it too), in up to three
+        passes, then what earlier deletions left and the tombstones the journal owes (``sweep_orphans``), then every
+        skill a paired device offered (the deferred ledger's); how many skills, and what could not be removed, named.
+        A skill made while the wipe runs goes with the others, one still arriving after the passes is named; one whose
+        deletion refuses is tried again at the next pass, and named when it refuses at the last; a listing or a step
+        that fails is named, and what went is still counted. A registry that cannot be read at first raises: nothing
+        was removed. A tree without skills holds none; a registry whose folder is not there is not made."""
+        registry = _get_skill_registry()
+        labels = WIPE_WHEN_NAMED["skills"]
+        removed, left, failed = 0, [], {}
+        keys = registry.skill_keys() if registry is not None else []
+        for _ in range(3):
+            if not keys:
+                break
+            for key in keys:
+                category, name, draft = key
+                try:
+                    gone = registry.forget_skill(name, category, draft=draft, sweep=False, left=left)
+                except Exception as e:  # noqa: BLE001 - named, and the other skills go on
+                    logger.warning("The wipe could not delete a skill: %s", type(e).__name__)
+                    what = "draft" if draft else "skill"
+                    failed[key] = f"{labels[0]} (the {what} '{category}/{name}' not deleted: {type(e).__name__})"
+                    continue
+                failed.pop(key, None)
+                removed += int(gone)
+            try:
+                keys = registry.skill_keys()
+            except Exception as e:  # noqa: BLE001 - named, and what went is still counted
+                logger.warning("The wipe could not list the skills again: %s", type(e).__name__)
+                left.append(f"{labels[0]} (not listed again: {type(e).__name__}; any skill left is not counted)")
+                keys = None
+                break
+        if keys:
+            arrived = [key for key in keys if key not in failed]
+            if arrived:
+                left.append(f"{labels[0]} ({len(arrived)} made while the wipe ran, left)")
+        # A skill that refused and has gone since is not named; one the listing could not see again is.
+        left += [failed[key] for key in (failed if keys is None else keys) if key in failed]
+        steps = [(labels[1], "removed", lambda: _forgotten_offers())]
+        if registry is not None:
+            steps.insert(0, (labels[0], "what earlier deletions left, swept", registry.sweep_orphans))
+        for label, what, step in steps:
+            try:
+                left += step()
+            except Exception as e:  # noqa: BLE001 - named, and what went is still counted
+                logger.warning("The wipe's step of the skills (%s) failed: %s", what, type(e).__name__)
                 left.append(f"{label} (not {what}: {type(e).__name__})")
         return removed, list(dict.fromkeys(left))
 

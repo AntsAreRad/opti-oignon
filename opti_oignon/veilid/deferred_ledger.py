@@ -171,6 +171,8 @@ _DELETE_BELOW = (
 
 _DELETE_ALL = f"DELETE FROM {_safe_table(TABLE_NAME)}"
 
+_DELETE_KIND = f"DELETE FROM {_safe_table(TABLE_NAME)} WHERE kind = ?"
+
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -352,6 +354,8 @@ class DeferredLedger:
                 ),
             )
             conn.commit()
+            # The version replaced is overwritten (``secure_delete``); its older frames in the log go with it.
+            _empty_log(conn)
             return OFFER_REPLACED
 
     def remove(self, kind: str, record_id: str) -> bool:
@@ -399,6 +403,36 @@ class DeferredLedger:
             cur = conn.execute(_DELETE_BELOW, (kind, record_id, int(clock)))
             conn.commit()
             return cur.rowcount > 0
+
+    def forget_offers(self, kind: str, record_id: str | None = None, *, below: int | None = None,
+                      beaten_by: SyncRecord | None = None) -> int:
+        """A deletion's forgetting of what this ledger holds of what it deleted: the offer of ``record_id`` held at a
+        clock strictly below ``below``, and the one at that clock which the deletion's tombstone ``beaten_by`` beats
+        (``choose_winner``: applying it would lose) -- one that beats the tombstone is a version newer than the
+        deletion, left for the human to decide --, or with no ``record_id`` every offer of ``kind`` (the wipe);
+        overwritten, the log emptied; how many. A ledger whose file is not there holds none, and is not created to be
+        asked."""
+        if record_id is not None and (isinstance(below, bool) or not isinstance(below, int)):
+            raise ValueError("an offer is forgotten below the clock of the deletion that outclocks it")
+        if self._connection is None and not self._resolve_db_path().exists():
+            return 0
+        with self._lock:
+            conn = self._conn()
+            if record_id is None:
+                cur = conn.execute(_DELETE_KIND, (str(kind),))
+            else:
+                cur = conn.execute(_DELETE_BELOW, (str(kind), str(record_id), int(below)))
+            gone = int(cur.rowcount or 0)
+            if record_id is not None and beaten_by is not None:
+                row = conn.execute(_SELECT_ONE, (str(kind), str(record_id))).fetchone()
+                stored = decode_record(_row_to_entry(row).envelope) if row is not None else None
+                if stored is not None and int(stored.clock) == int(below) and (
+                        choose_winner([stored, beaten_by]) is beaten_by):
+                    gone += int(conn.execute(_DELETE_ONE, (str(kind), str(record_id))).rowcount or 0)
+            conn.commit()
+            if gone:
+                _empty_log(conn)
+        return gone
 
     def clear(self) -> None:
         """Remove every entry (the file and connection are kept)."""
@@ -452,6 +486,32 @@ class DeferredLedger:
 
 _ledger: DeferredLedger | None = None
 _ledger_lock = threading.Lock()
+
+
+def _empty_log(conn: sqlite3.Connection) -> None:
+    """Empty the write-ahead log after a deletion, whose older frames still hold the offers removed. Never waits: a
+    read in progress keeps the log, said, until the next deletion; the connection's own wait is given back after."""
+    try:
+        wait = int(conn.execute("PRAGMA busy_timeout").fetchone()[0])
+        conn.execute("PRAGMA busy_timeout = 0")
+        try:
+            busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
+        finally:
+            conn.execute(f"PRAGMA busy_timeout = {wait}")
+    except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+        logger.warning("deferred ledger: offers removed; the write-ahead log could not be emptied (%s)",
+                       type(exc).__name__)
+        return
+    if busy:
+        logger.warning("deferred ledger: offers removed; a read in progress keeps the write-ahead log, whose older "
+                       "frames hold them, until the next deletion")
+
+
+def forget_offers(kind: str, record_id: str | None = None, *, below: int | None = None,
+                  beaten_by: SyncRecord | None = None) -> int:
+    """A deletion's forgetting of the offers the process ledger holds of what it deleted
+    (``DeferredLedger.forget_offers``)."""
+    return get_deferred_ledger().forget_offers(kind, record_id, below=below, beaten_by=beaten_by)
 
 
 def get_deferred_ledger(root: Path | str | None = None) -> DeferredLedger:

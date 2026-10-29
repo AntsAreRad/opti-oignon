@@ -434,8 +434,8 @@ STORES = {
     "skills": _store(
         "opti_oignon/agent/skills.py", classes=("SkillRegistry",), accesses=("get_skill_registry",),
         writes=("add", "update", "patch", "publish", "delete", "apply_synced_skill", "adopt_synced",
-                "write_accepted", "publish_draft", "delete_named", "adopt"),
-        quiet=("delete", "delete_named"),
+                "write_accepted", "publish_draft", "delete_named", "adopt", "forget_skill", "sweep_orphans"),
+        quiet=("delete", "delete_named", "forget_skill", "sweep_orphans"),
         reason="the skills, whose text re-enters the prompt once admitted: written here by hand, or its bytes "
                "named by their digest on this device",
     ),
@@ -744,6 +744,7 @@ EXEMPT = {
     ("opti_oignon/user_data_manager.py", "legacy"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "notes"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "projects"): ("quiet", "the user's own erasure"),
+    ("opti_oignon/user_data_manager.py", "skills"): ("quiet", "the user's own erasure"),
     ("opti_oignon/projects.py", "project_index"): (
         "quiet", "a project's deletion, or a file's removal, forgets the chunks drawn from its files"),
 }

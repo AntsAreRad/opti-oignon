@@ -3480,6 +3480,40 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] A deleted skill keeps no words, its deletion reaches the
+  paired devices, and the account wipe removes the skills when the
+  request names them. Deleting a skill archived its final version into
+  its history first -- one more full copy of its text --, unlinked its
+  file and two of its sidecars without overwriting them, and left its
+  history, its sync mark and its folder, named by the skill; a failure
+  was swallowed and the panel said "Deleted". Its tombstone named no
+  skill, so a paired device refused it at the landing and kept the
+  skill, serving it on; a deletion whose tombstone was not journalled
+  left the skill's versions in the sync journal. The review queue kept
+  the decided proposals that held its text, and the deferred ledger a
+  paired device's offer of it. Now a deletion erases the skill's versions
+  in the journal first, the floor they leave kept, then overwrites and
+  removes its folder -- its history, its counter, its marks, its file
+  last -- and its decided proposals; a pending proposal and a newer offer
+  stay, listed for a decision. Its tombstone names the skill, and a
+  paired device lands it -- one from a build before this by its key --
+  and forgets the skill the same way; one that finds an offer of the
+  skill waiting takes its place, the offer overwritten, and lands when
+  approved. A history that cannot be removed, or a sync journal that
+  cannot be written or loaded, refuses while the skill's file stays, the
+  skill listed (503, "delete it again"); a queue or a ledger
+  out of reach, and a tombstone the journal did not take, are named
+  (`not_forgotten`, shown by the panel) -- an owed tombstone is published
+  by the next deletion, whose sweep also removes what deletions before
+  this left (a folder holding only what the registry writes beside a
+  skill) and the decided proposals of skills deleted before. The wipe removes
+  the skills only when the request names `skills` and repeats the
+  preview's phrase (`remove 3 skills 8f1e`): every skill and draft
+  through its deletion, and every skill a paired device offered. The
+  export carries every skill, its text and the versions its history
+  keeps. sk1-sk11 in the new `tests/test_skill_forgetting_contracts.py`;
+  lc6, kb11 and pf13 give way to sk1, sk9 and sk11.
+
 - [SECURITY] A document removed from the knowledge base keeps no words,
   and the account wipe removes the knowledge base when the request names
   it. Removing a document deleted its row and its citations on a

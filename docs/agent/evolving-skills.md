@@ -10,7 +10,8 @@ and you publish it by naming the digest of the text you read.
 
 Skills live in a registry on disk under `data/skills/`. Each published skill is a
 `<category>/<name>/SKILL.md`; drafts left from before proposals live under a
-`.drafts/` area until published; prior versions are retained under `.versions/`.
+`.drafts/` area until published; prior versions are kept under `.versions/` while
+the skill lives.
 A `_usage.json` sidecar records how often each skill is consulted, so a
 consultation never rewrites the SKILL.md itself. Path components are strictly
 validated, and every mutation is appended to the hash-chain audit log.
@@ -57,6 +58,26 @@ not run by `/skill` nor consulted until you adopt its bytes by their digest: a r
 kept the source of the skill it replaced, so any skill the registry rewrote then --
 it keeps a `.versions/` history -- waits for that one adoption.
 
+## Deleting a skill
+
+A deleted skill keeps no words on this device. Its versions in the sync journal are
+erased first, the highest clock kept as a floor; then its folder is overwritten and
+removed -- its history, its counter, its sync mark and approval, its file last --, with
+the review queue's decided proposals of it and a paired device's offer its deletion
+outclocks; a proposal still waiting and a newer offer stay, listed for a decision. Its
+tombstone names the skill, so a paired device lands it and forgets the skill the same
+way; a tombstone from a build before this, which names nothing, lands by its key, and one
+that finds an offer of the skill waiting takes its place and lands when approved. A
+history that cannot be removed, or a sync journal that cannot be written or loaded,
+refuses while the file stays: the skill is listed, and deleting it again finishes it. A tombstone the
+journal does not take is named, and the next deletion publishes it, with what deletions
+before this left -- a folder holding only what the registry writes beside a skill, and the
+proposals decided after their skill was deleted; a folder holding anything else is left.
+A draft's deletion is device-local. The account wipe removes every skill and draft when the request names
+`skills`, and the skills a paired device offered; the export carries every skill and the
+versions its history keeps. A draft of the same name is its own row, deleted on its own; the
+audit chain keeps the record of each deletion (the skill's name and category), by design.
+
 ## API surface
 
 The panel consumes the skills surface mounted under the agent route, and the review
@@ -69,7 +90,10 @@ queue's:
 - `POST /api/agent/skills/{category}/{name}/publish` publishes a draft named by the
   digest of its text; a draft changed since is refused.
 - `DELETE /api/agent/skills/{category}/{name}?status=...&sha256=...` deletes the
-  draft or the published skill named, by that digest.
+  draft or the published skill named, by that digest: `{"deleted": true}`, with
+  `not_forgotten` naming what the deletion could not finish when there is any (the
+  paired devices not told, the review queue or the deferred ledger out of reach);
+  a 503 when the deletion refused, the skill still listed.
 - `POST /api/agent/skills/{category}/{name}/adopt` adopts a published skill's bytes
   named by their digest.
 - `GET /api/pending-writes?store=skills` lists the waiting proposals, and

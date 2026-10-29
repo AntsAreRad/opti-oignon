@@ -1270,6 +1270,14 @@ fail_under = 0
 # tests/test_knowledge_forgetting_contracts.py, which keeps its other assertions unchanged and holds the third.
 # It stays in the tree word for word.
 #
+# A deleted skill keeps no words, and the wipe removes the skills when a request names them (block 194). lc6 of
+# tests/test_skill_lifecycle_versioning_contracts.py held that a deletion archives the final version and keeps the
+# history: it gives way to sk1 of tests/test_skill_forgetting_contracts.py, which keeps its other assertions (the
+# file gone, a second deletion refused) and takes the history with the skill. kb11 held the request words three: it
+# gives way to sk9, which keeps its other assertions unchanged and holds the fourth. pf13 of
+# tests/test_project_forgetting_contracts.py counted four copies of the overwrite: it gives way to sk11, which runs it
+# unchanged on those four and holds the fifth, the skills', to the same text. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1715,4 +1723,7 @@ addopts = """
     --deselect=tests/test_executor_onion_window_contracts.py::test_jw6_the_admission_stands_between_the_plan_and_the_composition_and_a_descent_is_composed_under_it
     --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b33_every_storage_statement_is_a_constant_and_one_is_bound
     --deselect=tests/test_project_forgetting_contracts.py::test_pf12_what_a_deletion_names_starts_with_the_inventorys_label
+    --deselect=tests/test_skill_lifecycle_versioning_contracts.py::test_lc6_delete_archives_the_final_version_and_keeps_history
+    --deselect=tests/test_knowledge_forgetting_contracts.py::test_kb11_the_requests_words_are_three_and_failures_carry_the_inventorys_labels
+    --deselect=tests/test_project_forgetting_contracts.py::test_pf13_no_deletion_overwrites_a_file_another_link_names
 """

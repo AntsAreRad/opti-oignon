@@ -2,9 +2,9 @@
   YourDataPanel.svelte -- the user's own data: export it first, see what a wipe removes and leaves, then wipe.
 
   1. The export, offered before anything else: downloaded, or skipped by a deliberate choice.
-  2. The preview: what the wipe removes and what stays. In single-user mode the notes, the projects and the
-     knowledge base can be named for removal; the preview then counts them and gives the phrase to type, and says what the paired devices
-     and the export do with them.
+  2. The preview: what the wipe removes and what stays. In single-user mode the notes, the projects, the
+     knowledge base and the skills can be named for removal; the preview then counts them and gives the phrase to type, and says what
+     the paired devices and the export do with them.
   3. The typed confirmations: the wipe's own words, and the preview's phrase when content is named. The server
      checks the phrase again against what it counts at that moment, and refuses when the counts moved.
   4. The answer, failures first.
@@ -29,6 +29,7 @@
 	let removeNotes = false;
 	let removeProjects = false;
 	let removeKnowledge = false;
+	let removeSkills = false;
 	let preview: WipePreview | null = null;
 	let previewing = false;
 	let previewError = '';
@@ -42,10 +43,11 @@
 	let result: WipeResult | null = null;
 	let lines: WipeAnswerLines | null = null;
 
-	$: named = wordsNamed(removeNotes, removeProjects, removeKnowledge);
+	$: named = wordsNamed(removeNotes, removeProjects, removeKnowledge, removeSkills);
 	$: notesCounted = preview?.counts?.notes;
 	$: projectsCounted = preview?.counts?.projects;
 	$: knowledgeCounted = preview?.counts?.knowledge;
+	$: skillsCounted = preview?.counts?.skills;
 	$: allowed = canWipe({
 		exportOffered,
 		typedWipe,
@@ -57,8 +59,10 @@
 
 	onMount(loadPreview);
 
-	function wordsNamed(notes: boolean, projects: boolean, knowledge: boolean): string[] {
-		return [...(notes ? ['notes'] : []), ...(projects ? ['projects'] : [])].concat(knowledge ? ['knowledge'] : []);
+	function wordsNamed(notes: boolean, projects: boolean, knowledge: boolean, skills: boolean): string[] {
+		return [...(notes ? ['notes'] : []), ...(projects ? ['projects'] : [])]
+			.concat(knowledge ? ['knowledge'] : [])
+			.concat(skills ? ['skills'] : []);
 	}
 
 	async function downloadFirst() {
@@ -80,7 +84,10 @@
 		previewError = '';
 		typedPhrase = '';
 		try {
-			const answer = await previewWipe(userId, wordsNamed(removeNotes, removeProjects, removeKnowledge));
+			const answer = await previewWipe(
+				userId,
+				wordsNamed(removeNotes, removeProjects, removeKnowledge, removeSkills)
+			);
 			if (asked === previewAsked) preview = answer;
 		} catch (err: unknown) {
 			if (asked === previewAsked) previewError = parseApiError(err, 'reading what a wipe removes').message;
@@ -101,6 +108,11 @@
 
 	function toggleKnowledge(event: CustomEvent<boolean>) {
 		removeKnowledge = event.detail;
+		loadPreview();
+	}
+
+	function toggleSkills(event: CustomEvent<boolean>) {
+		removeSkills = event.detail;
 		loadPreview();
 	}
 
@@ -135,8 +147,8 @@
 	<section class="oo-your-data-step" aria-labelledby="oo-your-data-export">
 		<h3 id="oo-your-data-export">1. Keep a copy first</h3>
 		<p>
-			The export holds your conversations, notes, projects, knowledge base, facts and settings as JSON; a
-			project's files and outputs are downloaded from the project. A wipe cannot be undone.
+			The export holds your conversations, notes, projects, knowledge base, skills, facts and settings as
+			JSON; a project's files and outputs are downloaded from the project. A wipe cannot be undone.
 		</p>
 		<div class="oo-your-data-actions">
 			<Button variant="primary" loading={exporting} on:click={downloadFirst}>Download my data</Button>
@@ -187,6 +199,18 @@
 						`${counted(knowledgeCounted.documents, 'document')} and ${counted(knowledgeCounted.chunks, 'chunk')}`
 					: 'Your collections, their documents and chunks, the injection audit and the ingest jobs'}
 				on:change={toggleKnowledge}
+			/>
+		{/if}
+		{#if preview?.on_request?.skills}
+			<Checkbox
+				label="Also delete my skills"
+				checked={removeSkills}
+				disabled={previewing || wiping}
+				description={skillsCounted
+					? `${counted(skillsCounted.skills, 'skill')}, ${counted(skillsCounted.drafts, 'draft')} among them, ` +
+						`and ${counted(skillsCounted.versions, 'earlier version')} kept in their histories`
+					: 'Your skills, their drafts and histories, and the skills a paired device offered'}
+				on:change={toggleSkills}
 			/>
 		{/if}
 		{#if named.length > 0 && preview?.notice}

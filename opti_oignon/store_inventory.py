@@ -34,7 +34,8 @@ WIPES = (REMOVED, ONE_USER, NOT_COVERED, KEPT, NOT_THE_USERS)
 NOTES = "notes"
 PROJECTS = "projects"
 KNOWLEDGE = "knowledge"
-REQUESTS = (NOTES, PROJECTS, KNOWLEDGE)
+SKILLS = "skills"
+REQUESTS = (NOTES, PROJECTS, KNOWLEDGE, SKILLS)
 
 
 class Entry(NamedTuple):
@@ -86,8 +87,8 @@ STORES: tuple[Entry, ...] = (
     Entry("old memory store (single-user, emptied at boot once migrated)", ("memories.db",),
           ("memory/legacy.py", "memory/migration.py"), DRAWN, ONE_USER,
           failures=("old memory store",)),
-    Entry("pending writes (proposals waiting for the user)", ("pending_writes.db",), ("pending_writes.py",), DRAWN,
-          REMOVED,
+    Entry("pending writes (proposals waiting for the user)", ("pending_writes.db",),
+          ("pending_writes.py", "agent/skills.py"), DRAWN, REMOVED,
           failures=("pending writes",)),
     # -- The stores that only keep copies of the user's words: emptied for the one user ---------------------------
     Entry("the coding agent's decision preferences (not user-scoped)", ("fingerprint.db", "*"),
@@ -135,7 +136,9 @@ STORES: tuple[Entry, ...] = (
     Entry("sandbox exports (the files copied out of a sandbox)", ("sandbox_exports",), ("api/routes_sandbox.py",),
           DRAWN, NOT_COVERED),
     Entry("skills (written by the user or accepted from the agent)", ("skills",), ("agent/skills.py",), WORDS,
-          NOT_COVERED),
+          NOT_COVERED, failures=("skills",), request=SKILLS),
+    Entry("skills a paired device offered (waiting for this device's approval)", ("veilid_deferred.db",),
+          ("veilid/deferred_ledger.py", "agent/skills.py"), WORDS, NOT_COVERED, request=SKILLS),
     Entry("the garden (allium; no wipe of its own yet)",
           (".autobio.db", ".autobio.glass.db", ".glass.db", ".sowing.db", ".sowing.glass.db"),
           ("allium/store.py",), DRAWN, NOT_COVERED),
@@ -151,9 +154,9 @@ STORES: tuple[Entry, ...] = (
            "system_presets.py", "cli/config.py"),
           WORDS, NOT_COVERED),
     # -- Sync -----------------------------------------------------------------------------------------------------
-    Entry("sync: paired devices, skills a peer offered, and every record's latest version in the change feed",
-          ("veilid_change_feed.db", "veilid_deferred.db", "veilid_peers.db"),
-          ("veilid/change_feed.py", "veilid/deferred_ledger.py", "veilid/peers.py"), DRAWN, NOT_COVERED),
+    Entry("sync: paired devices, and every record's latest version in the change feed",
+          ("veilid_change_feed.db", "veilid_peers.db"), ("veilid/change_feed.py", "veilid/peers.py", "agent/skills.py"),
+          DRAWN, NOT_COVERED),
     # -- Counts, measures and models ------------------------------------------------------------------------------
     Entry("the onion's counters (counts only)", ("*",), ("memory/librarian.py",), IDS, NOT_COVERED),
     Entry("context ledger (what each window held, counted)", ("context_ledger.db",), ("context_ledger.py",), IDS,

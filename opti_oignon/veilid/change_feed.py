@@ -214,6 +214,16 @@ _RAISE_FLOOR = (
 )
 # A version appended at or above a floor carries the clock itself: the floor goes.
 _DROP_FLOOR = f"DELETE FROM {_safe_table(FLOOR_TABLE_NAME)} WHERE kind = ? AND record_id = ? AND clock <= ?"
+# The latest version of one record.
+_SELECT_ONE_LATEST = (
+    f"SELECT {_SELECT_COLUMNS} FROM {_safe_table(TABLE_NAME)} WHERE kind = ? AND record_id = ? "
+    "ORDER BY seq DESC LIMIT 1"
+)
+# The keys of a kind a deletion left a floor for and whose tombstone was never journalled.
+_SELECT_OWED = (
+    f"SELECT record_id FROM {_safe_table(FLOOR_TABLE_NAME)} WHERE kind = ? AND clock > 0 "
+    f"AND record_id NOT IN (SELECT record_id FROM {_safe_table(TABLE_NAME)} WHERE kind = ?)"
+)
 _SELECT_COUNT = f"SELECT COUNT(*) FROM {_safe_table(TABLE_NAME)}"
 _DELETE_ALL = f"DELETE FROM {_safe_table(TABLE_NAME)}"
 
@@ -955,6 +965,51 @@ class ChangeFeed:
                 states[note_id] = "owed" if floor and floor[0] else "none"
         return states
 
+    def record_states(self, kind: RecordKind | str, record_ids: Iterable[str]) -> dict[str, str]:
+        """``note_states`` for the records of any kind: ``tombstone``, ``live``, ``owed`` (nothing but the floor a
+        deletion here left), ``none``; ``absent`` for every record when the journal's file is not there, which is not
+        created to be asked."""
+        wanted = list(dict.fromkeys(record_ids))
+        if not wanted:
+            return {}
+        if self._connection is None and not self._resolve_db_path().exists():
+            return {record_id: "absent" for record_id in wanted}
+        k = kind.value if isinstance(kind, RecordKind) else str(kind)
+        states: dict[str, str] = {}
+        with self._lock:
+            conn = self._conn()
+            for record_id in wanted:
+                row = conn.execute(_SELECT_LATEST, (k, record_id)).fetchone()
+                if row is not None:
+                    states[record_id] = "tombstone" if row[0] else "live"
+                    continue
+                floor = conn.execute(_SELECT_FLOOR, (k, record_id)).fetchone()
+                states[record_id] = "owed" if floor and floor[0] else "none"
+        return states
+
+    def latest(self, kind: RecordKind | str, record_id: str) -> SyncRecord | None:
+        """The latest version of one record, or None: none journalled, or one that no longer reads. A journal whose
+        file is not there holds none, and is not created to be asked."""
+        if self._connection is None and not self._resolve_db_path().exists():
+            return None
+        k = kind.value if isinstance(kind, RecordKind) else str(kind)
+        with self._lock:
+            conn = self._conn()
+            row = conn.execute(_SELECT_ONE_LATEST, (k, record_id)).fetchone()
+        return self._row_to_record(row[1:]) if row is not None else None
+
+    def owed(self, kind: RecordKind | str) -> list[str]:
+        """The records of a kind whose deletion here erased their versions and whose tombstone the journal never
+        took -- the peers were not told --, sorted. A journal whose file is not there owes none, and is not created
+        to be asked."""
+        if self._connection is None and not self._resolve_db_path().exists():
+            return []
+        k = kind.value if isinstance(kind, RecordKind) else str(kind)
+        with self._lock:
+            conn = self._conn()
+            rows = conn.execute(_SELECT_OWED, (k, k)).fetchall()
+        return sorted(str(row[0]) for row in rows)
+
     def tend(self) -> int:
         """Erase the versions older builds left superseded, overwritten, and empty the log; how many rows went. A
         journal whose file is not there holds none, and is not created to be asked."""
@@ -1028,6 +1083,16 @@ def forget_note(note_id: str, *, versions: bool = True) -> int:
     if versions:
         gone += feed.forget_record(RecordKind.NOTE, note_id)
     return gone
+
+
+def record_states(kind: RecordKind | str, record_ids: Iterable[str]) -> dict[str, str]:
+    """What the process journal holds of each of these records (``ChangeFeed.record_states``)."""
+    return get_change_feed().record_states(kind, record_ids)
+
+
+def owed(kind: RecordKind | str) -> list[str]:
+    """The records of a kind whose tombstone the process journal owes its peers (``ChangeFeed.owed``)."""
+    return get_change_feed().owed(kind)
 
 
 def forget_dead_notes(note_ids: Iterable[str]) -> int:

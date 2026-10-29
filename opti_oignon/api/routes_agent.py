@@ -887,6 +887,11 @@ class SkillDigestRefused(Exception):
     """A publication, deletion or adoption whose digest does not name the text there now: nothing was done."""
 
 
+class SkillStays(Exception):
+    """A deletion the registry refused while the skill's text stays: it is listed, and deleting it again finishes
+    it."""
+
+
 _STATUSES = ("published", "draft")
 
 
@@ -975,15 +980,25 @@ def skill_publish_payload(registry: Any, category: str, name: str, sha256: str) 
     return _skill_payload(published, with_body=True, registry=registry)
 
 
-def skill_delete_payload(registry: Any, category: str, name: str, *, status: str, sha256: str) -> dict[str, bool]:
-    """Delete the draft or the published skill ``status`` names, only when ``sha256`` names the text shown."""
+def skill_delete_payload(registry: Any, category: str, name: str, *, status: str, sha256: str) -> dict[str, Any]:
+    """Delete the draft or the published skill ``status`` names, only when ``sha256`` names the text shown: forgotten,
+    with what its deletion could not finish named, when there is any (``not_forgotten``: the paired devices not told,
+    a store not reached). A deletion refused while the text stays raises ``SkillStays``."""
     if status not in _STATUSES:
         raise ValueError("status must name the target: published or draft")
+    left: list[str] = []
     try:
-        deleted = registry.delete_named(name, category, draft=(status == "draft"), sha256=sha256)
+        deleted = registry.delete_named(name, category, draft=(status == "draft"), sha256=sha256, left=left)
     except LookupError as refused:
         raise _refused(refused, f"{category}/{name}") from refused
-    return {"deleted": bool(deleted)}
+    except RuntimeError as refused:
+        if type(refused).__name__ == "SkillNotForgotten":
+            raise SkillStays(str(refused)) from refused
+        raise
+    answer: dict[str, Any] = {"deleted": bool(deleted)}
+    if left:
+        answer["not_forgotten"] = list(left)
+    return answer
 
 
 def skill_adopt_payload(registry: Any, category: str, name: str, sha256: str) -> dict[str, Any]:
@@ -1160,8 +1175,9 @@ try:
             raise HTTPException(status_code=500, detail="Failed to publish skill")
 
     @router.delete("/skills/{category}/{name}")
-    def delete_skill(category: str, name: str, status: str, sha256: str) -> dict[str, bool]:
-        """Delete the draft or the published skill its status names, only when the digest names the text shown."""
+    def delete_skill(category: str, name: str, status: str, sha256: str) -> dict[str, Any]:
+        """Delete the draft or the published skill its status names, only when the digest names the text shown; what
+        the deletion could not finish, named (``not_forgotten``); 503 when it refused, the skill listed."""
         registry = _resolve_skill_registry()
         try:
             return skill_delete_payload(registry, category, name, status=status, sha256=sha256)
@@ -1169,6 +1185,8 @@ try:
             raise HTTPException(status_code=404, detail="Skill not found")
         except SkillDigestRefused as exc:
             raise HTTPException(status_code=409, detail=str(exc))
+        except SkillStays as exc:
+            raise HTTPException(status_code=503, detail=str(exc))
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc))
         except Exception:  # pragma: no cover - registry write is defensive

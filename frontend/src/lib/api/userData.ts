@@ -23,6 +23,7 @@ export interface WipePreview {
 		notes?: { notes: number; attachments: number; disputed: number | null; deleted_notes: number; code: string };
 		projects?: { projects: number; files: number; outputs: number; code: string };
 		knowledge?: { collections: number; documents: number; chunks: number; code: string };
+		skills?: { skills: number; published: number; drafts: number; versions: number; code: string };
 	};
 	phrase?: string;
 	notice?: string;

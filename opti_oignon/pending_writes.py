@@ -472,6 +472,26 @@ class PendingWriteStore:
             _FORGOTTEN.discard(str(conversation_id))
             raise
 
+    def forget_decided(self, store: str, names: Callable[[str, str, dict], bool]) -> int:
+        """Delete the decided proposals of ``store`` that ``names`` -- asked with each one's action, status and
+        arguments -- says name a deleted target: those declined, and those accepted whose write is done, whatever
+        their user; how many. What is deleted is overwritten (every connection, ``secure_delete``); a failure raises.
+        A proposal still pending is listed for a decision, and one accepted whose write is still under way is that
+        write's: both stay."""
+        with self._lock, self._connect() as conn:
+            rows = conn.execute(
+                "SELECT id, action, status, arguments FROM pending_writes WHERE store = ? "
+                "AND (status = 'declined' OR (status = 'accepted' AND outcome IS NOT NULL))", (str(store),)).fetchall()
+            gone = 0
+            for pid, action, status, arguments in rows:
+                try:
+                    named = names(str(action), str(status), json.loads(arguments))
+                except (TypeError, ValueError):
+                    named = False
+                if named:
+                    gone += conn.execute("DELETE FROM pending_writes WHERE id = ?", (pid,)).rowcount
+            return gone
+
     def claim(self, pid: str, *, user_id: str | None = None) -> PendingWrite | None:
         """Mark a pending proposal accepted, once; the proposal, or None when it was not pending."""
         uid = self._uid(user_id)
@@ -540,6 +560,17 @@ def get_pending_store() -> PendingWriteStore:
         if _QUEUE is None:
             _QUEUE = PendingWriteStore()
         return _QUEUE
+
+
+def forget_decided(store: str, names: Callable[[str, str, dict], bool]) -> int:
+    """Forget the decided proposals the process's review queue holds of a deleted target
+    (``PendingWriteStore.forget_decided``); how many. A queue this process never opened, whose file is not in the
+    data directory, holds none, and is not created."""
+    with _QUEUE_LOCK:
+        queue = _QUEUE
+    if queue is None and not _default_db_path().exists():
+        return 0
+    return get_pending_store().forget_decided(store, names)
 
 
 def forget_conversation(conversation_id: str) -> int:
@@ -680,8 +711,11 @@ def _apply_skill(action: str, arguments: dict, registry: Any) -> str:
             return f"Skill '{category}/{name}' published as v{skill.version} (sha256 {skill.digest()[:16]})."
         if action == "delete":
             draft = bool(arguments.get("draft"))
-            registry.delete_named(name, category, draft=draft, sha256=str(arguments.get("base_sha256") or ""))
-            return f"{'Draft' if draft else 'Skill'} '{category}/{name}' deleted."
+            left: list[str] = []
+            registry.delete_named(name, category, draft=draft, sha256=str(arguments.get("base_sha256") or ""),
+                                  left=left)
+            said = f" Not forgotten: {'; '.join(left)}." if left else ""
+            return f"{'Draft' if draft else 'Skill'} '{category}/{name}' deleted.{said}"
     except LookupError as refused:
         reason = getattr(refused, "reason", "missing")
         if reason == "changed":

@@ -29,7 +29,7 @@
 		type Skill,
 		type SkillStatus
 	} from '$lib/api/skills';
-	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { toastSuccess, toastError, toastWarning } from '$lib/stores/notifications';
 	import PendingWritesReview from './PendingWritesReview.svelte';
 
 	type Filter = 'all' | 'published' | 'drafts';
@@ -82,11 +82,13 @@
 		}
 	}
 
+	// A run that answers words -- what a deletion could not finish -- has them shown in place of its success.
 	async function act(skill: Skill, run: () => Promise<unknown>, done: string, failed: string) {
 		busyKey = skill.key;
 		try {
-			await run();
-			toastSuccess(done);
+			const said = await run();
+			if (typeof said === 'string') toastWarning(said);
+			else toastSuccess(done);
 			await load();
 		} catch (e) {
 			toastError(e instanceof Error ? e.message : failed);
@@ -106,8 +108,17 @@
 	}
 
 	function handleDelete(skill: Skill, shown: Skill) {
-		act(skill, () => deleteSkill(skill.category, skill.name, skill.status, shown.sha256), `Deleted ${skill.name}`,
-			'Failed to delete skill');
+		act(
+			skill,
+			async () => {
+				const answer = await deleteSkill(skill.category, skill.name, skill.status, shown.sha256);
+				if (!answer.deleted) throw new Error(`${skill.name} was not deleted`);
+				const left = answer.not_forgotten ?? [];
+				return left.length > 0 ? `Deleted ${skill.name}; not all of it went: ${left.join('; ')}` : undefined;
+			},
+			`Deleted ${skill.name}`,
+			'Failed to delete skill'
+		);
 	}
 
 	onMount(load);

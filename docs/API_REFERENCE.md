@@ -424,10 +424,13 @@ instructions and settings, the conversations linked to it, and its
 files' and outputs' names, sizes and what was drawn from each (summary,
 key terms) -- their bytes are downloaded from the project
 (`GET /api/projects/{id}/files/{file_id}/content`,
-`.../outputs/{output_id}/content`), named in `not_covered`. `failed`
-names each part that could not be read -- a conversation the store
-answers nothing for, the conversations it counts and its listing did
-not reach.
+`.../outputs/{output_id}/content`), named in `not_covered` --, every
+collection of the knowledge base with its documents and their chunks'
+text, and every skill and draft with its text and the versions its
+history keeps (the skills a paired device offered stay with it, named in
+`not_covered`). `failed` names each part that could not be read -- a
+conversation the store answers nothing for, the conversations it counts
+and its listing did not reach.
 
 **Response (200):**
 
@@ -445,6 +448,7 @@ not reach.
   "notes": [{"id": "...", "title": "...", "body_text": "...", "updates": [...], "attachments": [...]}],
   "projects": [{"id": "...", "name": "...", "system_instructions": "...", "files": [...], "outputs": [...]}],
   "knowledge": [{"name": "...", "description": "...", "documents": [{"doc_id": "...", "source_file": "...", "chunks": [...]}]}],
+  "skills": [{"category": "...", "name": "...", "status": "published", "markdown": "...", "versions": [{"file": "v1.md", "markdown": "..."}]}],
   "memories": [...],
   "rag_collections": [...],
   "plugin_configs": [...],
@@ -512,9 +516,16 @@ its chunks first, then the injection audit's entries and the ingest
 records of its documents, then its rows, overwritten --, then the whole
 injection audit and every ingest job, then what earlier removals left,
 then the logs emptied once; `content_removed` counts the documents. The
-words can be named together (`remove=notes&remove=projects&remove=knowledge`),
-with one phrase for all. The rest of the content the user manages -- the
-coding history, skills, the garden, the plugins' data -- is not removed. `not_covered` names every store it leaves, and why one
+skills go the same way, only when named (`remove=skills`): each skill
+and draft deleted as its own deletion does -- its versions in the sync
+journal erased, its folder overwritten with its history, its decided
+proposals, its tombstone published, so the paired devices forget it
+too --, then what earlier deletions left and the tombstones the journal
+owes, then every skill a paired device offered; `content_removed` counts
+the skills and drafts. The words can be named together
+(`remove=notes&remove=projects&remove=knowledge&remove=skills`), with one
+phrase for all. The rest of the content the user manages -- the coding
+history, the garden, the plugins' data -- is not removed. `not_covered` names every store it leaves, and why one
 could not be emptied or removed -- a store that cannot even be opened
 included, which stops none of the steps after it; `retained_by_design`,
 the trails kept on purpose. Every store is classified in
@@ -566,8 +577,11 @@ notes a3f9 and 3 projects b2c1` for both), and a notice that the export
 carries no file's bytes. With `remove=knowledge`, the collections,
 documents and chunks counted, the phrase's part (`remove 8
 knowledge-base documents 8f1e`), and a notice that the export carries
-the documents' chunks, not the files they were read from. Refusals as
-the wipe's.
+the documents' chunks, not the files they were read from. With
+`remove=skills`, the skills and drafts counted, with the versions their
+histories keep, the phrase's part (`remove 3 skills 8f1e`), and a notice
+that each deletion is published to the paired devices. Refusals as the
+wipe's.
 
 **Response (200):**
 
