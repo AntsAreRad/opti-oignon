@@ -20,7 +20,7 @@
 		ingestURL,
 		queryKnowledgeBase,
 	} from '$lib/api/rag';
-	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { toastSuccess, toastError, toastWarning } from '$lib/stores/notifications';
 	import { parseApiError } from '$lib/api/errorHandler';
 	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
 	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
@@ -124,9 +124,10 @@
 		deletingCollection = true;
 		deleteError = null;
 		try {
-			await deleteCollection(name);
+			const left = (await deleteCollection(name)).not_forgotten ?? [];
 			pendingCollection = null;
-			toastSuccess(`Collection "${name}" deleted`);
+			if (left.length > 0) toastWarning(`Collection "${name}" deleted; not all of it went: ${left.join('; ')}`);
+			else toastSuccess(`Collection "${name}" deleted`);
 			await loadCollections();
 			if (docManagerRef) docManagerRef.refresh();
 		} catch (e) {

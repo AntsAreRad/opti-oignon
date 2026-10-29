@@ -12,7 +12,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { listDocuments, listCollections, deleteDocument } from '$lib/api/rag';
-	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { toastSuccess, toastError, toastWarning } from '$lib/stores/notifications';
 	import { parseApiError } from '$lib/api/errorHandler';
 	import ConfirmDialog from '$lib/ds/ConfirmDialog.svelte';
 	import StopAllButton from '$lib/components/layout/StopAllButton.svelte';
@@ -158,9 +158,10 @@
 		deletingDoc = true;
 		deleteError = null;
 		try {
-			await deleteDocument(doc.doc_id);
+			const left = (await deleteDocument(doc.doc_id)).not_forgotten ?? [];
 			pendingDoc = null;
-			toastSuccess(`Deleted "${name}"`);
+			if (left.length > 0) toastWarning(`Deleted "${name}"; not all of it went: ${left.join('; ')}`);
+			else toastSuccess(`Deleted "${name}"`);
 			await loadDocuments();
 		} catch (e) {
 			const message = parseApiError(e, 'deleting the document').message;
@@ -187,17 +188,20 @@
 		bulkDeleting = true;
 		let success = 0;
 		let failed = 0;
+		const left = new Set<string>();
 
 		for (const docId of selectedIds) {
 			try {
-				await deleteDocument(docId);
+				for (const line of (await deleteDocument(docId)).not_forgotten ?? []) left.add(line);
 				success++;
 			} catch {
 				failed++;
 			}
 		}
 
-		if (success > 0) toastSuccess(`Deleted ${success} document(s)`);
+		if (success > 0 && left.size > 0)
+			toastWarning(`Deleted ${success} document(s); not all of it went: ${[...left].join('; ')}`);
+		else if (success > 0) toastSuccess(`Deleted ${success} document(s)`);
 		if (failed > 0) toastError(`Failed to delete ${failed} document(s)`);
 
 		bulkDeleting = false;

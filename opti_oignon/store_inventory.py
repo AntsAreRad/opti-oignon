@@ -33,7 +33,8 @@ WIPES = (REMOVED, ONE_USER, NOT_COVERED, KEPT, NOT_THE_USERS)
 # request names it -- in single-user mode, for the install's one user, the preview's phrase repeated.
 NOTES = "notes"
 PROJECTS = "projects"
-REQUESTS = (NOTES, PROJECTS)
+KNOWLEDGE = "knowledge"
+REQUESTS = (NOTES, PROJECTS, KNOWLEDGE)
 
 
 class Entry(NamedTuple):
@@ -115,14 +116,15 @@ STORES: tuple[Entry, ...] = (
           request=PROJECTS),
     Entry("the knowledge base: documents, their chunks and vectors (not user-scoped)",
           ("rag_documents.db", "vectors.db", "*"), ("rag_store.py", "rag/config.py"), WORDS, NOT_COVERED,
-          failures=("knowledge base collections named for the user",)),
+          failures=("knowledge base collections named for the user", "knowledge base"), request=KNOWLEDGE),
     Entry("the knowledge base's index cache (the documents' paths and hashes)", ("cache", "index_cache.json"),
           ("rag/config.py", "rag/indexer.py"), IDS, NOT_COVERED),
     Entry("project indexes (chunks of the project files)", ("vectors.db",), ("project_context.py", "projects.py"),
           WORDS, NOT_COVERED, request=PROJECTS),
     Entry("the knowledge base's injection audit (the flagged chunks' text)", ("rag_injection_audit.db", "*"),
-          ("rag_sanitizer.py",), DRAWN, NOT_COVERED),
-    Entry("knowledge-base ingest jobs", ("rag_ingest_jobs.db",), ("rag/batch_ingest.py",), IDS, NOT_COVERED),
+          ("rag_sanitizer.py",), DRAWN, NOT_COVERED, request=KNOWLEDGE),
+    Entry("knowledge-base ingest jobs", ("rag_ingest_jobs.db",), ("rag/batch_ingest.py",), WORDS, NOT_COVERED,
+          request=KNOWLEDGE),
     Entry("legacy vector folders (the documents' chunks in plain text until `db_encryption migrate`)",
           ("chroma_v2", "project_chroma", "chroma_db", "chroma.sqlite3"),
           ("rag_store.py", "project_context.py", "rag/config.py", "vector_db.py", "db_encryption.py",
@@ -225,7 +227,8 @@ NOT_STORES: dict[str, tuple[str, tuple[str, ...]]] = {
                  ("memory/librarian.py",)),
     "logs": ("the knowledge base's log folder, which nothing writes", ("rag/config.py",)),
     "rag": ("the knowledge base's folder: its stores are listed by name",
-            ("rag_store.py", "project_context.py", "rag/batch_ingest.py", "rag/config.py", "rag_dashboard.py")),
+            ("rag_store.py", "project_context.py", "rag/batch_ingest.py", "rag/config.py", "rag_dashboard.py",
+             "user_data_manager.py")),
     ".db": ("a suffix: the garden's beings' files end in it, and the encryption tool finds every database by it",
             ("allium/store.py", "db_encryption.py")),
 }

@@ -187,8 +187,63 @@ class _IngestJobsDatabase:
         conn = _safe_connect(self.db_path)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        # A job or a file deleted leaves no path nor name in the file's pages.
+        conn.execute("PRAGMA secure_delete = ON")
         conn.row_factory = sqlite3.Row
         return conn
+
+    def _emptied(self, conn: sqlite3.Connection, jobs: Any = ()) -> bool:
+        """Drop those of ``jobs`` that are finished and that no file record names any more -- a folder job keeps the
+        folder's path --, commit, then empty the write-ahead log, never waiting: whether a read or a write in
+        progress kept it."""
+        conn.executemany("DELETE FROM ingest_jobs WHERE job_id = ? AND status IN ('completed', 'failed', 'cancelled') "
+                         "AND NOT EXISTS (SELECT 1 FROM ingest_files WHERE ingest_files.job_id = ingest_jobs.job_id)",
+                         [(job_id,) for job_id in sorted(set(jobs))])
+        conn.commit()
+        conn.execute("PRAGMA busy_timeout = 0")
+        return bool(conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0])
+
+    def forget_documents(self, doc_ids: Any) -> tuple[int, bool]:
+        """Delete the file records of these documents -- each file's path and name -- overwritten, the log emptied:
+        how many went, and whether a read or a write in progress kept the log."""
+        ids = sorted({str(doc_id) for doc_id in doc_ids})
+        if not ids:
+            return 0, False
+        with self._conn() as conn:
+            jobs = [row[0] for i in ids for row in conn.execute(
+                "SELECT DISTINCT job_id FROM ingest_files WHERE doc_id = ?", (i,)).fetchall()]
+            gone = conn.executemany("DELETE FROM ingest_files WHERE doc_id = ?", [(i,) for i in ids]).rowcount or 0
+            return gone, self._emptied(conn, jobs) if gone else False
+
+    def forget_collection(self, collection: str) -> tuple[int, bool]:
+        """Delete the jobs that stored into this collection, with their file records, overwritten, the log emptied:
+        how many jobs went, and whether a read or a write in progress kept the log."""
+        with self._conn() as conn:
+            jobs = [row[0] for row in conn.execute(
+                "SELECT job_id FROM ingest_jobs WHERE collection = ?", (collection,)).fetchall()]
+            for job_id in jobs:
+                conn.execute("DELETE FROM ingest_files WHERE job_id = ?", (job_id,))
+                conn.execute("DELETE FROM ingest_jobs WHERE job_id = ?", (job_id,))
+            return len(jobs), self._emptied(conn) if jobs else False
+
+    def forget_orphans(self, live_doc_ids: Any) -> tuple[int, bool]:
+        """Delete the file records of documents the knowledge base no longer holds -- left by removals before they
+        were forgotten here -- overwritten, the log emptied: how many went, and whether the log was kept."""
+        live = {str(doc_id) for doc_id in live_doc_ids}
+        with self._conn() as conn:
+            rows = conn.execute("SELECT DISTINCT doc_id, job_id FROM ingest_files WHERE doc_id IS NOT NULL").fetchall()
+            stale = sorted({row[0] for row in rows if row[0] not in live})
+            jobs = [row[1] for row in rows if row[0] not in live]
+            gone = conn.executemany("DELETE FROM ingest_files WHERE doc_id = ?", [(i,) for i in stale]).rowcount or 0
+            return gone, self._emptied(conn, jobs) if gone else False
+
+    def forget_all(self) -> tuple[int, bool]:
+        """Delete every job and file record, overwritten, the log emptied: how many jobs went, and whether the log
+        was kept."""
+        with self._conn() as conn:
+            conn.execute("DELETE FROM ingest_files")
+            gone = conn.execute("DELETE FROM ingest_jobs").rowcount or 0
+            return gone, self._emptied(conn)
 
     def _init_db(self) -> None:
         with self._conn() as conn:
@@ -833,9 +888,15 @@ class BatchIngestEngine:
         job = self.db.get_job(job_id)
         if not job:
             return
+        # The collection's removals counted before any file is read; the job's row read again after: a removal
+        # before the count took the row with it, and one after refuses every landing of the job.
+        removals = getattr(store, "removals", None)
+        since = removals(job.collection) if callable(removals) else None
+        if since is not None and self.db.get_job(job_id) is None:
+            return
 
         try:
-            self._run_files(job_id, job.collection, store, cancel_event)
+            self._run_files(job_id, job.collection, store, cancel_event, since=since)
 
             # Determine final status
             if cancel_event.is_set():
@@ -863,6 +924,8 @@ class BatchIngestEngine:
         collection: str,
         store: Any,
         cancel_event: threading.Event,
+        *,
+        since: int | None = None,
     ) -> None:
         """Chunk ahead in the background pool; store in order on this thread.
 
@@ -976,7 +1039,7 @@ class BatchIngestEngine:
                 except Exception as exc:
                     self._fail(file_rec, str(exc))
                 else:
-                    self._store_file(file_rec, result, store, collection, cancel_event)
+                    self._store_file(file_rec, result, store, collection, cancel_event, since=since)
                 head = None
                 self.db.update_job_counters(job_id)
         finally:
@@ -1142,6 +1205,8 @@ class BatchIngestEngine:
         store: Any,
         collection: str,
         cancel_event: threading.Event,
+        *,
+        since: int | None = None,
     ) -> None:
         """Store one chunked file on this thread, under the governor's
         ticket for the "index" caller."""
@@ -1158,6 +1223,7 @@ class BatchIngestEngine:
                     result,
                     collection=collection,
                     metadata={"batch_job_id": file_rec.job_id, "original_filename": file_rec.filename},
+                    **({} if since is None else {"since": since}),
                 )
         except Exception as exc:
             self._fail(file_rec, str(exc))
@@ -1348,6 +1414,31 @@ def _holding(decision: Any):
 
 _engine_instance: BatchIngestEngine | None = None
 _engine_lock = threading.Lock()
+
+
+def stop_jobs_of(jobs: _IngestJobsDatabase, collection: str) -> None:
+    """Cancel, in the engine of this process when it runs them, the jobs of ``jobs`` that store into this
+    collection: its removal is under way, and what a job still holds refuses to land."""
+    held = _engine_instance
+    if held is None or Path(held.db.db_path) != Path(jobs.db_path):
+        return
+    with jobs._conn() as conn:
+        ids = [row[0] for row in conn.execute("SELECT job_id FROM ingest_jobs WHERE collection = ?", (collection,))]
+    with held._lock:
+        for job_id in ids:
+            flag = held._cancel_flags.get(job_id)
+            if flag is not None:
+                flag.set()
+
+
+def existing_jobs(data_dir: str | Path) -> _IngestJobsDatabase | None:
+    """The ingest jobs' records in this folder when their file is there (the engine's own when it is built there);
+    None otherwise: asking an install that never ran a job makes nothing."""
+    path = Path(data_dir) / "rag_ingest_jobs.db"
+    held = _engine_instance
+    if held is not None and Path(held.db.db_path) == path:
+        return held.db
+    return _IngestJobsDatabase(path) if path.exists() else None
 
 
 def get_batch_ingest_engine(

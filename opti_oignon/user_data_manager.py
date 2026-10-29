@@ -75,6 +75,35 @@ def _get_rag_store() -> Any:
         return None
 
 
+def _cleared_audit() -> list[str]:
+    """The knowledge base's injection audit cleared whole, overwritten, its log emptied, when its file is there; a
+    log a read or a write in progress kept, named."""
+    from opti_oignon.rag_sanitizer import existing_audit_log
+
+    audit = existing_audit_log()
+    if audit is None or not audit.clear_all()[1]:
+        return []
+    return [f"{WIPE_WHEN_NAMED['knowledge'][1]} (a read or a write in progress keeps what was erased in the "
+            "database's file until it ends)"]
+
+
+def _removed_jobs(data_dir: Any) -> list[str]:
+    """Every knowledge-base ingest job and file record removed, overwritten, the log emptied, when their file is
+    there (in the knowledge base's folder, else the default one); a log a read or a write in progress kept,
+    named."""
+    from opti_oignon.rag.batch_ingest import existing_jobs
+
+    if data_dir is None:
+        from opti_oignon.config import DATA_DIR
+
+        data_dir = Path(DATA_DIR) / "rag"
+    jobs = existing_jobs(data_dir)
+    if jobs is None or not jobs.forget_all()[1]:
+        return []
+    return [f"{WIPE_WHEN_NAMED['knowledge'][2]} (a read or a write in progress keeps what was erased in the "
+            "database's file until it ends)"]
+
+
 def _get_pending_store() -> Any:
     """The review queue of pending writes: the agent's memory and notes writes waiting for the user. A queue that
     cannot be opened raises: its caller names it."""
@@ -382,6 +411,11 @@ WIPE_WHEN_NAMED = {
         "project files and saved outputs",
         "project indexes (chunks of the project files)",
     ),
+    "knowledge": (
+        "the knowledge base: documents, their chunks and vectors (not user-scoped)",
+        "the knowledge base's injection audit (the flagged chunks' text)",
+        "knowledge-base ingest jobs",
+    ),
 }
 
 # Stores every wipe removes for the user it is asked for, in any mode: what the preview says goes.
@@ -426,6 +460,9 @@ NOTES_NOTICE = ("Each note's deletion is published to your paired devices, which
 # What the preview says to the user when the projects are named.
 PROJECTS_NOTICE = ("The export carries each project, its instructions and what was drawn from its files, not the files "
                    "themselves: download the files and outputs you want to keep from their project first.")
+# What the preview says to the user when the knowledge base is named.
+KNOWLEDGE_NOTICE = ("The export carries each collection of the knowledge base, its documents and their chunks' text; "
+                    "the files they were read from are not kept by the app: keep your own copies.")
 # Said beside it when the notes hidden here cannot be counted.
 NOTES_UNREAD_NOTICE = ("The sync journal cannot be read: the notes hidden here that a paired device still shows are "
                        "not counted, and a wipe now would leave them.")
@@ -479,6 +516,13 @@ def _counted(words: tuple[str, ...]) -> dict[str, dict[str, int]]:
                                   else {"projects": 0, "files": 0, "outputs": 0, "code": ""})
         except Exception as e:  # noqa: BLE001 - said, and nothing is removed
             raise WipeRefused(503, f"the projects cannot be read: {type(e).__name__}; nothing removed") from e
+    if "knowledge" in words:
+        try:
+            store = _get_rag_store()
+            counts["knowledge"] = ({**store.counts(), "code": store.fingerprint()} if store is not None
+                                   else {"collections": 0, "documents": 0, "chunks": 0, "code": ""})
+        except Exception as e:  # noqa: BLE001 - said, and nothing is removed
+            raise WipeRefused(503, f"the knowledge base cannot be read: {type(e).__name__}; nothing removed") from e
     return counts
 
 
@@ -496,6 +540,10 @@ def _phrase(counts: dict[str, dict[str, Any]]) -> str:
         n = counts["projects"]["projects"]
         parts.append(f"{n} project" + ("" if n == 1 else "s") + (f" {counts['projects']['code']}"
                                                                 if counts["projects"].get("code") else ""))
+    if "knowledge" in counts:
+        n = counts["knowledge"]["documents"]
+        parts.append(f"{n} knowledge-base document" + ("" if n == 1 else "s")
+                     + (f" {counts['knowledge']['code']}" if counts["knowledge"].get("code") else ""))
     return "remove " + " and ".join(parts)
 
 
@@ -527,6 +575,8 @@ def wipe_preview(user_id: str, remove: Any = ()) -> dict[str, Any]:
                 notices.append(NOTES_UNREAD_NOTICE)
         if "projects" in words:
             notices.append(PROJECTS_NOTICE)
+        if "knowledge" in words:
+            notices.append(KNOWLEDGE_NOTICE)
         preview["notice"] = " ".join(notices)
     return preview
 
@@ -610,7 +660,8 @@ class UserDataExporter:
         failed: list[str] = []
         # The projects' index is drawn from their files, which are carried: it is not.
         carried = ["conversations (store not user-scoped)", "artifacts (stored in conversation metadata)",
-                   *WIPE_WHEN_NAMED["notes"], *WIPE_WHEN_NAMED["projects"][:2]] if single else []
+                   *WIPE_WHEN_NAMED["notes"], *WIPE_WHEN_NAMED["projects"][:2],
+                   WIPE_WHEN_NAMED["knowledge"][0]] if single else []
         left = [label for label in [*WIPE_NOT_COVERED, *EXPORT_NOT_COVERED] if label not in carried]
         if not single:
             left = [label for label in left if label not in EXPORT_NOT_COVERED[1:]]
@@ -621,7 +672,7 @@ class UserDataExporter:
                 # 1.1: adds plugin_reviews and retained_by_design.
                 # 1.2: adds pending_writes.
                 # 1.3: adds notes, the one user's conversations, and failed.
-                # 1.4: adds projects.
+                # 1.4: adds projects, and the knowledge base (a key added, none changed).
                 "format_version": "1.4",
                 "not_covered": left,
                 # Audit trails survive a wipe by design.
@@ -632,6 +683,7 @@ class UserDataExporter:
                               else self._export_conversations(user_id)),
             "notes": self._export_notes(failed) if single else [],
             "projects": self._export_projects(failed) if single else [],
+            "knowledge": self._export_knowledge(failed) if single else [],
             "memories": self._export_memories(user_id),
             "rag_collections": self._export_rag(user_id),
             "plugin_configs": self._export_plugin_configs(user_id),
@@ -805,6 +857,23 @@ class UserDataExporter:
                 logger.warning("The note %s could not be read for the export: %s", note_id, e)
                 failed.append(f"note {note_id} (not exported: {type(e).__name__})")
         return out
+
+    @staticmethod
+    def _export_knowledge(failed: list[str]) -> list[dict[str, Any]]:
+        """Single-user mode, the one user: every collection of the knowledge base, its description, and each of its
+        documents -- its source, type, times and metadata -- with its chunks' text in order: what the app keeps of
+        the files it read. One that cannot be read is named in ``failed``, never taken for an empty one."""
+        try:
+            store = _get_rag_store()
+            if store is None:
+                return []
+            exported, missing = store.export_all()
+        except Exception as e:  # noqa: BLE001 - said
+            logger.warning("The knowledge base could not be read for the export: %s", type(e).__name__)
+            failed.append(f"knowledge base (not exported: {type(e).__name__})")
+            return []
+        failed.extend(missing)
+        return exported
 
     @staticmethod
     def _export_projects(failed: list[str]) -> list[dict[str, Any]]:
@@ -1057,6 +1126,12 @@ class UserDataDeleter:
                     results["content_removed"]["projects"] = projects
                     results["not_covered"] = [label for label in results["not_covered"]
                                               if label not in WIPE_WHEN_NAMED["projects"]] + left_projects
+            if "knowledge" in words:
+                documents, left_knowledge = _guarded(failed, "knowledge base", self._remove_knowledge, (0, None))
+                if left_knowledge is not None:
+                    results["content_removed"]["knowledge"] = documents
+                    results["not_covered"] = [label for label in results["not_covered"]
+                                              if label not in WIPE_WHEN_NAMED["knowledge"]] + left_knowledge
         results["not_covered"] += failed
 
         # Log to admin audit
@@ -1079,34 +1154,131 @@ class UserDataDeleter:
         no words left here, its tombstone published, so the paired devices forget it too), then what every dead
         note still held (``sweep_dead_notes``), then the blobs no row names; how many notes, and what could not be
         removed, named. A note that lands while the wipe runs goes with the others; one still arriving after three
-        passes is named. A tree without notes holds none."""
+        passes is named. A note whose deletion fails is tried again at the next pass, and named when it fails at
+        the last; a listing or a sweep that fails is named, and what went is still counted. A store that cannot be
+        read at first raises: nothing was removed. A tree without notes holds none."""
         store = _get_notes_store()
         if store is None:
             return 0, []
         started = time.time()
-        removed, left = 0, []
+        removed, left, failed = 0, [], {}
+
+        def forget(note_id: str) -> tuple[bool, list[str]] | None:
+            try:
+                return store.forget_note(note_id, sweep=False)
+            except Exception as e:  # noqa: BLE001 - named, and the other notes go on
+                logger.warning("The wipe could not delete note %s: %s", note_id, type(e).__name__)
+                failed[note_id] = f"notes and their updates (note {note_id} not deleted: {type(e).__name__})"
+                return None
+
+        ids = store.live_ids()
         for _ in range(3):
-            ids = store.live_ids()
             if not ids:
                 break
             for note_id in ids:
-                died, rest = store.forget_note(note_id, sweep=False)
-                removed += int(died)
-                left += rest
-        still = store.live_ids()
-        if still:
-            left.append(f"notes and their updates ({len(still)} arrived while the wipe ran, left)")
+                outcome = forget(note_id)
+                if outcome is None:
+                    continue
+                failed.pop(note_id, None)
+                removed += int(outcome[0])
+                left += outcome[1]
+            try:
+                ids = store.live_ids()
+            except Exception as e:  # noqa: BLE001 - named, and what went is still counted
+                logger.warning("The wipe could not list the notes again: %s", type(e).__name__)
+                left.append(f"notes and their updates (not listed again: {type(e).__name__}; any note left is not "
+                            "counted)")
+                ids = None
+                break
+        if ids:
+            arrived = [note_id for note_id in ids if note_id not in failed]
+            if arrived:
+                left.append(f"notes and their updates ({len(arrived)} arrived while the wipe ran, left)")
+        # A note that failed and has gone since is not named; one the listing could not see again is.
+        left += [failed[note_id] for note_id in (failed if ids is None else ids) if note_id in failed]
         # A note dead here that the journal holds alive (a peer's tombstone that lost) is the user's too, counted.
-        hidden = store.disputed_ids()
+        try:
+            hidden = store.disputed_ids()
+        except Exception as e:  # noqa: BLE001 - named
+            logger.warning("The wipe could not read the notes hidden here: %s", type(e).__name__)
+            hidden = None
         if hidden is None:
             left.append("notes and their updates (those hidden here that a paired device still shows, not removed: "
                         "the sync journal could not be read)")
         for note_id in hidden or []:
-            _died, rest = store.forget_note(note_id, sweep=False)
+            outcome = forget(note_id)
+            if outcome is None:
+                left.append(failed[note_id])
+                continue
             removed += 1
-            left += rest
-        left += store.sweep_dead_notes()
-        left += store.forget_orphan_blobs(before=started)
+            left += outcome[1]
+        for sweep, label, what in (
+                (store.sweep_dead_notes, WIPE_WHEN_NAMED["notes"][0], "what dead notes still held"),
+                (lambda: store.forget_orphan_blobs(before=started), WIPE_WHEN_NAMED["notes"][1],
+                 "the attachments no note names")):
+            try:
+                left += sweep()
+            except Exception as e:  # noqa: BLE001 - named, and what went is still counted
+                logger.warning("The wipe could not sweep %s: %s", what, type(e).__name__)
+                left.append(f"{label} ({what}, not swept: {type(e).__name__})")
+        return removed, list(dict.fromkeys(left))
+
+    @staticmethod
+    def _remove_knowledge() -> tuple[int, list[str]]:
+        """Single-user mode, the knowledge base named: every collection forgotten through its removal
+        (``RAGVectorStore.forget_collection``: its chunks first, the audit's entries and the ingest records of its
+        documents, its rows, overwritten), in up to three passes, then the whole injection audit and every ingest
+        job, then what earlier removals left (``sweep_orphans``), then the logs emptied once (``empty_logs``); how
+        many documents, and what could not be removed, named. A collection whose removal fails is tried again at
+        the next pass, and named when it fails at the last; a listing or a sweep that fails is named, and what went
+        is still counted. A knowledge base that cannot be read at first raises: nothing was removed. An install
+        whose knowledge base holds no document file has none to remove, and its audit and ingest jobs, when they
+        are there, are cleared all the same."""
+        store = _get_rag_store()
+        labels = WIPE_WHEN_NAMED["knowledge"]
+        removed, left, failed = 0, [], {}
+        names = store.db.collection_names() if store is not None else []
+        for _ in range(3):
+            if not names:
+                break
+            for name in names:
+                try:
+                    count = len(store.db.get_doc_ids_for_collection(name))
+                    store.forget_collection(name, sweep=False, empty=False)
+                except Exception as e:  # noqa: BLE001 - named, and the other collections go on
+                    logger.warning("The wipe could not remove a knowledge-base collection: %s", type(e).__name__)
+                    what = ("its chunks removed, its rows not" if type(e).__name__ == "RowsLeft"
+                            else "not removed")
+                    failed[name] = f"{labels[0]} (a collection {what}: {type(e).__name__})"
+                    continue
+                failed.pop(name, None)
+                removed += count
+            try:
+                names = store.db.collection_names()
+            except Exception as e:  # noqa: BLE001 - named, and what went is still counted
+                logger.warning("The wipe could not list the knowledge base again: %s", type(e).__name__)
+                left.append(f"{labels[0]} (not listed again: {type(e).__name__}; any collection left is not counted)")
+                names = None
+                break
+        if names:
+            arrived = [name for name in names if name not in failed]
+            if arrived:
+                left.append(f"{labels[0]} ({len(arrived)} collection(s) made while the wipe ran, left)")
+        # A collection that failed and has gone since is not named; one the listing could not see again is.
+        left += [failed[name] for name in (failed if names is None else names) if name in failed]
+        steps = [
+            (labels[1], "cleared", lambda: _cleared_audit()),
+            (labels[2], "removed", lambda: _removed_jobs(store.data_dir if store is not None else None)),
+        ]
+        if store is not None:
+            steps += [(labels[0], "what earlier removals left, swept", store.sweep_orphans),
+                      (labels[0], "the logs emptied", store.empty_logs)]
+        for label, what, step in steps:
+            try:
+                left += step()
+            except Exception as e:  # noqa: BLE001 - named, and what went is still counted
+                logger.warning("The wipe's step of the knowledge base (%s) failed: %s", what, type(e).__name__)
+                left.append(f"{label} (not {what}: {type(e).__name__})")
         return removed, list(dict.fromkeys(left))
 
     @staticmethod

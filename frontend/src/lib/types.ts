@@ -2922,6 +2922,8 @@ export interface RAGCollectionCreateRequest {
 export interface RAGCollectionDeleteResponse {
 	deleted: boolean;
 	name: string;
+	/** What the removal could not finish, named; the next removal sweeps it. */
+	not_forgotten?: string[];
 }
 
 export interface RAGDocument {
@@ -2943,6 +2945,8 @@ export interface RAGDocumentsListResponse {
 export interface RAGDocumentDeleteResponse {
 	deleted: boolean;
 	doc_id: string;
+	/** What the removal could not finish, named; the next removal sweeps it. */
+	not_forgotten?: string[];
 }
 
 export interface RAGIngestResponse {

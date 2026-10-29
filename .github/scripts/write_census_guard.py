@@ -548,8 +548,8 @@ STORES = {
     "documents": _store(
         "opti_oignon/rag_store.py", classes=("RAGVectorStore",), accesses=("get_rag_store",),
         writes=("ingest_file", "ingest_text", "ingest_url", "store_chunked", "delete_document",
-                "delete_collection"),
-        quiet=("delete_document", "delete_collection"),
+                "delete_collection", "forget_document", "forget_collection", "sweep_orphans"),
+        quiet=("delete_document", "delete_collection", "forget_document", "forget_collection", "sweep_orphans"),
         reason="the ingested documents, retrieved into an augmented prompt",
     ),
     "document_index": _store(

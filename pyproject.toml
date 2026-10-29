@@ -1265,6 +1265,11 @@ fail_under = 0
 # tests/test_escalation_preflight_verifies_contracts.py, on the real module.
 # They stay in the tree word for word.
 #
+# The wipe removes the knowledge base when a request names it (block 193): the request words are three. pf12 of
+# tests/test_project_forgetting_contracts.py held them two; it gives way to kb11 of
+# tests/test_knowledge_forgetting_contracts.py, which keeps its other assertions unchanged and holds the third.
+# It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1709,4 +1714,5 @@ addopts = """
     --deselect=tests/test_executor_ledger_emission_contracts.py::test_e5_offline_enqueue_records_its_outcome_without_generation
     --deselect=tests/test_executor_onion_window_contracts.py::test_jw6_the_admission_stands_between_the_plan_and_the_composition_and_a_descent_is_composed_under_it
     --deselect=tests/test_session_fingerprint_heuristics_seam_contracts.py::test_b33_every_storage_statement_is_a_constant_and_one_is_bound
+    --deselect=tests/test_project_forgetting_contracts.py::test_pf12_what_a_deletion_names_starts_with_the_inventorys_label
 """

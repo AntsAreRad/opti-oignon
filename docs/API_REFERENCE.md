@@ -376,7 +376,8 @@ Query the injection audit log.
 
 ### DELETE /api/rag/injection-defense/audit
 
-Clear the injection audit log.
+Clear the injection audit log: every entry, the flagged chunks' text and
+their sources, overwritten, the log emptied.
 
 **Response (200):**
 
@@ -443,6 +444,7 @@ not reach.
   "conversations": [...],
   "notes": [{"id": "...", "title": "...", "body_text": "...", "updates": [...], "attachments": [...]}],
   "projects": [{"id": "...", "name": "...", "system_instructions": "...", "files": [...], "outputs": [...]}],
+  "knowledge": [{"name": "...", "description": "...", "documents": [{"doc_id": "...", "source_file": "...", "chunks": [...]}]}],
   "memories": [...],
   "rag_collections": [...],
   "plugin_configs": [...],
@@ -504,10 +506,15 @@ stay. A project whose deletion fails is tried again, and named when it
 still fails; `content_removed` counts what went. While ChromaDB's projects folder
 waits for `db_encryption migrate`, the index cannot be reached: it is
 named as left, and the first deletion after the migration removes it.
-Both words can be named at once (`remove=notes&remove=projects`), with
-one phrase for both. The rest of the content the user manages -- the
-knowledge base's documents, the coding history, skills, the garden, the
-plugins' data -- is not removed. `not_covered` names every store it leaves, and why one
+The knowledge base goes the same way, only when named
+(`remove=knowledge`): each collection removed as its own removal does --
+its chunks first, then the injection audit's entries and the ingest
+records of its documents, then its rows, overwritten --, then the whole
+injection audit and every ingest job, then what earlier removals left,
+then the logs emptied once; `content_removed` counts the documents. The
+words can be named together (`remove=notes&remove=projects&remove=knowledge`),
+with one phrase for all. The rest of the content the user manages -- the
+coding history, skills, the garden, the plugins' data -- is not removed. `not_covered` names every store it leaves, and why one
 could not be emptied or removed -- a store that cannot even be opened
 included, which stops none of the steps after it; `retained_by_design`,
 the trails kept on purpose. Every store is classified in
@@ -556,7 +563,11 @@ reads and four characters drawn from the notes and attachments counted
 too. With `remove=projects`, the projects, files and outputs counted,
 the phrase's part for them (`remove 3 projects b2c1`, or `remove 12
 notes a3f9 and 3 projects b2c1` for both), and a notice that the export
-carries no file's bytes. Refusals as the wipe's.
+carries no file's bytes. With `remove=knowledge`, the collections,
+documents and chunks counted, the phrase's part (`remove 8
+knowledge-base documents 8f1e`), and a notice that the export carries
+the documents' chunks, not the files they were read from. Refusals as
+the wipe's.
 
 **Response (200):**
 
@@ -629,6 +640,41 @@ Count admin audit events (admin only).
 {
   "count": 234
 }
+```
+
+## Knowledge base
+
+### DELETE /api/rag/documents/{doc_id}
+
+Delete a document: its chunks first, then the injection audit's entries
+of those chunks and the ingest jobs' records of the document, then its
+citations and its row, each overwritten, and the stores' logs emptied;
+what a removal before this left (chunks whose document has no row,
+ingest records of documents gone) goes with it. `not_forgotten` names
+what could not be finished now -- a read or a write in progress that
+keeps what was erased in a database's file until it ends, ingest
+records out of reach, which the next removal finishes, or an injection
+audit out of reach, whose entries its clear or the wipe removes. A
+document whose chunks cannot be removed is not deleted: 503, and it
+stays listed with them; one whose row could not be removed once its
+chunks went, 503 too, listed until it is deleted again. Without the
+knowledge base's store, or while it waits for `db_encryption migrate`,
+503 before anything goes.
+
+```json
+{"deleted": true, "doc_id": "3f2a9c1e0b7d", "not_forgotten": []}
+```
+
+### DELETE /api/rag/collections/{name}
+
+Delete a collection: every one of its documents removed as above, the
+ingest jobs that stored into it with them -- a job still running is
+stopped, and a file it was reading or storing then lands nowhere --,
+every audit entry of it, then its rows; one that is not there is deleted
+already. `not_forgotten` and the refusals as above.
+
+```json
+{"deleted": true, "name": "papers", "not_forgotten": []}
 ```
 
 ## Projects

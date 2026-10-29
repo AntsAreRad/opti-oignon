@@ -81,6 +81,8 @@ class CollectionsListResponse(BaseModel):
 class CollectionDeleteResponse(BaseModel):
     deleted: bool
     name: str
+    # What the removal could not finish, named: the next removal sweeps it.
+    not_forgotten: list[str] = []
 
 
 # -- Documents --
@@ -104,6 +106,8 @@ class DocumentsListResponse(BaseModel):
 class DocumentDeleteResponse(BaseModel):
     deleted: bool
     doc_id: str
+    # What the removal could not finish, named: the next removal sweeps it.
+    not_forgotten: list[str] = []
 
 
 # -- Ingestion --
@@ -345,17 +349,20 @@ def create_collection(request: CollectionCreateRequest) -> dict:
 
 @router.delete("/collections/{name}", response_model=CollectionDeleteResponse)
 def delete_collection(name: str) -> dict:
-    """Delete a collection and all its documents, chunks, and citations."""
+    """Delete a collection and every one of its documents: their chunks, the injection audit's entries and the
+    ingest records of them, their citations and rows, overwritten, the logs emptied; what could not be finished is
+    named (``not_forgotten``). A collection that is not there is deleted already."""
     store = _get_store()
     try:
-        deleted = store.delete_collection(name)
+        _held, left = store.forget_collection(name)
     except RuntimeError as exc:
         # The knowledge base waits for its migration: said as it is, nothing
         # deleted.
         raise HTTPException(status_code=503, detail=str(exc))
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"Collection '{name}' not found")
-    return CollectionDeleteResponse(deleted=True, name=name)
+    except Exception as exc:  # noqa: BLE001 - its chunks could not go: the collection stays, said
+        raise HTTPException(status_code=503, detail=f"the collection was not deleted: its chunks could not be "
+                                                    f"removed ({type(exc).__name__}); it stays as it was")
+    return CollectionDeleteResponse(deleted=True, name=name, not_forgotten=left)
 
 
 # =========================================================================
@@ -841,17 +848,21 @@ def list_documents(
 
 @router.delete("/documents/{doc_id}", response_model=DocumentDeleteResponse)
 def delete_document(doc_id: str) -> dict:
-    """Delete a document and its chunks from the vector store."""
+    """Delete a document: its chunks first, then the injection audit's entries and the ingest records of it, its
+    citations and its row, overwritten, the logs emptied; what could not be finished is named (``not_forgotten``)."""
     store = _get_store()
     try:
-        deleted = store.delete_document(doc_id)
+        deleted, left = store.forget_document(doc_id)
     except RuntimeError as exc:
         # The knowledge base waits for its migration, or its store does not
         # open: said as it is, nothing deleted.
         raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 - its chunks could not go: the document stays, said
+        raise HTTPException(status_code=503, detail=f"the document was not deleted: its chunks could not be "
+                                                    f"removed ({type(exc).__name__}); it stays listed")
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Document '{doc_id}' not found")
-    return DocumentDeleteResponse(deleted=True, doc_id=doc_id)
+    return DocumentDeleteResponse(deleted=True, doc_id=doc_id, not_forgotten=left)
 
 
 # =========================================================================

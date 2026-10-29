@@ -438,8 +438,20 @@ class InjectionAuditLog:
         self._store_text = cfg.get("store_chunk_text", True)
         self._init_db()
 
-    def _init_db(self) -> None:
+    def _open(self) -> sqlite3.Connection:
+        """A connection to the audit that overwrites what it frees: an entry deleted -- evicted, forgotten with its
+        document, cleared -- leaves no text in the file's pages."""
         conn = _safe_connect(self._db_path, check_same_thread=False)
+        conn.execute("PRAGMA secure_delete = ON")
+        return conn
+
+    def _empty_log(self, conn: sqlite3.Connection) -> bool:
+        """Empty the write-ahead log, never waiting: whether a read or a write in progress kept it."""
+        conn.execute("PRAGMA busy_timeout = 0")
+        return bool(conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0])
+
+    def _init_db(self) -> None:
+        conn = self._open()
         try:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("""
@@ -483,7 +495,7 @@ class InjectionAuditLog:
         chunk_text = chunk.original_text if self._store_text else None
         meta_json = json.dumps(metadata or {})
 
-        conn = _safe_connect(self._db_path, check_same_thread=False)
+        conn = self._open()
         try:
             conn.execute("""
                 INSERT INTO injection_audit
@@ -538,7 +550,7 @@ class InjectionAuditLog:
         if conditions:
             where = "WHERE " + " AND ".join(conditions)
 
-        conn = _safe_connect(self._db_path, check_same_thread=False)
+        conn = self._open()
         try:
             cursor = conn.execute(
                 "SELECT * FROM injection_audit " + where
@@ -563,7 +575,7 @@ class InjectionAuditLog:
 
     def count(self) -> int:
         """Return total number of audit entries."""
-        conn = _safe_connect(self._db_path, check_same_thread=False)
+        conn = self._open()
         try:
             row = conn.execute("SELECT COUNT(*) FROM injection_audit").fetchone()
             return row[0] if row else 0
@@ -571,13 +583,47 @@ class InjectionAuditLog:
             conn.close()
 
     def clear(self) -> int:
-        """Delete all audit entries. Returns count deleted."""
-        conn = _safe_connect(self._db_path, check_same_thread=False)
+        """Delete all audit entries, overwritten, the log emptied. Returns count deleted."""
+        count, busy = self.clear_all()
+        if busy:
+            logger.warning("the injection audit cleared; a read in progress keeps the write-ahead log, whose older "
+                           "frames hold the flagged text until the last connection closes")
+        return count
+
+    def clear_all(self) -> tuple[int, bool]:
+        """Delete all audit entries, overwritten, the log emptied: how many went, and whether a read or a write in
+        progress kept the log."""
+        conn = self._open()
         try:
             count = conn.execute("SELECT COUNT(*) FROM injection_audit").fetchone()[0]
             conn.execute("DELETE FROM injection_audit")
             conn.commit()
-            return count
+            return count, self._empty_log(conn)
+        finally:
+            conn.close()
+
+    def forget(self, chunk_ids: Any = (), *, sources: Any = (), collection: str | None = None,
+               whole: bool = False) -> tuple[int, bool]:
+        """Delete the entries a removed document or collection left -- their text, their source's path --
+        overwritten, the log emptied: how many went, and whether a read or a write in progress kept the log. The
+        entries of these chunks; with ``collection``, those of these ``sources`` in it (a writer that keyed the
+        chunk otherwise still named its file and its collection), or with ``whole`` every entry of the collection.
+        An audit whose file is not there holds none, and is not created to be asked."""
+        ids = sorted({str(chunk_id) for chunk_id in chunk_ids})
+        paths = sorted({str(source) for source in sources})
+        if not self._db_path.exists() or not (ids or (collection is not None and (paths or whole))):
+            return 0, False
+        conn = self._open()
+        try:
+            gone = conn.executemany("DELETE FROM injection_audit WHERE chunk_id = ?",
+                                    [(chunk_id,) for chunk_id in ids]).rowcount or 0
+            if collection is not None and whole:
+                gone += conn.execute("DELETE FROM injection_audit WHERE collection = ?", (collection,)).rowcount or 0
+            elif collection is not None:
+                gone += conn.executemany("DELETE FROM injection_audit WHERE source = ? AND collection = ?",
+                                         [(path, collection) for path in paths]).rowcount or 0
+            conn.commit()
+            return gone, self._empty_log(conn) if gone else False
         finally:
             conn.close()
 
@@ -1101,6 +1147,19 @@ def get_rag_sanitizer() -> RAGSanitizer:
     if _rag_sanitizer is None:
         _rag_sanitizer = RAGSanitizer()
     return _rag_sanitizer
+
+
+def existing_audit_log() -> InjectionAuditLog | None:
+    """The audit this process writes to, when its file is there; None otherwise: asking an install that never
+    audited anything makes nothing. Neither the sanitizer nor its audit is built to be asked."""
+    held = _rag_sanitizer
+    if held is not None and held._audit_log is not None:
+        return held._audit_log
+    cfg = held._audit_config if held is not None else load_injection_defense_config().get("audit", {})
+    from opti_oignon.config import DATA_DIR
+    if not (Path(DATA_DIR) / cfg.get("db_filename", "rag_injection_audit.db")).exists():
+        return None
+    return InjectionAuditLog(config=cfg)
 
 
 def reset_rag_sanitizer() -> None:

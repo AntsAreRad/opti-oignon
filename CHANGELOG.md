@@ -3480,6 +3480,46 @@ package costs.
 ### Fixed
 
 
+- [SECURITY] A document removed from the knowledge base keeps no words,
+  and the account wipe removes the knowledge base when the request names
+  it. Removing a document deleted its row and its citations on a
+  connection that overwrote nothing, never emptied the log, and only
+  logged a failure to remove its chunks -- the document gone from the
+  list, its chunks still retrieved into answers; the injection audit
+  (each flagged chunk's text and its file's path) and the ingest jobs
+  (each file's path and name) were never told. An ingestion that was
+  embedding a file when its collection was removed landed in a
+  collection made again. The wipe could not remove the knowledge base,
+  and no export carried it. Now a removal takes the chunks first -- one
+  whose chunks cannot go refuses, the document kept and listed, said --,
+  then the audit's entries of those chunks and the ingest records of the
+  document, then its citations and its row, each overwritten, and every
+  store's log emptied; a collection's removal is every one of its
+  documents removed, with the jobs that stored into it and every audit
+  entry of it. What a removal cannot finish -- a read or a write in
+  progress keeping what was erased in a database's file, ingest records
+  or an audit out of reach -- is named (`not_forgotten` in its answer,
+  shown by the panels); the next removal finishes the ingest records,
+  with what removals before this left (chunks whose document has no row,
+  ingest records of documents gone), and the audit's clear or the wipe
+  the audit's entries. Every write of the knowledge base holds one lock
+  of the process, and a document lands only while its collection is
+  still there and was not removed since its file began to be read or
+  its page fetched -- made again under the same name or not; a removal
+  stops the batch jobs storing into the collection, and what they still
+  hold refuses to land. The wipe
+  removes the knowledge base only when the request names `knowledge` and
+  repeats the preview's phrase (`remove 8 knowledge-base documents
+  8f1e`): every collection, the whole injection audit, every ingest job
+  -- an install whose knowledge base has no document left still has its
+  audit and its jobs cleared --, the logs emptied once, a collection that
+  fails tried again and named.
+  The export carries every collection, its documents and their chunks'
+  text. The notes' wipe no longer stops at a note whose deletion fails:
+  it is named and tried again, the others go and are counted. kb1-kb12
+  in the new `tests/test_knowledge_forgetting_contracts.py`; pf12 gives
+  way to kb11.
+
 - [SECURITY] A sync round writes a version a paired device sent into its
   store only when this device's journal keeps it. Every received note,
   conversation, fact and skill was written into its store first, and only

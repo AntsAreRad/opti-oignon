@@ -25,6 +25,7 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -57,6 +58,27 @@ VECTOR_NAMESPACE = "knowledge"
 # ``get_rag_store()``: ``db_encryption migrate`` computes the vectors of ChromaDB's collections again with them.
 EMBEDDING_MODEL = "mxbai-embed-large"
 OLLAMA_URL = "http://localhost:11434"
+
+
+# Every write of the store -- a collection made, a document's landing, a removal -- holds this one lock of the
+# process: a removal never meets a document half landed, and a landing finds its collection still there or nothing.
+_WRITES = threading.RLock()
+# How many times each collection of each store was removed in this process: a landing that began before a removal
+# refuses, even when the collection was made again since under the same name.
+_REMOVALS: dict[tuple[str, str], int] = {}
+
+# The inventory's labels (``store_inventory``) what a removal could not finish is named under.
+_DOCUMENTS_LABEL = "the knowledge base: documents, their chunks and vectors (not user-scoped)"
+_AUDIT_LABEL = "the knowledge base's injection audit (the flagged chunks' text)"
+_JOBS_LABEL = "knowledge-base ingest jobs"
+
+
+class CollectionRemoved(RuntimeError):
+    """The collection a document was being stored into was removed meanwhile: nothing of the document landed."""
+
+
+class RowsLeft(RuntimeError):
+    """A removal took the chunks, and the rows could not go after them: listed until removed again."""
 
 
 def _waits(exc: BaseException) -> bool:
@@ -249,8 +271,31 @@ class _RAGDatabase:
         conn = _safe_connect(self.db_path)
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
+        # A document, a collection or a search deleted leaves no word in the file's pages.
+        conn.execute("PRAGMA secure_delete = ON")
         conn.row_factory = sqlite3.Row
         return conn
+
+    def empty_log(self) -> bool:
+        """Empty the write-ahead log, never waiting: whether a read or a write in progress kept it."""
+        conn = _safe_connect(self.db_path)
+        try:
+            conn.execute("PRAGMA busy_timeout = 0")
+            return bool(conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0])
+        finally:
+            conn.close()
+
+    def has_collection(self, name: str) -> bool:
+        with self._conn() as conn:
+            return conn.execute("SELECT 1 FROM collections WHERE name = ?", (name,)).fetchone() is not None
+
+    def collection_names(self) -> list[str]:
+        with self._conn() as conn:
+            return [row[0] for row in conn.execute("SELECT name FROM collections ORDER BY created_at")]
+
+    def document_ids(self) -> list[str]:
+        with self._conn() as conn:
+            return [row[0] for row in conn.execute("SELECT doc_id FROM documents ORDER BY ingested_at")]
 
     # -- Collections --
 
@@ -685,11 +730,12 @@ class RAGVectorStore:
         """Create a new collection."""
         if not self._chroma:
             raise RuntimeError("the knowledge base's store is not available")
-        self._chroma.get_or_create_collection(
-            name=name,
-            metadata={"hnsw:space": "cosine"},
-        )
-        self.db.create_collection(name, description)
+        with _WRITES:
+            self._chroma.get_or_create_collection(
+                name=name,
+                metadata={"hnsw:space": "cosine"},
+            )
+            self.db.create_collection(name, description)
         now = time.time()
         return CollectionInfo(
             name=name,
@@ -716,27 +762,60 @@ class RAGVectorStore:
         return results
 
     def delete_collection(self, name: str) -> bool:
-        """Delete a collection and all its documents/chunks.
+        """Delete a collection and all its documents/chunks (``forget_collection``): whether it is gone -- True
+        for a collection that was not there.
 
         While the knowledge base waits for its migration nothing is deleted
         (``vector_db.MigrationPending``): the chunks still in ChromaDB's store
         would come back with it.
         """
         try:
-            if self._chroma:
-                try:
-                    self._chroma.delete_collection(name)
-                except Exception as exc:
-                    if _waits(exc):
-                        raise
-                    # Collection may not exist in the knowledge base's store
-            self.db.delete_collection(name)
+            self.forget_collection(name)
             return True
         except Exception as exc:
             if _waits(exc):
                 raise
-            logger.error("Failed to delete collection %s: %s", name, exc)
+            logger.error("Failed to delete collection %s: %s", name, type(exc).__name__)
             return False
+
+    def forget_collection(self, name: str, *, sweep: bool = True, empty: bool = True) -> tuple[bool, list[str]]:
+        """Forget a collection: its chunks first (the vector collection, overwritten), then the audit's entries and
+        the ingest jobs' records of its documents, then its rows (overwritten), both logs emptied; whether it was
+        there, and what could not be removed, named under the inventory's labels. Chunks that cannot be removed
+        refuse it, the collection kept, the failure raised as it came; a knowledge base that waits for its
+        migration refuses before anything goes (``MigrationPending``). With ``sweep``, what removals made before
+        this left goes too (``sweep_orphans``); without ``empty``, the logs are left to the caller (the wipe empties
+        them once)."""
+        with _WRITES:
+            self._gate()
+            if not self._chroma:
+                raise RuntimeError("the knowledge base's store is not available: nothing was removed")
+            doc_ids = self.db.get_doc_ids_for_collection(name)
+            sources = [d.source_file for d in self.db.list_documents(collection_name=name, limit=1_000_000)]
+            chunk_ids: list[str] = []
+            held = self.db.has_collection(name)
+            try:
+                coll = self._chroma.get_collection(name)
+            except vector_db.CollectionNotFound:
+                coll = None
+            if coll is not None:
+                chunk_ids = list(coll.get(include=[]).get("ids") or [])
+                self._chroma.delete_collection(name)
+                held = True
+            # A landing that began before this removal refuses, the collection made again or not.
+            _REMOVALS[(str(self.data_dir), name)] = self.removals(name) + 1
+            left = self._forget_drawn(chunk_ids, doc_ids, sources, collection=name, whole=True)
+            try:
+                self.db.delete_collection(name)
+            except Exception as exc:
+                raise RowsLeft(f"the chunks of collection {name!r} were removed; its rows could not be "
+                               f"({type(exc).__name__}): it stays listed, delete it again") from exc
+            if sweep:
+                left += self.sweep_orphans()
+            if empty:
+                left += self.empty_logs()
+        logger.info("Forgot a collection: %d document(s), %d chunk(s)", len(doc_ids), len(chunk_ids))
+        return held, list(dict.fromkeys(left))
 
     def get_collection_stats(self, name: str) -> dict[str, Any]:
         """Get detailed stats for a collection."""
@@ -784,15 +863,19 @@ class RAGVectorStore:
             IngestedDocument record.
         """
         doc_id = doc_id or uuid.uuid4().hex[:12]
+        # Counted before the file is read: a removal of its collection while it is read refuses its landing.
+        since = self.removals(collection or self.DEFAULT_COLLECTION)
         chunker = self._get_chunker()
         result = chunker.chunk_file(filepath, doc_id=doc_id)
-        return self.store_chunked(result, collection=collection, metadata=metadata)
+        return self.store_chunked(result, collection=collection, metadata=metadata, since=since)
 
     def store_chunked(
         self,
         result: Any,
         collection: str | None = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        since: int | None = None,
     ) -> IngestedDocument:
         """
         Store a file already chunked: embed its chunks into the store and
@@ -803,6 +886,8 @@ class RAGVectorStore:
             result: The chunker's ChunkingResult for the file.
             collection: Target collection name (default: 'default').
             metadata: Extra metadata to attach.
+            since: The collection's removals counted when the file began to be read (``removals``), by the caller
+                that read it; now, when not given.
 
         Returns:
             IngestedDocument record.
@@ -810,13 +895,15 @@ class RAGVectorStore:
         collection = collection or self.DEFAULT_COLLECTION
         filepath = result.source_file
         doc_id = result.doc_id
+        since = self.removals(collection) if since is None else since
 
-        # Ensure collection exists
+        # Ensure collection exists -- unless it was removed while the file was read: then nothing is made again.
         self._gate()
+        self._still(collection, since, doc_id)
         self.db.create_collection(collection)
 
         if not result.chunks:
-            logger.warning("No chunks produced for %s", filepath)
+            logger.warning("No chunks produced for document %s", doc_id)
             doc = IngestedDocument(
                 doc_id=doc_id,
                 collection_name=collection,
@@ -827,12 +914,8 @@ class RAGVectorStore:
                 ingested_at=time.time(),
                 metadata=metadata or {},
             )
-            self.db.insert_document(doc)
+            self._land(doc, since=since)
             return doc
-
-        # Store chunks in the knowledge base's store
-        self._store_chunks(result.chunks, collection)
-        self.db.touch_collection(collection)
 
         doc = IngestedDocument(
             doc_id=doc_id,
@@ -844,10 +927,11 @@ class RAGVectorStore:
             ingested_at=time.time(),
             metadata=metadata or {},
         )
-        self.db.insert_document(doc)
+        # Store chunks in the knowledge base's store, and the document with them
+        self._store_chunks(result.chunks, collection, doc=doc, since=since)
         logger.info(
-            "Ingested %s: %d chunks into collection '%s'",
-            filepath, result.chunk_count, collection,
+            "Ingested document %s: %d chunks into collection '%s'",
+            doc_id, result.chunk_count, collection,
         )
         return doc
 
@@ -859,6 +943,8 @@ class RAGVectorStore:
         collection: str | None = None,
         doc_id: str | None = None,
         metadata: dict[str, Any] | None = None,
+        *,
+        since: int | None = None,
     ) -> IngestedDocument:
         """
         Ingest raw text content.
@@ -876,16 +962,14 @@ class RAGVectorStore:
         """
         collection = collection or self.DEFAULT_COLLECTION
         doc_id = doc_id or uuid.uuid4().hex[:12]
+        since = self.removals(collection) if since is None else since
 
         self._gate()
+        self._still(collection, since, doc_id)
         self.db.create_collection(collection)
 
         chunker = self._get_chunker()
         result = chunker.chunk_text(text, source=source, file_type=file_type, doc_id=doc_id)
-
-        if result.chunks:
-            self._store_chunks(result.chunks, collection)
-            self.db.touch_collection(collection)
 
         doc = IngestedDocument(
             doc_id=doc_id,
@@ -897,21 +981,29 @@ class RAGVectorStore:
             ingested_at=time.time(),
             metadata=metadata or {},
         )
-        self.db.insert_document(doc)
+        if result.chunks:
+            self._store_chunks(result.chunks, collection, doc=doc, since=since)
+        else:
+            self._land(doc, since=since)
         return doc
 
-    def _store_chunks(self, chunks: list, collection_name: str) -> None:
-        """Embed and store chunks in the knowledge base's store.
+    def _store_chunks(self, chunks: list, collection_name: str, *, doc: IngestedDocument | None = None,
+                      since: int | None = None) -> None:
+        """Embed and store chunks in the knowledge base's store, and ``doc``'s row with them.
 
         A chunk whose embedding fails is dropped and counted; when no chunk has
         an embedding -- the embedder is missing, or every embedding failed --
         nothing is stored and the ingestion is refused by name: the store
-        computes no vector of its own.
+        computes no vector of its own. The embedding runs first, outside the
+        store's lock; the chunks and the row land under it, once ``doc``'s
+        collection is found still there (``_land``).
         """
         if not self._chroma:
             raise RuntimeError("the knowledge base's store is not available")
 
-        coll = self._get_collection(collection_name)
+        # The collection is there before the embedding, as a search of it finds it; its chunks land only with
+        # the document's row.
+        self._get_collection(collection_name)
         embedder = self._get_embedder()
 
         # Prepare data
@@ -948,12 +1040,44 @@ class RAGVectorStore:
             logger.warning("%d of %d chunk(s) dropped: their embedding failed",
                            len(ids) - len(valid), len(ids))
         v_ids, v_docs, v_metas, v_embs = zip(*valid)
-        coll.upsert(
-            ids=list(v_ids),
-            documents=list(v_docs),
-            metadatas=list(v_metas),
-            embeddings=list(v_embs),
-        )
+
+        def upsert() -> None:
+            self._get_collection(collection_name).upsert(
+                ids=list(v_ids),
+                documents=list(v_docs),
+                metadatas=list(v_metas),
+                embeddings=list(v_embs),
+            )
+
+        if doc is None:
+            with _WRITES:
+                upsert()
+            return
+        self._land(doc, upsert, since=since)
+
+    def _still(self, collection: str, since: int, doc_id: str) -> None:
+        """Refuse, before the collection is made again, a document whose collection was removed while it was read
+        or fetched (``CollectionRemoved``)."""
+        if self.removals(collection) != since:
+            raise CollectionRemoved(
+                f"the collection {collection!r} was removed while document {doc_id} was being read: nothing of it "
+                "was kept")
+
+    def _land(self, doc: IngestedDocument, chunks: Any = None, *, since: int | None = None) -> None:
+        """Land a document under the store's lock: its chunks (``chunks``, a call that stores them), then its row,
+        only while its collection is still there and was not removed since ``since`` (its removals counted when
+        the document's storing began) -- one removed while the document was read or embedded refuses, nothing of
+        it stored, even when it was made again since under its name (``CollectionRemoved``)."""
+        with _WRITES:
+            removed = since is not None and self.removals(doc.collection_name) != since
+            if removed or not self.db.has_collection(doc.collection_name):
+                raise CollectionRemoved(
+                    f"the collection {doc.collection_name!r} was removed while document {doc.doc_id} was being "
+                    "stored: nothing of it was kept")
+            if chunks is not None:
+                chunks()
+                self.db.touch_collection(doc.collection_name)
+            self.db.insert_document(doc)
 
     # -----------------------------------------------------------------
     # DOCUMENT MANAGEMENT
@@ -973,44 +1097,208 @@ class RAGVectorStore:
         return self.db.get_document(doc_id)
 
     def delete_document(self, doc_id: str) -> bool:
-        """Delete a document and its chunks from the knowledge base's store + SQLite.
+        """Delete a document and its chunks from the knowledge base's store + SQLite (``forget_document``): whether
+        it went.
 
         While the knowledge base waits for its migration nothing is deleted
         (``vector_db.MigrationPending``): the chunks still in ChromaDB's store
         would come back with it.
         """
-        record = self.db.get_document(doc_id)
-        if record is None:
+        try:
+            return self.forget_document(doc_id)[0]
+        except Exception as exc:
+            if _waits(exc):
+                raise
+            logger.error("Failed to delete document %s: %s", doc_id, type(exc).__name__)
             return False
-        # The collection is opened first: a knowledge base that waits for its
-        # migration refuses here, before the document's row goes. Any other
-        # failure is said below, where the chunks are removed.
-        if self._chroma:
+
+    def forget_document(self, doc_id: str, *, sweep: bool = True, empty: bool = True) -> tuple[bool, list[str]]:
+        """Forget a document: its chunks first (overwritten), then the audit's entries of those chunks and the
+        ingest jobs' records of the document, then its citations and its row (overwritten), both logs emptied;
+        whether it was there, and what could not be removed, named under the inventory's labels. Chunks that cannot
+        be removed refuse it: the document stays listed with them, the failure raised as it came, never a row gone
+        with its chunks still searchable. A knowledge base that waits for its migration refuses before anything goes.
+        ``sweep`` and ``empty`` as ``forget_collection``."""
+        with _WRITES:
+            record = self.db.get_document(doc_id)
+            if record is None:
+                return False, []
+            self._gate()
+            if not self._chroma:
+                raise RuntimeError("the knowledge base's store is not available: nothing was removed")
+            chunk_ids: list[str] = []
             try:
-                self._chroma.get_collection(record.collection_name)
+                coll = self._chroma.get_collection(record.collection_name)
+            except vector_db.CollectionNotFound:
+                coll = None
+            if coll is not None:
+                chunk_ids = list(coll.get(where={"parent_doc_id": {"$eq": doc_id}}, include=[]).get("ids") or [])
+                if chunk_ids:
+                    coll.delete(ids=chunk_ids)
+            # The audit's entries keyed by the file in its collection go too, unless another document there was
+            # read from the same file.
+            others = [d for d in self.db.list_documents(collection_name=record.collection_name, limit=1_000_000)
+                      if d.doc_id != doc_id and d.source_file == record.source_file]
+            left = self._forget_drawn(chunk_ids, [doc_id], [] if others else [record.source_file],
+                                      collection=record.collection_name)
+            try:
+                self.db.delete_document(doc_id)
             except Exception as exc:
+                raise RowsLeft(f"the chunks of document {doc_id} were removed; its row and its citations could "
+                               f"not be ({type(exc).__name__}): it stays listed, delete it again") from exc
+            if sweep:
+                left += self.sweep_orphans()
+            if empty:
+                left += self.empty_logs()
+        logger.info("Forgot document %s: %d chunk(s)", doc_id, len(chunk_ids))
+        return True, list(dict.fromkeys(left))
+
+    def _forget_drawn(self, chunk_ids: list[str], doc_ids: list[str], sources: list[str], *, collection: str,
+                      whole: bool = False) -> list[str]:
+        """What the audit and the ingest jobs hold of these chunks and documents, forgotten: the audit's entries of
+        the chunks, and those of these ``sources`` in ``collection`` (with ``whole``, every entry and every job of
+        the collection); what could not be, named. An audit out of reach now is not reached again by a later
+        removal: its clear, or the wipe, removes what it kept."""
+        left: list[str] = []
+        try:
+            from opti_oignon.rag_sanitizer import existing_audit_log
+
+            audit = existing_audit_log()
+            if audit is not None:
+                _gone, busy = audit.forget(chunk_ids, sources=sources, collection=collection, whole=whole)
+                if busy:
+                    left.append(f"{_AUDIT_LABEL} (a read or a write in progress keeps what was erased in the "
+                                "database's file until it ends)")
+        except Exception as exc:  # noqa: BLE001 - named: no later removal finds these entries again
+            left.append(f"{_AUDIT_LABEL} (the removed chunks' entries not removed: {type(exc).__name__}; the "
+                        "audit's clear removes them)")
+        try:
+            from opti_oignon.rag.batch_ingest import existing_jobs
+
+            jobs = existing_jobs(self.data_dir)
+            if jobs is not None:
+                busy = jobs.forget_documents(doc_ids)[1]
+                if whole:
+                    from opti_oignon.rag.batch_ingest import stop_jobs_of
+
+                    # A job storing into the collection stops: what it still holds refuses to land.
+                    stop_jobs_of(jobs, collection)
+                    busy = jobs.forget_collection(collection)[1] or busy
+                if busy:
+                    left.append(f"{_JOBS_LABEL} (a read or a write in progress keeps what was erased in the "
+                                "database's file until it ends)")
+        except Exception as exc:  # noqa: BLE001 - named, and swept by the next removal
+            left.append(f"{_JOBS_LABEL} (the removed documents' records not removed: {type(exc).__name__})")
+        return left
+
+    def sweep_orphans(self) -> list[str]:
+        """What removals made before this left: in a collection the knowledge base lists, the chunks whose document
+        has no row (a removal took the row, and its chunks' removal failed and was only logged); the ingest records
+        of documents gone -- removed, overwritten; what could not be, named. A vector collection no row names is
+        left as it is: no removal leaves one, and nothing of the knowledge base reads it. Under the store's lock,
+        so no document is ever half landed when it looks. A knowledge base that waits for its migration is not
+        swept."""
+        left: list[str] = []
+        with _WRITES:
+            try:
+                live = set(self.db.document_ids())
+                if self._chroma and getattr(self._chroma, "ready", None) is not None:
+                    names = set(self.db.collection_names())
+                    for coll in self._chroma.list_collections():
+                        if coll.name not in names:
+                            continue
+                        got = coll.get(include=["metadatas"])
+                        stale = [item_id for item_id, meta in zip(got.get("ids") or [], got.get("metadatas") or [])
+                                 if (meta or {}).get("parent_doc_id") and meta["parent_doc_id"] not in live]
+                        if stale:
+                            coll.delete(ids=stale)
+            except Exception as exc:  # noqa: BLE001 - named
                 if _waits(exc):
-                    raise
-        info = self.db.delete_document(doc_id)
-        if not info:
-            return False
-
-        # Remove chunks from the knowledge base's store
-        if self._chroma:
+                    return left
+                left.append(f"{_DOCUMENTS_LABEL} (what earlier removals left, not swept: {type(exc).__name__})")
+                return left
             try:
-                coll_name = info["collection_name"]
-                coll = self._chroma.get_collection(coll_name)
-                # Find chunk IDs by parent_doc_id
-                results = coll.get(
-                    where={"parent_doc_id": {"$eq": doc_id}},
-                    include=[],
-                )
-                if results and results.get("ids"):
-                    coll.delete(ids=results["ids"])
-            except Exception as exc:
-                logger.error("Error removing chunks from the knowledge base's store: %s", exc)
+                from opti_oignon.rag.batch_ingest import existing_jobs
 
-        return True
+                jobs = existing_jobs(self.data_dir)
+                if jobs is not None and jobs.forget_orphans(live)[1]:
+                    left.append(f"{_JOBS_LABEL} (a read or a write in progress keeps what was erased in the "
+                                "database's file until it ends)")
+            except Exception as exc:  # noqa: BLE001 - named
+                left.append(f"{_JOBS_LABEL} (what earlier removals left, not swept: {type(exc).__name__})")
+        return left
+
+    def empty_logs(self) -> list[str]:
+        """Empty the tracking database's log and the chunks' store's, never waiting; what a read or a write in
+        progress kept, named."""
+        left: list[str] = []
+        busy = []
+        try:
+            if self.db.empty_log():
+                busy.append("rag_documents.db")
+        except Exception as exc:  # noqa: BLE001 - named
+            left.append(f"{_DOCUMENTS_LABEL} (the log not emptied: {type(exc).__name__})")
+        try:
+            if self._chroma and not self._chroma.empty_log():
+                busy.append("vectors.db")
+        except Exception as exc:  # noqa: BLE001 - named
+            left.append(f"{_DOCUMENTS_LABEL} (the chunks' log not emptied: {type(exc).__name__})")
+        if busy:
+            left.append(f"{_DOCUMENTS_LABEL} (a read or a write in progress keeps what was erased in the database's "
+                        f"file until it ends: {', '.join(busy)})")
+        return left
+
+    def removals(self, name: str) -> int:
+        """How many times this store's collection ``name`` was removed in this process."""
+        return _REMOVALS.get((str(self.data_dir), name), 0)
+
+    def counts(self) -> dict[str, int]:
+        """How many collections, documents and chunks the knowledge base lists, as a wipe's preview counts them."""
+        rows = self.db.list_collections()
+        return {"collections": len(rows),
+                "documents": sum(int(r.get("document_count") or 0) for r in rows),
+                "chunks": sum(int(r.get("chunk_count") or 0) for r in rows)}
+
+    def fingerprint(self) -> str:
+        """Four characters drawn from every collection and document the knowledge base lists: a document that came
+        while another went, the counts unchanged, changes them."""
+        listed = sorted(self.db.collection_names()) + ["--"] + sorted(self.db.document_ids())
+        return hashlib.sha256("\n".join(listed).encode("utf-8")).hexdigest()[:4]
+
+    def export_all(self) -> tuple[list[dict[str, Any]], list[str]]:
+        """Every collection, its description, and each of its documents -- source, type, times, metadata -- with
+        its chunks' text in their order; and what could not be read, named."""
+        out: list[dict[str, Any]] = []
+        missing: list[str] = []
+        for row in self.db.list_collections():
+            name = row["name"]
+            chunks: dict[str, list[tuple[int, str]]] = {}
+            if self._chroma:
+                try:
+                    coll = self._chroma.get_collection(name)
+                    got = coll.get(include=["metadatas", "documents"])
+                    for text, meta in zip(got.get("documents") or [], got.get("metadatas") or []):
+                        meta = meta or {}
+                        chunks.setdefault(str(meta.get("parent_doc_id", "")), []).append(
+                            (int(meta.get("chunk_index", 0) or 0), text or ""))
+                except vector_db.CollectionNotFound:
+                    pass
+                except Exception as exc:  # noqa: BLE001 - named, the rows still exported
+                    missing.append(f"{_DOCUMENTS_LABEL} (the chunks of a collection not exported: "
+                                   f"{type(exc).__name__})")
+            documents = []
+            for doc in self.db.list_documents(collection_name=name, limit=1_000_000):
+                documents.append({
+                    "doc_id": doc.doc_id,
+                    "source_file": doc.source_file,
+                    "file_type": doc.file_type,
+                    "ingested_at": doc.ingested_at,
+                    "metadata": doc.metadata,
+                    "chunks": [text for _index, text in sorted(chunks.get(doc.doc_id, []), key=lambda c: c[0])],
+                })
+            out.append({"name": name, "description": row.get("description", ""), "created_at": row.get("created_at"),
+                        "documents": documents})
+        return out, missing
 
     # -----------------------------------------------------------------
     # RETRIEVAL
@@ -1265,13 +1553,16 @@ class RAGVectorStore:
 
         # Nothing is fetched while the knowledge base waits for its migration.
         self._gate()
+        collection = collection or self.DEFAULT_COLLECTION
+        # Counted before the page is fetched: a removal of its collection meanwhile refuses its landing.
+        since = self.removals(collection)
 
         # Fetch page
         page = self._fetch_page(url, web_cfg)
 
-        collection = collection or self.DEFAULT_COLLECTION
         doc_id = doc_id or uuid.uuid4().hex[:12]
 
+        self._still(collection, since, doc_id)
         self.db.create_collection(collection)
 
         # Extract text
@@ -1294,7 +1585,7 @@ class RAGVectorStore:
                 ingested_at=time.time(),
                 metadata={**(metadata or {}), "url": url, "domain": parsed.netloc},
             )
-            self.db.insert_document(doc)
+            self._land(doc, since=since)
             return doc
 
         # Chunk and ingest
@@ -1305,6 +1596,7 @@ class RAGVectorStore:
             collection=collection,
             doc_id=doc_id,
             metadata={**(metadata or {}), "url": url, "domain": parsed.netloc},
+            since=since,
         )
 
     @staticmethod
