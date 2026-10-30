@@ -135,7 +135,7 @@ BUDGET_S = {
         3.0,
     "test_ut21_a_pre_inference_hook_sees_the_files_and_may_rewrite_their_text_which_stays_a_document": 2.0,
     "test_ut22_a_stored_turn_outside_the_grammar_or_of_another_text_comes_back_legacy": 2.0,
-    "test_ut23_a_refused_name_says_which_rule_it_breaks": 1.0,
+    "test_ut23_a_refused_name_says_which_rule_it_breaks": 1.5,
     "test_ut24_a_hook_without_the_inference_content_permission_is_never_shown_a_files_text": 2.0,
     "test_ut25_a_hook_that_writes_a_file_in_place_and_fails_changes_nothing_and_a_rewrite_out_of_bounds_is_set_aside":
         3.0,

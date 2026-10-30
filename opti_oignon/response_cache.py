@@ -30,8 +30,10 @@ import logging
 import sqlite3
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .config import DATA_DIR
 
@@ -69,6 +71,61 @@ _ORIGIN_UNKNOWN = "?"
 _FORGOTTEN: set[str] = set()
 # Held while a mark is checked and an entry written, and while a forgetting marks and deletes.
 _MARKS_LOCK = threading.Lock()
+# How many times this process emptied the cache, and, by key, how many it had when the request whose lookup of that
+# key missed began (``begin_request``): an answer a request already under way puts after an emptying -- a deletion of
+# what it may have been drawn from -- is refused, its request older than the emptying. A key looked up again keeps the
+# oldest count. The oldest lookups give way past the bound, far above the requests a process has under way.
+_EMPTIED = [0]
+_ASKED: OrderedDict[Any, int] = OrderedDict()
+_ASKED_LIMIT = 4096
+# The count when the request this thread is making began, before its prompt drew on any store; and the count a request
+# hands back right before its put (``declare_request``), which that put spends.
+_REQUEST = threading.local()
+_PUTTING = threading.local()
+
+
+def begin_request() -> int:
+    """A request begins on this thread, before its prompt draws on any store: its lookups are marked from now, so an
+    answer whose prompt a deletion outran is never put after it; the count, which the request hands back at its put
+    (``declare_request``)."""
+    with _MARKS_LOCK:
+        _REQUEST.count = _EMPTIED[0]
+        return _EMPTIED[0]
+
+
+def declare_request(count: int) -> None:
+    """The request that began at ``count`` (``begin_request``) is about to put its answer on this thread: the next put
+    here is refused when the cache was emptied since, whatever another request on the same key saw. Spent by that
+    put."""
+    _PUTTING.count = int(count)
+
+
+def _declared() -> int | None:
+    """The count the request putting now handed back on this thread, spent; None when none was."""
+    count = getattr(_PUTTING, "count", None)
+    _PUTTING.count = None
+    return count
+
+
+def _note_asked(key: Any) -> None:
+    """A lookup of ``key`` missed: remember how many emptyings the request making it saw when it began -- this
+    thread's, or now when it marked none --, the oldest when the key was already looked up."""
+    with _MARKS_LOCK:
+        seen = min(getattr(_REQUEST, "count", _EMPTIED[0]), _EMPTIED[0])
+        _ASKED[key] = min(_ASKED.get(key, seen), seen)
+        _ASKED.move_to_end(key)
+        while len(_ASKED) > _ASKED_LIMIT:
+            _ASKED.popitem(last=False)
+
+
+def _outdated(key: Any, declared: int | None) -> bool:
+    """Whether the answer about to be put under ``key`` was asked before the cache's last emptying: by the request's
+    own count when it handed one back (``declared``), else by the mark its key's lookup left. Held under
+    ``_MARKS_LOCK``; the key's mark is spent."""
+    asked = _ASKED.pop(key, None)
+    if declared is not None:
+        return declared != _EMPTIED[0]
+    return asked is not None and asked != _EMPTIED[0]
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -357,6 +414,7 @@ class ResponseCache:
                 self._session_misses += 1
                 self._last_cache_hit = False
                 self._last_cache_key = cache_key
+                _note_asked(cache_key)
                 return None
 
             # Verification TTL
@@ -373,6 +431,7 @@ class ResponseCache:
                 self._session_misses += 1
                 self._last_cache_hit = False
                 self._last_cache_key = cache_key
+                _note_asked(cache_key)
                 logger.debug(f"Cache entry expired: {cache_key[:12]}...")
                 return None
 
@@ -442,6 +501,7 @@ class ResponseCache:
         Returns:
             The cache key for the stored entry
         """
+        declared = _declared()
         if not self._enabled:
             return ""
 
@@ -457,6 +517,10 @@ class ResponseCache:
         # deleted by the forgetting, one that takes it after is refused.
         with _MARKS_LOCK:
             if origin and origin in _FORGOTTEN:
+                return ""
+            # An answer asked before the cache was last emptied may be drawn from what that emptying forgot.
+            if _outdated(cache_key, declared):
+                logger.debug("Cache put declined: asked before the cache was emptied")
                 return ""
             conn = self._get_connection()
             try:
@@ -606,7 +670,10 @@ class ResponseCache:
             conn.close()
 
     def empty(self) -> int:
-        """Erase every entry, overwritten; how many. A file that is not there holds none, and is not created."""
+        """Erase every entry, overwritten; how many. A file that is not there holds none, and is not created. From
+        then on, an answer whose lookup came before is never put: it may be drawn from what the emptying forgot."""
+        with _MARKS_LOCK:
+            _EMPTIED[0] += 1
         if not Path(self._db_path).exists():
             return 0
         return self.clear()

@@ -166,7 +166,7 @@ BUDGET_S = {
     "test_xe3_a_start_handed_a_copy_of_the_process_environment_is_a_finding": 8.0,
     "test_xe4_a_launchers_environment_parameter_is_followed_to_its_callers": 8.0,
     "test_xe5_every_inheriting_start_is_listed_with_its_reason_and_its_contract": 8.0,
-    "test_xe6_every_process_sink_of_the_egress_census_is_a_start_counted_here": 8.0,
+    "test_xe6_every_process_sink_of_the_egress_census_is_a_start_counted_here": 10.0,
     "test_xe7_what_cannot_be_read_fails_the_census_by_name": 8.0,
     "test_xe8_no_module_but_process_secrets_reads_a_secret_in_the_environment": 8.0,
     "test_xe9_take_moves_both_secrets_into_the_holder": 6.0,

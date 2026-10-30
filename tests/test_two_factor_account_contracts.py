@@ -111,7 +111,7 @@ BUDGET_S = {
     "test_tf6_no_route_acts_under_a_literal_identity": 2.0,
     "test_tf7_a_factor_enrolled_belongs_to_the_session_account_and_the_login_asks_it": 4.0,
     "test_tf8_the_account_a_session_stands_for": 4.0,
-    "test_tf9_each_route_that_adds_or_removes_a_credential_asks_the_accounts_password": 6.0,
+    "test_tf9_each_route_that_adds_or_removes_a_credential_asks_the_accounts_password": 6.5,
     "test_tf10_a_session_acts_on_its_own_factors_alone": 4.0,
     "test_tf11_setting_totp_up_over_a_verified_secret_is_refused": 4.0,
     "test_tf12_the_second_step_takes_only_what_the_first_offered": 6.0,

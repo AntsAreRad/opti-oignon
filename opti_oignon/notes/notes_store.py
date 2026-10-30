@@ -191,6 +191,19 @@ _DELETE_AWAITED = "DELETE FROM awaited_blob WHERE note_id = ? AND user_id = ?"
 _INSERT_AWAITED = "INSERT OR IGNORE INTO awaited_blob (note_id, attachment_id, user_id) VALUES (?, ?, ?)"
 
 
+def _forget_cached_answers(data: Path) -> list[str]:
+    """The answers the response and semantic caches keep, emptied (``cached_answers``): any may have been drawn from
+    what was deleted. A folder ``data`` that holds neither cache's file holds none of them, and nothing is loaded to
+    be asked."""
+    if not ((data / "response_cache.db").exists() or (data / "semantic_cache.db").exists()):
+        return []
+    try:
+        from opti_oignon.cached_answers import forget_cached_answers
+    except ImportError as exc:
+        return [f"response and semantic caches (not emptied: {type(exc).__name__})"]
+    return forget_cached_answers(data)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -821,7 +834,8 @@ class NotesStore:
     def _forget_after(self, note_id: str, uid: str, *, versions: bool) -> list[str]:
         """What a note's death leaves outside its row, forgotten: its versions (``versions``: this device's own
         deletion, whose tombstone is minted after) and its updates in the sync journal, its update tail, its
-        attachments' blobs then their rows, the log; each step that fails named. A store whose module this tree
+        attachments' blobs then their rows, the log, its decided proposals in the review queue, the cached answers;
+        each step that fails named. A store whose module this tree
         does not have holds nothing of the note; one whose file is not there holds none, and is not created."""
         left: list[str] = []
         try:
@@ -839,7 +853,37 @@ class NotesStore:
             attachments = [str(r[0]) for r in conn.execute(_SELECT_NOTE_ATTACHMENTS, (note_id, uid)).fetchall()]
         left += self._forget_attachments(attachments, uid)
         self._empty_log()
+        left += self._forget_proposals([note_id])
+        # The cached answers: any may have been drawn from the note.
+        left += _forget_cached_answers(self._db_path.parent)
         return left
+
+    def _forget_proposals(self, note_ids: list[str]) -> list[str]:
+        """The review queue's decided proposals of these dead notes forgotten (``pending_writes.forget_decided``):
+        an update or a deletion aimed at one, and the proposal whose acceptance made one (``accepted_note_id``); a
+        proposal still pending is listed for a decision, and a declined one that would have made a note never made
+        one: both stay. What stays, named. A queue whose file is not beside this store holds none, and nothing is
+        loaded to be asked."""
+        if not note_ids or not (self._db_path.parent / "pending_writes.db").exists():
+            return []
+        dead = set(note_ids)
+        try:
+            from opti_oignon.pending_writes import accepted_note_id, forget_decided
+        except ImportError as exc:
+            return [f"pending writes (the notes' decided proposals not read: {type(exc).__name__})"]
+
+        def names(action: str, status: str, arguments: dict, pid: str) -> bool:
+            if action == "make":
+                return status == "accepted" and accepted_note_id(pid) in dead
+            return isinstance(arguments, dict) and arguments.get("note_id") in dead
+
+        try:
+            forget_decided("notes", names)
+        except Exception as exc:  # noqa: BLE001 - what stays is said
+            logger.warning("the review queue could not forget a deleted note's proposals: %s", type(exc).__name__)
+            return [f"pending writes (the notes' decided proposals not removed: {type(exc).__name__}; the next "
+                    "deletion or the wipe removes them)"]
+        return []
 
     def _forget_updates(self, note_ids: list[str], uid: str) -> list[str]:
         """The update tails and checkpoints of these dead notes pruned, through the update store beside this one;
@@ -950,6 +994,8 @@ class NotesStore:
                 left += self._tell_peers(note_id, _now())
         if not settled:
             return left
+        # A proposal decided after its note died, or one an older deletion left.
+        left += self._forget_proposals(settled)
         attachments: list[str] = []
         with self._lock, self._conn() as conn:
             for note_id in settled:

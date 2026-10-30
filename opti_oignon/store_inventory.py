@@ -65,7 +65,8 @@ STORES: tuple[Entry, ...] = (
     Entry("the onion's store (keyed by conversation)", ("*",), ("memory/librarian.py", "memory/onion_store.py"),
           DRAWN, ONE_USER),
     Entry("response/semantic caches (conversation-scoped)", ("response_cache.db", "semantic_cache.db"),
-          ("response_cache.py", "semantic_cache.py"), DRAWN, ONE_USER,
+          ("response_cache.py", "semantic_cache.py", "cached_answers.py", "rag_store.py", "projects.py",
+           "notes/notes_store.py", "agent/skills.py", "memory/canonical_store.py"), DRAWN, ONE_USER,
           failures=("response cache", "semantic cache")),
     Entry("offline queue (single-user)", ("sync_queue.db",), ("sync_queue.py",), WORDS, ONE_USER,
           failures=("offline queue",)),
@@ -88,7 +89,7 @@ STORES: tuple[Entry, ...] = (
           ("memory/legacy.py", "memory/migration.py"), DRAWN, ONE_USER,
           failures=("old memory store",)),
     Entry("pending writes (proposals waiting for the user)", ("pending_writes.db",),
-          ("pending_writes.py", "agent/skills.py"), DRAWN, REMOVED,
+          ("pending_writes.py", "agent/skills.py", "notes/notes_store.py"), DRAWN, REMOVED,
           failures=("pending writes",)),
     # -- The stores that only keep copies of the user's words: emptied for the one user ---------------------------
     Entry("the coding agent's decision preferences (not user-scoped)", ("fingerprint.db", "*"),

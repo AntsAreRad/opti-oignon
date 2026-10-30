@@ -664,11 +664,17 @@ Delete a document: its chunks first, then the injection audit's entries
 of those chunks and the ingest jobs' records of the document, then its
 citations and its row, each overwritten, and the stores' logs emptied;
 what a removal before this left (chunks whose document has no row,
-ingest records of documents gone) goes with it. `not_forgotten` names
-what could not be finished now -- a read or a write in progress that
-keeps what was erased in a database's file until it ends, ingest
-records out of reach, which the next removal finishes, or an injection
-audit out of reach, whose entries its clear or the wipe removes. A
+ingest records of documents gone) goes with it. Both answer caches are
+emptied too, overwritten: no cached answer says which documents its
+prompt held, and one drawn from the removed chunks never stays (a
+project's, a project file's, a note's, a skill's deletion and a fact's
+erasure empty them the same way; an answer whose request began before
+the emptying is never put after it).
+`not_forgotten` names what could not be finished now -- a read or a
+write in progress that keeps what was erased in a database's file until
+it ends, ingest records out of reach, which the next removal finishes,
+an injection audit out of reach, whose entries its clear or the wipe
+removes, or a cache that could not be emptied. A
 document whose chunks cannot be removed is not deleted: 503, and it
 stays listed with them; one whose row could not be removed once its
 chunks went, 503 too, listed until it is deleted again. Without the

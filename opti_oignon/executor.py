@@ -352,6 +352,30 @@ except ImportError:
     SEMANTIC_CACHE_AVAILABLE = False
     _semantic_cache = None
 
+
+def _begin_cached_request() -> dict:
+    """Mark the start of a request in both caches (``cached_answers.begin_cached_request``), before its prompt draws
+    on any store; the marks, which the request hands back right before each put (``_declare_cached_request``). A
+    tree without the caches' forgetting marks nothing: each cache then marks a lookup when it misses."""
+    try:
+        from .cached_answers import begin_cached_request
+    except ImportError:
+        return {}
+    return begin_cached_request()
+
+
+def _declare_cached_request(marks: dict, cache: str) -> None:
+    """Hand this request's mark to the cache ``cache`` (its module's name) right before its put
+    (``cached_answers.declare_cached_request``): a cache emptied since the request began refuses its answer."""
+    if not marks:
+        return
+    try:
+        from .cached_answers import declare_cached_request
+    except ImportError:
+        return
+    declare_cached_request(marks, cache)
+
+
 # Untrusted-context envelope for every data block of a turn (memory, project
 # files, web results, archive snippets, summaries), which then rides the user
 # role. When the wrapper cannot be imported no such block is placed at all:
@@ -2970,6 +2994,9 @@ class Executor:
             The return value is also stored in self.last_refined_question
             for easy retrieval after iteration completes.
         """
+        # The caches mark this request now, before its prompt draws on any store: an answer whose prompt a deletion
+        # outran is never put after it.
+        _cached_marks = _begin_cached_request()
         _call_run = run if run is not None else _Run()
         stop, _run_results = _call_run.stop, _call_run.results
         # The question as this call received it: the vision step may rewrite
@@ -4587,6 +4614,7 @@ class Executor:
         ):
             try:
                 # The entry keeps its conversation, which its deletion forgets.
+                _declare_cached_request(_cached_marks, "opti_oignon.response_cache")
                 _response_cache.put(
                     model=routing.model,
                     system_prompt=system_prompt,
@@ -4631,6 +4659,7 @@ class Executor:
             and _semantic_cache.enabled
         ):
             try:
+                _declare_cached_request(_cached_marks, "opti_oignon.semantic_cache")
                 semcache_key = _semantic_cache.put(
                     query=user_content,
                     response=full_response,

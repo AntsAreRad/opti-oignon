@@ -73,8 +73,8 @@ from _isolation import REPO, isolate, source  # noqa: E402
 
 PACKAGE = REPO / "opti_oignon"
 BUDGET_S = {
-    "test_wi1_every_database_name_the_package_spells_is_classified": 5.0,
-    "test_wi2_every_name_joined_to_a_data_folder_is_classified": 5.0,
+    "test_wi1_every_database_name_the_package_spells_is_classified": 8.0,
+    "test_wi2_every_name_joined_to_a_data_folder_is_classified": 7.0,
     "test_wi3_the_inventorys_words_are_closed": 3.0,
     "test_wi4_the_wipes_lists_are_the_inventorys": 3.0,
     "test_wi5_the_coding_agents_decision_preferences_are_emptied_overwritten": 5.0,

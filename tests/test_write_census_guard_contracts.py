@@ -196,7 +196,7 @@ BUDGET_S = {
     "test_sw7_a_gated_site_needs_its_gate_before_it": 2.0,
     "test_sw8_an_exemption_with_no_site_is_stale": 2.0,
     "test_sw9_what_cannot_be_read_listed_or_parsed_fails_by_name": 2.0,
-    "test_sw10_the_real_tree_satisfies_its_own_guard_with_its_denominators": 12.0,
+    "test_sw10_the_real_tree_satisfies_its_own_guard_with_its_denominators": 16.0,
     "test_sw11_the_entry_point_refuses_a_violation_and_an_empty_estate": 2.0,
     "test_sw12_every_seal_is_a_full_digest_of_its_module": 12.0,
     "test_sw13_a_store_object_is_followed_across_modules": 2.0,

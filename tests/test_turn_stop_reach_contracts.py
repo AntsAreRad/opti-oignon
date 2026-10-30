@@ -61,7 +61,7 @@ BUDGET_S = {
     "test_fc7_the_executor_stops_its_own_call": 2.0,
     "test_fc9_a_stopped_call_leaves_no_answer_behind": 2.0,
     "test_fc10_the_executors_results_belong_to_its_call": 2.0,
-    "test_fc11_the_stop_reaches_the_tool_stages": 2.0,
+    "test_fc11_the_stop_reaches_the_tool_stages": 2.5,
     "test_fc12_two_coding_turns_of_one_conversation_stay_apart": 2.0,
     "test_fc13_a_stopped_call_leaves_no_answer_behind_over_the_store_with_its_origin_read": 2.0,
 }

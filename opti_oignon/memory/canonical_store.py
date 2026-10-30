@@ -782,7 +782,10 @@ class CanonicalMemoryStore:
                 _sync_publish_memory_fact(
                     fact_id, deleted=True, updated_at=_now()
                 )
-            return deleted
+        # Once the row is gone, outside the store's lock.
+        if deleted:
+            self._forget_cached_answers()
+        return deleted
 
     def erase(self, fact_id: str, *, trashed_only: bool = False) -> bool:
         """Delete a fact by its id whoever owns it, and tell the peers (a tombstone); whether it went.
@@ -803,7 +806,27 @@ class CanonicalMemoryStore:
                     _forget_in_feed(fact_id)
             if deleted:
                 _sync_publish_memory_fact(fact_id, deleted=True, updated_at=_now())
-            return deleted
+        # Once the row is gone, outside the store's lock.
+        if deleted:
+            self._forget_cached_answers()
+        return deleted
+
+    def _forget_cached_answers(self) -> None:
+        """The answers the response and semantic caches keep, emptied (``cached_answers``): a fact enters the prompt,
+        and any may have been drawn from the one erased -- here, by a paired device, or by the user's clear --; asked
+        once the rows are gone, outside the store's lock. What stays is logged: an erasure answers whether the fact
+        went. A folder that holds neither cache's file holds none of them, and nothing is loaded to be asked."""
+        data = self._db_path.parent
+        if not ((data / "response_cache.db").exists() or (data / "semantic_cache.db").exists()):
+            return
+        try:
+            from opti_oignon.cached_answers import forget_cached_answers
+
+            left = forget_cached_answers(data)
+        except Exception as exc:  # noqa: BLE001 - an erasure stands; what stays is said in the log
+            left = [f"response and semantic caches (not emptied: {type(exc).__name__})"]
+        for what in left:
+            logger.warning("a fact erased; %s", what)
 
     def clear(self, *, user_id: str | None = None) -> int:
         """Remove all of the user's rows (tests, resets, the UD-03 user wipe).
@@ -835,7 +858,9 @@ class CanonicalMemoryStore:
                     _forget_in_feed(fid)
             for fid in sync_ids:
                 _sync_publish_memory_fact(fid, deleted=True, updated_at=ts)
-            return count
+        if count:
+            self._forget_cached_answers()
+        return count
 
     def apply_synced_memory_canonical(
         self,
@@ -906,6 +931,7 @@ class CanonicalMemoryStore:
             if not _drop_vector(record_id):
                 self.owe_vector(record_id, "drop")
             self.empty_log(f"a peer's erasure of fact {record_id} applied")
+            self._forget_cached_answers()
             return True
         if not isinstance(payload, dict):
             return False

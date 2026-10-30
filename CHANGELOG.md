@@ -2129,6 +2129,14 @@ package costs.
 
 ### Changed
 
+- Seven of the ladder's time budgets are raised, each to at least 1.15 times
+  the longest time a ladder run measured for it (the new budget, then the
+  old one and that longest time): wi1 8.0 s (5.0; 6.83), wi2 7.0 s (5.0;
+  5.51), sw10 16.0 s (12.0; 13.19), xe6 10.0 s (8.0; 8.36), tf9 6.5 s (6.0;
+  5.27), fc11 2.5 s (2.0; 1.90), ut23 1.5 s (1.0; 0.98). Those times were
+  measured beside the other contracts on a machine doing other work, and
+  failed ladder runs; alone on a fast core wi1 takes 3.8 s and sw10 10.0 s.
+
 - [SECURITY] The knowledge base computes no vector of its own. ChromaDB
   embedded what it was handed without a vector, with a model it downloaded
   on first use: the RAG store stored chunks that way when every embedding
@@ -3479,6 +3487,31 @@ package costs.
 
 ### Fixed
 
+
+- [SECURITY] A deletion leaves no answer drawn from what it deleted in
+  the caches, and a deleted note's decided proposals go with it. The
+  response cache and the semantic cache keep answers by the request and
+  the prompt they were given for, and no entry says which documents,
+  files, notes or skills that prompt held: a conversation's deletion
+  forgot its cached answers, but the deletion of a knowledge-base
+  document or collection, a project, a note or a skill forgot none -- an
+  answer drawn from the deleted words stayed on disk until its time ran
+  out, and an answer a request already under way put after the deletion
+  was drawn from them too. A note's deletion never asked the review
+  queue, which kept the proposals aimed at it and the acceptance that
+  made it, its title and body. Now each of those deletions, here or a
+  paired device's -- a project file's removal and a fact's erasure, here
+  or a paired device's, too -- empties both caches whole, overwritten
+  (`opti_oignon/cached_answers.py`), and an answer whose request began
+  before an emptying is refused when it is put (the executor marks each
+  request before its prompt draws on any store, and hands its mark to the
+  cache right before its put); a cache that cannot be emptied is named
+  (`not_forgotten`), and the deletion goes on. A chained step (a
+  pipeline's, a self-correction's) is judged by its own beginning. A deleted
+  note's decided proposals go; one still pending, and a declined one that
+  would have made a note, stay, and one decided after the deletion goes
+  with the next. cf1-cf8 in the new
+  `tests/test_cache_forgetting_contracts.py`.
 
 - [SECURITY] A deleted skill keeps no words, its deletion reaches the
   paired devices, and the account wipe removes the skills when the

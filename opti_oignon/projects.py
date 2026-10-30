@@ -194,6 +194,19 @@ def _forget_folder(folder: Path, said: list) -> None:
         raise first
 
 
+def _forget_cached_answers(data: Path) -> list[str]:
+    """The answers the response and semantic caches keep, emptied (``cached_answers``): any may have been drawn from
+    what was deleted. A folder ``data`` that holds neither cache's file holds none of them, and nothing is loaded to
+    be asked."""
+    if not ((data / "response_cache.db").exists() or (data / "semantic_cache.db").exists()):
+        return []
+    try:
+        from opti_oignon.cached_answers import forget_cached_answers
+    except ImportError as exc:
+        return [f"response and semantic caches (not emptied: {type(exc).__name__})"]
+    return forget_cached_answers(data)
+
+
 def _absent(error: ModuleNotFoundError, module: str) -> bool:
     """Whether an import failed because the module, or a package it would be in, is not in this tree -- then it holds
     nothing; a module that is there and fails to load is broken, and raises."""
@@ -843,6 +856,8 @@ class ProjectStore:
                 conn.commit()
             finally:
                 conn.close()
+            # The cached answers: any may have been drawn from the project's files or instructions.
+            left += _forget_cached_answers(Path(self._db_path).parent)
             if sweep:
                 left += self.sweep_orphans(index=reached, disk=on_disk)
             if empty:
@@ -1043,6 +1058,8 @@ class ProjectStore:
             finally:
                 conn.close()
             self._touch_project(pf.project_id)
+            # The cached answers: any may have been drawn from the file.
+            left += _forget_cached_answers(Path(self._db_path).parent)
             if sweep:
                 left += self.sweep_orphans(index=reached, disk=not [line for line in stored if "not removed" in line])
             left += self.empty_logs()

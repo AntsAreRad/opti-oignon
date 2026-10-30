@@ -1155,9 +1155,9 @@ class RAGVectorStore:
 
     def _forget_drawn(self, chunk_ids: list[str], doc_ids: list[str], sources: list[str], *, collection: str,
                       whole: bool = False) -> list[str]:
-        """What the audit and the ingest jobs hold of these chunks and documents, forgotten: the audit's entries of
-        the chunks, and those of these ``sources`` in ``collection`` (with ``whole``, every entry and every job of
-        the collection); what could not be, named. An audit out of reach now is not reached again by a later
+        """What the audit, the ingest jobs and the caches hold of these chunks and documents, forgotten: the audit's
+        entries of the chunks, and those of these ``sources`` in ``collection`` (with ``whole``, every entry and every
+        job of the collection), and every cached answer (``cached_answers``); what could not be, named. An audit out of reach now is not reached again by a later
         removal: its clear, or the wipe, removes what it kept."""
         left: list[str] = []
         try:
@@ -1189,6 +1189,8 @@ class RAGVectorStore:
                                 "database's file until it ends)")
         except Exception as exc:  # noqa: BLE001 - named, and swept by the next removal
             left.append(f"{_JOBS_LABEL} (the removed documents' records not removed: {type(exc).__name__})")
+        # The cached answers: any may have been drawn from the removed chunks.
+        left += _forget_cached_answers(self.data_dir.parent)
         return left
 
     def sweep_orphans(self) -> list[str]:
@@ -1755,6 +1757,19 @@ def load_rag_config() -> dict[str, Any]:
 # =========================================================================
 
 _store_instance: RAGVectorStore | None = None
+
+
+def _forget_cached_answers(data: Path) -> list[str]:
+    """The answers the response and semantic caches keep, emptied (``cached_answers``): any may have been drawn from
+    what was deleted. A folder ``data`` that holds neither cache's file holds none of them, and nothing is loaded to
+    be asked."""
+    if not ((data / "response_cache.db").exists() or (data / "semantic_cache.db").exists()):
+        return []
+    try:
+        from opti_oignon.cached_answers import forget_cached_answers
+    except ImportError as exc:
+        return [f"response and semantic caches (not emptied: {type(exc).__name__})"]
+    return forget_cached_answers(data)
 
 
 def _default_data_dir() -> Path:

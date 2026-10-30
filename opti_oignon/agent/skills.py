@@ -647,6 +647,19 @@ _LEDGER_FILE = "veilid_deferred.db"
 _QUEUE_FILE = "pending_writes.db"
 
 
+def _forget_cached_answers(data: Path) -> list[str]:
+    """The answers the response and semantic caches keep, emptied (``cached_answers``): any may have been drawn from
+    what was deleted. A folder ``data`` that holds neither cache's file holds none of them, and nothing is loaded to
+    be asked."""
+    if not ((data / "response_cache.db").exists() or (data / "semantic_cache.db").exists()):
+        return []
+    try:
+        from opti_oignon.cached_answers import forget_cached_answers
+    except ImportError as exc:
+        return [f"response and semantic caches (not emptied: {type(exc).__name__})"]
+    return forget_cached_answers(data)
+
+
 def _forget_in_journal(key: str, data: Path) -> list[str]:
     """Erase every version of a skill in the sync journal, overwritten, before its deletion is done
     (``change_feed.forget_record``): its words leave this device even when its tombstone cannot be journalled after,
@@ -763,7 +776,7 @@ def _forget_proposals(category: str, name: str, *, data: Path, present: Any = No
         return []
     key = _skill_sync_key(category, name)
 
-    def names(action: str, status: str, arguments: dict) -> bool:
+    def names(action: str, status: str, arguments: dict, pid: str) -> bool:
         named = _proposal_key(arguments)
         if present is None:
             return named == key
@@ -1330,6 +1343,8 @@ class SkillRegistry:
                 _audit("delete", name=nm, category=cat, draft=draft)
                 if not draft:
                     said += _forget_proposals(cat, nm, data=self.root.parent)
+                    # The cached answers: any may have been drawn from the skill's text.
+                    said += _forget_cached_answers(self.root.parent)
                     said += self._tell_peers(cat, nm, key)
             if sweep:
                 said += self.sweep_orphans()
@@ -1639,6 +1654,7 @@ class SkillRegistry:
                     if there:
                         cat, nm = _safe_segment(category, "general"), _safe_segment(name, "untitled-skill")
                         said += _forget_proposals(cat, nm, data=self.root.parent)
+                        said += _forget_cached_answers(self.root.parent)
                     for what in said:
                         logger.warning("a paired device's deletion of skill %s: %s", record_id, what)
                     return True
