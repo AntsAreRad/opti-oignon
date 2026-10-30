@@ -1278,6 +1278,11 @@ fail_under = 0
 # tests/test_project_forgetting_contracts.py counted four copies of the overwrite: it gives way to sk11, which runs it
 # unchanged on those four and holds the fifth, the skills', to the same text. They stay in the tree word for word.
 #
+# A turn's later calls are judged by the turn's beginning in the caches (block 196). cf5 of
+# tests/test_cache_forgetting_contracts.py held the executor's first act to mark its request with no run: it gives way to
+# tj4 of tests/test_turn_cache_mark_contracts.py, which keeps its other assertions unchanged and holds the first act
+# marking with the call's run, so a later call of a turn takes the turn's marks. It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1726,4 +1731,5 @@ addopts = """
     --deselect=tests/test_skill_lifecycle_versioning_contracts.py::test_lc6_delete_archives_the_final_version_and_keeps_history
     --deselect=tests/test_knowledge_forgetting_contracts.py::test_kb11_the_requests_words_are_three_and_failures_carry_the_inventorys_labels
     --deselect=tests/test_project_forgetting_contracts.py::test_pf13_no_deletion_overwrites_a_file_another_link_names
+    --deselect=tests/test_cache_forgetting_contracts.py::test_cf5_an_answer_asked_before_an_emptying_is_never_put
 """

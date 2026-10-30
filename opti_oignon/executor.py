@@ -353,15 +353,17 @@ except ImportError:
     _semantic_cache = None
 
 
-def _begin_cached_request() -> dict:
+def _begin_cached_request(run: Any = None) -> dict:
     """Mark the start of a request in both caches (``cached_answers.begin_cached_request``), before its prompt draws
-    on any store; the marks, which the request hands back right before each put (``_declare_cached_request``). A
-    tree without the caches' forgetting marks nothing: each cache then marks a lookup when it misses."""
+    on any store; the marks, which the request hands back right before each put (``_declare_cached_request``). With
+    the ``run`` of a turn already marked -- a pipeline's step, the agentic executor's next pass --, the turn's marks:
+    its answer is judged by the turn's beginning. A tree without the caches' forgetting marks nothing: each cache
+    then marks a lookup when it misses."""
     try:
         from .cached_answers import begin_cached_request
     except ImportError:
         return {}
-    return begin_cached_request()
+    return begin_cached_request(run)
 
 
 def _declare_cached_request(marks: dict, cache: str) -> None:
@@ -2994,9 +2996,9 @@ class Executor:
             The return value is also stored in self.last_refined_question
             for easy retrieval after iteration completes.
         """
-        # The caches mark this request now, before its prompt draws on any store: an answer whose prompt a deletion
-        # outran is never put after it.
-        _cached_marks = _begin_cached_request()
+        # The caches mark this request now, before its prompt draws on any store -- or hand it its turn's marks, when
+        # an earlier call of the turn marked it: an answer whose prompt a deletion outran is never put after it.
+        _cached_marks = _begin_cached_request(run)
         _call_run = run if run is not None else _Run()
         stop, _run_results = _call_run.stop, _call_run.results
         # The question as this call received it: the vision step may rewrite
@@ -4635,6 +4637,9 @@ class Executor:
                     and _semantic_cache.enabled
                 ):
                     try:
+                        # Judged like a put: a question asked before the
+                        # cache was emptied may repeat words it forgot.
+                        _declare_cached_request(_cached_marks, "opti_oignon.semantic_cache")
                         _semantic_cache.store_embedding(
                             cache_key=cache_key,
                             model=routing.model,
@@ -4814,6 +4819,8 @@ class Executor:
             CascadeResult with final response and tier details,
             or None if cascading is unavailable.
         """
+        # The caches mark this request first: its answer is judged by its own beginning.
+        _cached_marks = _begin_cached_request()
         self._last_cascade_result = None
 
         if not CASCADING_AVAILABLE or _cascading_inference is None:
@@ -4902,6 +4909,7 @@ class Executor:
                 and _semantic_cache.enabled
             ):
                 try:
+                    _declare_cached_request(_cached_marks, "opti_oignon.semantic_cache")
                     semcache_key = _semantic_cache.put(
                         query=question,
                         response=result.final_response,
@@ -4944,6 +4952,8 @@ class Executor:
             SpeculativeResult with final response and phase details,
             or None if speculative generation is unavailable.
         """
+        # The caches mark this request first: its answer is judged by its own beginning.
+        _cached_marks = _begin_cached_request()
         self._last_speculative_result = None
 
         if not SPECULATIVE_AVAILABLE or _speculative_generator is None:
@@ -5051,6 +5061,7 @@ class Executor:
                         if result.draft_accepted
                         else result.verify_model
                     )
+                    _declare_cached_request(_cached_marks, "opti_oignon.semantic_cache")
                     semcache_key = _semantic_cache.put(
                         query=question,
                         response=result.final_response,

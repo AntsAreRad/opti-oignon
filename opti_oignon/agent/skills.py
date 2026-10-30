@@ -91,6 +91,7 @@ import logging
 import os
 import re
 import stat
+import sys
 import threading
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -647,11 +648,17 @@ _LEDGER_FILE = "veilid_deferred.db"
 _QUEUE_FILE = "pending_writes.db"
 
 
+def _caches_loaded() -> bool:
+    """Whether this process loaded either answer cache."""
+    return any(sys.modules.get(f"opti_oignon.{name}") is not None for name in ("response_cache", "semantic_cache"))
+
+
 def _forget_cached_answers(data: Path) -> list[str]:
     """The answers the response and semantic caches keep, emptied (``cached_answers``): any may have been drawn from
     what was deleted. A folder ``data`` that holds neither cache's file holds none of them, and nothing is loaded to
-    be asked."""
-    if not ((data / "response_cache.db").exists() or (data / "semantic_cache.db").exists()):
+    be asked -- unless this process loaded a cache, which a request may be under way on before its first lookup makes
+    the file: its emptying is counted all the same."""
+    if not (_caches_loaded() or (data / "response_cache.db").exists() or (data / "semantic_cache.db").exists()):
         return []
     try:
         from opti_oignon.cached_answers import forget_cached_answers

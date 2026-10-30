@@ -84,13 +84,22 @@ _REQUEST = threading.local()
 _PUTTING = threading.local()
 
 
-def begin_request() -> int:
+def begin_request(since: int | None = None) -> int:
     """A request begins on this thread, before its prompt draws on any store: its lookups are marked from now, so an
     answer whose prompt a deletion outran is never put after it; the count, which the request hands back at its put
-    (``declare_request``)."""
+    (``declare_request``). ``since``: the count its turn began at, when the request is a later call of a turn (a
+    pipeline's step, the agentic executor's next pass), kept when older: the call is judged by the turn's beginning."""
     with _MARKS_LOCK:
-        _REQUEST.count = _EMPTIED[0]
-        return _EMPTIED[0]
+        count = _EMPTIED[0] if since is None else min(int(since), _EMPTIED[0])
+        _REQUEST.count = count
+        return count
+
+
+def emptied() -> int:
+    """How many times this cache was emptied so far, read without its lock: a turn's mark, taken where waiting on a
+    put's disk work would stall (``cached_answers.mark_cached_turn``). An emptying racing the read is counted after
+    the mark, so the turn is refused more often, never less."""
+    return _EMPTIED[0]
 
 
 def declare_request(count: int) -> None:

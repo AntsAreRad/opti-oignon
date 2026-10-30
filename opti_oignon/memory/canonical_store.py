@@ -815,9 +815,13 @@ class CanonicalMemoryStore:
         """The answers the response and semantic caches keep, emptied (``cached_answers``): a fact enters the prompt,
         and any may have been drawn from the one erased -- here, by a paired device, or by the user's clear --; asked
         once the rows are gone, outside the store's lock. What stays is logged: an erasure answers whether the fact
-        went. A folder that holds neither cache's file holds none of them, and nothing is loaded to be asked."""
+        went. A folder that holds neither cache's file holds none of them, and nothing is loaded to be asked -- unless
+        this process loaded a cache, which a request may be under way on before its first lookup makes the file: its
+        emptying is counted all the same."""
         data = self._db_path.parent
-        if not ((data / "response_cache.db").exists() or (data / "semantic_cache.db").exists()):
+        loaded = any(sys.modules.get(f"opti_oignon.{name}") is not None
+                     for name in ("response_cache", "semantic_cache"))
+        if not (loaded or (data / "response_cache.db").exists() or (data / "semantic_cache.db").exists()):
             return
         try:
             from opti_oignon.cached_answers import forget_cached_answers

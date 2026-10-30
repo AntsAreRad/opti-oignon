@@ -669,7 +669,9 @@ emptied too, overwritten: no cached answer says which documents its
 prompt held, and one drawn from the removed chunks never stays (a
 project's, a project file's, a note's, a skill's deletion and a fact's
 erasure empty them the same way; an answer whose request began before
-the emptying is never put after it).
+the emptying is never put after it, nor one of a later call of the same
+chat turn -- a pipeline's step, an agentic pass, a coding phase -- whose
+turn began before it, nor its question beside the semantic search).
 `not_forgotten` names what could not be finished now -- a read or a
 write in progress that keeps what was erased in a database's file until
 it ends, ingest records out of reach, which the next removal finishes,

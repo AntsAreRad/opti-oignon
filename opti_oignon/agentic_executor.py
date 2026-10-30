@@ -818,6 +818,19 @@ def _tool_provenance(turn: _Turn):
         return _provenance.TurnProvenance(demand=turn.demand)
 
 
+def _begin_cached_turn(run) -> None:
+    """Mark the turn ``run`` in both caches before any of its calls draws on a store
+    (``cached_answers.mark_cached_turn``): each later call of the turn begins from its marks, so an answer one of
+    them puts is judged by the turn's beginning. Nothing without a run, nor in a tree without the caches' forgetting."""
+    if run is None:
+        return
+    try:
+        from .cached_answers import mark_cached_turn
+    except ImportError:
+        return
+    mark_cached_turn(run)
+
+
 # What a pipeline that builds its own context says of it when the onion's
 # journal lays the conversation: the window is not its own.
 _OUTSIDE_WINDOW = {
@@ -1408,6 +1421,10 @@ class AgenticExecutor:
             on_consensus_model=on_consensus_model,
             on_correction_step=on_correction_step,
         )
+        # The caches mark the turn now, before any of its passes draws on a store: each executor call it makes takes
+        # the turn's marks, so the answer of a later pass -- the self-correction's, a second phase -- is judged by the
+        # turn's beginning.
+        _begin_cached_turn(turn)
         with self._live_lock:
             self._live_stops.add(turn.stop)
 

@@ -470,9 +470,23 @@ _anonymous_turns: set[ChatTurn] = set()
 _turns_lock = threading.Lock()
 
 
+def _begin_cached_turn(turn: ChatTurn) -> None:
+    """Mark the turn in the answer caches as it opens, before anything of it draws on a store
+    (``cached_answers.mark_cached_turn``, which reads the caches' counts without their locks, so the event loop
+    never waits on a put): every call of the turn -- the coding agent's phases, a pipeline's steps, the agentic
+    executor's passes, the executor's call -- begins from these marks, so an answer one of them puts is judged by
+    the turn's beginning. Nothing in a tree without the caches' forgetting."""
+    try:
+        from opti_oignon.cached_answers import mark_cached_turn
+    except ImportError:
+        return
+    mark_cached_turn(turn)
+
+
 def _open_turn(conversation_id: str) -> ChatTurn:
-    """Create and register a live turn."""
+    """Create and register a live turn, marked in the answer caches."""
     turn = ChatTurn(conversation_id)
+    _begin_cached_turn(turn)
     with _turns_lock:
         if conversation_id:
             _live_turns.setdefault(conversation_id, set()).add(turn)

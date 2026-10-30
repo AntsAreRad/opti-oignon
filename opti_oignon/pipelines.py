@@ -98,6 +98,19 @@ def _give_back(governor, decision) -> None:
         logger.debug("PipelineRunner: pending load end failed open: %s", exc)
 
 
+def _begin_cached_turn(run) -> None:
+    """Mark the turn ``run`` in both caches before any of its calls draws on a store
+    (``cached_answers.mark_cached_turn``): each later call of the turn begins from its marks, so an answer one of
+    them puts is judged by the turn's beginning. Nothing without a run, nor in a tree without the caches' forgetting."""
+    if run is None:
+        return
+    try:
+        from .cached_answers import mark_cached_turn
+    except ImportError:
+        return
+    mark_cached_turn(run)
+
+
 # Repertoire de config des pipelines
 _CONFIG_DIR = Path(__file__).parent / "config" / "pipelines"
 # Repertoire de data pour les pipelines custom
@@ -592,6 +605,9 @@ class PipelineRunner:
         Yields:
             Streaming chunks (str or tuples)
         """
+        # The caches mark the turn now, before its first step draws on any store: every step's answer is judged by the
+        # turn's beginning, its prompt carrying the steps before it.
+        _begin_cached_turn(run)
         executor = self._get_executor()
         if executor is None:
             yield "[ERR] AgenticExecutor not available"

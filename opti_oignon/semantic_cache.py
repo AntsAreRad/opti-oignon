@@ -103,13 +103,22 @@ _REQUEST = threading.local()
 _PUTTING = threading.local()
 
 
-def begin_request() -> int:
+def begin_request(since: int | None = None) -> int:
     """A request begins on this thread, before its prompt draws on any store: its lookups are marked from now, so an
     answer whose prompt a deletion outran is never put after it; the count, which the request hands back at its put
-    (``declare_request``)."""
+    (``declare_request``). ``since``: the count its turn began at, when the request is a later call of a turn (a
+    pipeline's step, the agentic executor's next pass), kept when older: the call is judged by the turn's beginning."""
     with _MARKS_LOCK:
-        _REQUEST.count = _EMPTIED[0]
-        return _EMPTIED[0]
+        count = _EMPTIED[0] if since is None else min(int(since), _EMPTIED[0])
+        _REQUEST.count = count
+        return count
+
+
+def emptied() -> int:
+    """How many times this cache was emptied so far, read without its lock: a turn's mark, taken where waiting on a
+    put's disk work would stall (``cached_answers.mark_cached_turn``). An emptying racing the read is counted after
+    the mark, so the turn is refused more often, never less."""
+    return _EMPTIED[0]
 
 
 def declare_request(count: int) -> None:
@@ -1487,7 +1496,13 @@ class SemanticCache:
 
         Returns:
             True if stored successfully.
+
+        Judged like a put: a question whose request handed its mark
+        (``declare_request``) and began before the cache was last emptied
+        may repeat words that emptying forgot, and is not stored. A caller
+        that hands no mark is not judged.
         """
+        declared = _declared()
         if not self._config.get("enabled", False):
             return False
 
@@ -1506,22 +1521,26 @@ class SemanticCache:
         if conn is None:
             return False
         try:
-            conn.execute(
-                """INSERT INTO semantic_embeddings
-                   (cache_key, model, query_text, embedding, embedding_dim,
-                    created_at, context_fingerprint)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)
-                   ON CONFLICT(cache_key) DO UPDATE SET
-                       embedding = excluded.embedding,
-                       embedding_dim = excluded.embedding_dim,
-                       query_text = excluded.query_text,
-                       created_at = excluded.created_at,
-                       context_fingerprint = excluded.context_fingerprint
-                """,
-                (cache_key, model, query_text, blob, dim, now,
-                 context_fingerprint),
-            )
-            conn.commit()
+            with _MARKS_LOCK:
+                if _outdated(("embedding", cache_key), declared):
+                    logger.debug("Embedding declined: asked before the cache was emptied")
+                    return False
+                conn.execute(
+                    """INSERT INTO semantic_embeddings
+                       (cache_key, model, query_text, embedding, embedding_dim,
+                        created_at, context_fingerprint)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(cache_key) DO UPDATE SET
+                           embedding = excluded.embedding,
+                           embedding_dim = excluded.embedding_dim,
+                           query_text = excluded.query_text,
+                           created_at = excluded.created_at,
+                           context_fingerprint = excluded.context_fingerprint
+                    """,
+                    (cache_key, model, query_text, blob, dim, now,
+                     context_fingerprint),
+                )
+                conn.commit()
             return True
         except (sqlite3.Error, RuntimeError, OSError) as exc:
             self._note_layer_failure(exc)

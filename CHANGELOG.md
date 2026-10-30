@@ -3487,6 +3487,27 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] A later call of a chat turn is judged by the turn's beginning
+  in the answer caches. Each answer a cache takes is refused when the cache
+  was emptied since its request began, but a turn makes many requests -- a
+  pipeline's steps, the agentic executor's passes, the self-correction's
+  pass on its draft, the coding agent's phases --, each marked its own
+  beginning, after the calls before it drew on the stores, though its prompt
+  repeats their words: a deletion between the turn's beginning and a later
+  call left that call's answer, drawn from the deleted words, put, and its
+  question stored beside the response cache's entries for the semantic
+  search. Now the chat route marks each turn it opens, before anything of it
+  draws on a store (the pipeline runner and the agentic executor mark a turn
+  handed to them the same way), and every later call of the turn begins from
+  those marks (`cached_answers.begin_cached_request(run)`, each turn known
+  by the stop its calls share, held weakly); a question's embedding is
+  judged like a put; the executor's cascade and speculative paths mark their
+  own request, no longer judged by what an earlier request on their thread
+  saw; and a deletion in a folder whose caches have no file yet still counts
+  its emptying when this process loaded them, so a request under way there
+  is refused. tj1-tj6 in the new `tests/test_turn_cache_mark_contracts.py`;
+  tj4 supersedes cf5.
+
 
 - [SECURITY] A deletion leaves no answer drawn from what it deleted in
   the caches, and a deleted note's decided proposals go with it. The
