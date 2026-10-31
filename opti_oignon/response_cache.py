@@ -27,6 +27,8 @@ Author: Leon
 
 import hashlib
 import logging
+import os
+import secrets
 import sqlite3
 import threading
 import time
@@ -71,10 +73,11 @@ _ORIGIN_UNKNOWN = "?"
 _FORGOTTEN: set[str] = set()
 # Held while a mark is checked and an entry written, and while a forgetting marks and deletes.
 _MARKS_LOCK = threading.Lock()
-# How many times this process emptied the cache, and, by key, how many it had when the request whose lookup of that
-# key missed began (``begin_request``): an answer a request already under way puts after an emptying -- a deletion of
-# what it may have been drawn from -- is refused, its request older than the emptying. A key looked up again keeps the
-# oldest count. The oldest lookups give way past the bound, far above the requests a process has under way.
+# How many times this process emptied the cache, or saw another process empty its file, and, by key, how many it had
+# when the request whose lookup of that key missed began (``begin_request``): an answer a request already under way
+# puts after an emptying -- a deletion of what it may have been drawn from -- is refused, its request older than the
+# emptying. A key looked up again keeps the oldest count. The oldest lookups give way past the bound, far above the
+# requests a process has under way.
 _EMPTIED = [0]
 _ASKED: OrderedDict[Any, int] = OrderedDict()
 _ASKED_LIMIT = 4096
@@ -82,6 +85,12 @@ _ASKED_LIMIT = 4096
 # hands back right before its put (``declare_request``), which that put spends.
 _REQUEST = threading.local()
 _PUTTING = threading.local()
+# The generation of each cache file this process last read or drew, by its path's spelling: SQLite's user_version,
+# which every emptying -- and every forgetting of a conversation -- draws anew in its own write, before its entries go;
+# 0 for a file never emptied. Another process on the same folder (the server and ``oo chat``) empties the file without
+# moving this process's count: a put reads the generation in the write it is about to make (``_absorb``), and one it
+# did not draw or read before is an emptying it counts.
+_GENERATIONS: dict[str, int] = {}
 
 
 def begin_request(since: int | None = None) -> int:
@@ -127,14 +136,49 @@ def _note_asked(key: Any) -> None:
             _ASKED.popitem(last=False)
 
 
-def _outdated(key: Any, declared: int | None) -> bool:
-    """Whether the answer about to be put under ``key`` was asked before the cache's last emptying: by the request's
-    own count when it handed one back (``declared``), else by the mark its key's lookup left. Held under
-    ``_MARKS_LOCK``; the key's mark is spent."""
+def _mark_of(key: Any, declared: int | None) -> int | None:
+    """The count the answer about to be put under ``key`` is judged by: the request's own when it handed one back
+    (``declared``), else the mark its key's lookup left; None when neither. Held under ``_MARKS_LOCK``; the key's mark
+    is spent."""
     asked = _ASKED.pop(key, None)
-    if declared is not None:
-        return declared != _EMPTIED[0]
-    return asked is not None and asked != _EMPTIED[0]
+    return declared if declared is not None else asked
+
+
+def _outdated(mark: int | None) -> bool:
+    """Whether an answer judged by ``mark`` was asked before the cache's last emptying. Held under ``_MARKS_LOCK``."""
+    return mark is not None and mark != _EMPTIED[0]
+
+
+def _note_generation(path: Any, found: int, held: int) -> None:
+    """The file at ``path`` was found at the generation ``found`` and is now at ``held`` -- the same, or one this
+    process drew over it: an emptying another process made, not read here yet, is counted -- ``found`` is not the
+    generation this process last saw, or, at its first reading, not 0: nothing tells whether that emptying came before
+    a request under way --; this process's own draw is not counted again. Held under ``_MARKS_LOCK``, inside the
+    file's write."""
+    key = os.path.abspath(str(path))
+    if found != _GENERATIONS.get(key, 0):
+        _EMPTIED[0] += 1
+    _GENERATIONS[key] = held
+
+
+def _absorb(conn: sqlite3.Connection, path: Any) -> None:
+    """Read the generation of the file at ``path`` inside the write a put is about to make, so no emptying falls
+    between the reading and the writing (``_note_generation``). Held under ``_MARKS_LOCK``."""
+    generation = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    _note_generation(path, generation, generation)
+
+
+def _draw_generation(conn: sqlite3.Connection) -> tuple[int, int]:
+    """Draw the file's next generation inside a deletion's write: at random, never 0 and never the one it replaces. The
+    one found and the one drawn, which the deletion hands at once to ``_note_generation``, holding the file's write and
+    ``_MARKS_LOCK``: an emptying another process made before it is counted, never swallowed, and no reading here comes
+    between the draw and its remembering."""
+    old = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    new = old
+    while new == old:
+        new = secrets.randbelow(0x7FFFFFFF) + 1
+    conn.execute(f"PRAGMA user_version = {new}")
+    return old, new
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -522,17 +566,30 @@ class ResponseCache:
         entry_ttl = ttl if ttl is not None else self._default_ttl
         origin = conversation_id or ""
 
-        # The mark is checked under the lock its forgetting takes, at the write: a put that took it first is
-        # deleted by the forgetting, one that takes it after is refused.
+        # The marks are judged under the lock a forgetting takes: what this process knows of refuses the answer
+        # before the file is opened. An answer asked before the cache was last emptied may be drawn from what that
+        # emptying forgot.
         with _MARKS_LOCK:
             if origin and origin in _FORGOTTEN:
                 return ""
-            # An answer asked before the cache was last emptied may be drawn from what that emptying forgot.
-            if _outdated(cache_key, declared):
+            mark = _mark_of(cache_key, declared)
+            if _outdated(mark):
                 logger.debug("Cache put declined: asked before the cache was emptied")
                 return ""
-            conn = self._get_connection()
-            try:
+        conn = self._get_connection()
+        try:
+            # The file's write first, then the marks' lock -- the order every write of the file keeps, so no request
+            # here waits on another process's write through that lock --, and the marks judged again: another
+            # process's emptying is read here (the file's generation), or waits for this write and deletes its entry;
+            # a forgetting here came first, or deletes the entry after. A refused put writes nothing.
+            conn.execute("BEGIN IMMEDIATE")
+            with _MARKS_LOCK:
+                if origin and origin in _FORGOTTEN:
+                    return ""
+                _absorb(conn, self._db_path)
+                if _outdated(mark):
+                    logger.debug("Cache put declined: asked before another process emptied the cache")
+                    return ""
                 # Evict the least recently used when the cache is full
                 count = conn.execute(
                     "SELECT COUNT(*) as cnt FROM response_cache"
@@ -568,8 +625,8 @@ class ResponseCache:
                 )
                 return cache_key
 
-            finally:
-                conn.close()
+        finally:
+            conn.close()
 
     def forget_conversation(self, conversation_id: str) -> int:
         """Delete every answer cached in a deleted conversation; how many.
@@ -580,14 +637,16 @@ class ResponseCache:
         one's -- go with the first forgetting (an entry dropped is only asked again): marked of an origin not known,
         or, in a file still without the column, every entry. What is deleted is overwritten (``secure_delete``).
         From then on, the conversation is never cached again in this process (``_FORGOTTEN``), unless the
-        forgetting fails.
+        forgetting fails; another process on the folder refuses the put it has under way, the file's generation
+        drawn anew.
         """
         try:
             with _MARKS_LOCK:
-                # Marked under the puts' lock: a put that took it first is deleted below, one that takes it after
-                # is refused.
+                # Marked under the puts' lock, before the file is looked at: a put that took it first is deleted
+                # below, one that takes it after is refused.
                 _FORGOTTEN.add(conversation_id)
-                return self._forget_entries(conversation_id)
+                there = Path(self._db_path).exists()
+            return self._forget_entries(conversation_id) if there else 0
         except BaseException:
             _FORGOTTEN.discard(conversation_id)
             raise
@@ -601,6 +660,12 @@ class ResponseCache:
             columns = _columns(conn, "response_cache")
             if not columns:
                 return 0
+            # The file's write first, then the marks' lock, as a put takes them: told to another process on the
+            # folder as an emptying, so a put it has under way is refused; the generation remembered as it is drawn.
+            conn.execute("BEGIN IMMEDIATE")
+            with _MARKS_LOCK:
+                found, drawn = _draw_generation(conn)
+                _note_generation(self._db_path, found, drawn)
             if "conversation_id" in columns:
                 gone = conn.execute(
                     "DELETE FROM response_cache WHERE conversation_id IN (?, ?)",
@@ -680,11 +745,25 @@ class ResponseCache:
 
     def empty(self) -> int:
         """Erase every entry, overwritten; how many. A file that is not there holds none, and is not created. From
-        then on, an answer whose lookup came before is never put: it may be drawn from what the emptying forgot."""
+        then on, an answer whose lookup came before is never put: it may be drawn from what the emptying forgot -- in
+        this process, and in another on the same folder, whose put reads the file's generation, drawn anew here in a
+        write of its own before the entries go."""
         with _MARKS_LOCK:
             _EMPTIED[0] += 1
-        if not Path(self._db_path).exists():
-            return 0
+            if not Path(self._db_path).exists():
+                return 0
+        # The file's write first, then the marks' lock, as a put takes them: no request here waits, through that
+        # lock, on another process's write; the generation remembered as it is drawn, so no reading here can take
+        # it for another process's.
+        conn = self._get_connection()
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            with _MARKS_LOCK:
+                found, drawn = _draw_generation(conn)
+                _note_generation(self._db_path, found, drawn)
+            conn.commit()
+        finally:
+            conn.close()
         return self.clear()
 
     # -------------------------------------------------------------------------

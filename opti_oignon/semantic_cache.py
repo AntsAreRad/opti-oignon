@@ -33,6 +33,8 @@ import hashlib
 import json
 import logging
 import math
+import os
+import secrets
 import sqlite3
 import threading
 import time
@@ -90,10 +92,11 @@ _ORIGIN_UNKNOWN = "?"
 _FORGOTTEN: set[str] = set()
 # Held while a mark is checked and an entry written, and while a forgetting marks and deletes.
 _MARKS_LOCK = threading.Lock()
-# How many times this process emptied the cache, and, by key, how many it had when the request whose lookup of that
-# key missed began (``begin_request``): an answer a request already under way puts after an emptying -- a deletion of
-# what it may have been drawn from -- is refused, its request older than the emptying. A key looked up again keeps the
-# oldest count. The oldest lookups give way past the bound, far above the requests a process has under way.
+# How many times this process emptied the cache, or saw another process empty its file, and, by key, how many it had
+# when the request whose lookup of that key missed began (``begin_request``): an answer a request already under way
+# puts after an emptying -- a deletion of what it may have been drawn from -- is refused, its request older than the
+# emptying. A key looked up again keeps the oldest count. The oldest lookups give way past the bound, far above the
+# requests a process has under way.
 _EMPTIED = [0]
 _ASKED: OrderedDict[Any, int] = OrderedDict()
 _ASKED_LIMIT = 4096
@@ -101,6 +104,12 @@ _ASKED_LIMIT = 4096
 # hands back right before its put (``declare_request``), which that put spends.
 _REQUEST = threading.local()
 _PUTTING = threading.local()
+# The generation of each cache file this process last read or drew, by its path's spelling: SQLite's user_version,
+# which every emptying -- and every forgetting of a conversation -- draws anew in its own write, before its entries go;
+# 0 for a file never emptied. Another process on the same folder (the server and ``oo chat``) empties the file without
+# moving this process's count: a write reads the generation in the write it is about to make (``_absorb``), and one it
+# did not draw or read before is an emptying it counts.
+_GENERATIONS: dict[str, int] = {}
 
 
 def begin_request(since: int | None = None) -> int:
@@ -146,14 +155,49 @@ def _note_asked(key: Any) -> None:
             _ASKED.popitem(last=False)
 
 
-def _outdated(key: Any, declared: int | None) -> bool:
-    """Whether the answer about to be put under ``key`` was asked before the cache's last emptying: by the request's
-    own count when it handed one back (``declared``), else by the mark its key's lookup left. Held under
-    ``_MARKS_LOCK``; the key's mark is spent."""
+def _mark_of(key: Any, declared: int | None) -> int | None:
+    """The count the answer about to be put under ``key`` is judged by: the request's own when it handed one back
+    (``declared``), else the mark its key's lookup left; None when neither. Held under ``_MARKS_LOCK``; the key's mark
+    is spent."""
     asked = _ASKED.pop(key, None)
-    if declared is not None:
-        return declared != _EMPTIED[0]
-    return asked is not None and asked != _EMPTIED[0]
+    return declared if declared is not None else asked
+
+
+def _outdated(mark: int | None) -> bool:
+    """Whether an answer judged by ``mark`` was asked before the cache's last emptying. Held under ``_MARKS_LOCK``."""
+    return mark is not None and mark != _EMPTIED[0]
+
+
+def _note_generation(path: Any, found: int, held: int) -> None:
+    """The file at ``path`` was found at the generation ``found`` and is now at ``held`` -- the same, or one this
+    process drew over it: an emptying another process made, not read here yet, is counted -- ``found`` is not the
+    generation this process last saw, or, at its first reading, not 0: nothing tells whether that emptying came before
+    a request under way --; this process's own draw is not counted again. Held under ``_MARKS_LOCK``, inside the
+    file's write."""
+    key = os.path.abspath(str(path))
+    if found != _GENERATIONS.get(key, 0):
+        _EMPTIED[0] += 1
+    _GENERATIONS[key] = held
+
+
+def _absorb(conn: Any, path: Any) -> None:
+    """Read the generation of the file at ``path`` inside the write about to be made, so no emptying falls between the
+    reading and the writing (``_note_generation``). Held under ``_MARKS_LOCK``."""
+    generation = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    _note_generation(path, generation, generation)
+
+
+def _draw_generation(conn: Any) -> tuple[int, int]:
+    """Draw the file's next generation inside a deletion's write: at random, never 0 and never the one it replaces. The
+    one found and the one drawn, which the deletion hands at once to ``_note_generation``, holding the file's write and
+    ``_MARKS_LOCK``: an emptying another process made before it is counted, never swallowed, and no reading here comes
+    between the draw and its remembering."""
+    old = int(conn.execute("PRAGMA user_version").fetchone()[0])
+    new = old
+    while new == old:
+        new = secrets.randbelow(0x7FFFFFFF) + 1
+    conn.execute(f"PRAGMA user_version = {new}")
+    return old, new
 
 
 def _columns(conn: Any, table: str) -> set[str]:
@@ -880,18 +924,33 @@ class SemanticCache:
             except Exception as exc:
                 logger.debug("Embedding generation skipped: %s", exc)
 
+        # What this process knows of refuses the answer before the file is opened: a conversation it forgot is never
+        # cached again -- a turn that outlived its deletion, or a put already on its way when it came --, and an answer
+        # asked before the cache was last emptied may be drawn from what that emptying forgot.
+        with _MARKS_LOCK:
+            if conversation_id and conversation_id.strip() in _FORGOTTEN:
+                logger.debug("Cache put declined: its conversation was deleted")
+                return ""
+            mark = _mark_of((query_hash, conv_id, context_fingerprint), declared)
+            if _outdated(mark):
+                logger.debug("Cache put declined: asked before the cache was emptied")
+                return ""
         conn = self._get_connection()
         if conn is None:
             return ""
         try:
+            # The file's write first, then the marks' lock -- the order every write of the file keeps, so no request
+            # here waits on another process's write through that lock --, and the marks judged again, under the lock
+            # the forgetting holds: another process's emptying is read here (the file's generation), or waits for
+            # this write and deletes its entry; a forgetting here came first, or deletes the entry after. A refused
+            # put writes nothing.
+            conn.execute("BEGIN IMMEDIATE")
             with _MARKS_LOCK:
-                # A conversation this process forgot is never cached again: a turn that outlived its deletion, or a
-                # put already on its way when it came, is refused here, under the lock the forgetting holds.
                 if conversation_id and conversation_id.strip() in _FORGOTTEN:
                     logger.debug("Cache put declined: its conversation was deleted")
                     return ""
-                # An answer asked before the cache was last emptied may be drawn from what that emptying forgot.
-                if _outdated((query_hash, conv_id, context_fingerprint), declared):
+                _absorb(conn, self._db_path)
+                if _outdated(mark):
                     logger.debug("Cache put declined: asked before the cache was emptied")
                     return ""
                 conn.execute(
@@ -945,14 +1004,16 @@ class SemanticCache:
         file still without the column, every entry with no conversation. The schema is never changed here. The
         embeddings table holds only requests made outside any conversation. What is deleted is overwritten
         (``secure_delete``). From then on, the conversation is never cached again in this process (``_FORGOTTEN``),
-        unless the forgetting fails.
+        unless the forgetting fails; another process on the folder refuses the put it has under way, the file's
+        generation drawn anew.
         """
         try:
             with _MARKS_LOCK:
-                # Marked under the puts' lock: a put that took it first is deleted below, one that takes it after is
-                # refused.
+                # Marked under the puts' lock, before the file is looked at: a put that took it first is deleted
+                # below, one that takes it after is refused.
                 _FORGOTTEN.add(conversation_id)
-                return self._forget_entries(conversation_id)
+                there = Path(self._db_path).exists()
+            return self._forget_entries(conversation_id) if there else 0
         except BaseException:
             _FORGOTTEN.discard(conversation_id)
             raise
@@ -966,6 +1027,12 @@ class SemanticCache:
         try:
             conn.execute("PRAGMA secure_delete = ON")
             columns = _columns(conn, "cache_entries")
+            # The file's write first, then the marks' lock, as a put takes them: told to another process on the
+            # folder as an emptying, so a put it has under way is refused; the generation remembered as it is drawn.
+            conn.execute("BEGIN IMMEDIATE")
+            with _MARKS_LOCK:
+                found, drawn = _draw_generation(conn)
+                _note_generation(self._db_path, found, drawn)
             where = "conversation_id = ?"
             if "source_conversation_id" in columns:
                 where += " OR source_conversation_id = ?"
@@ -1517,12 +1584,21 @@ class SemanticCache:
         dim = len(embedding)
         now = time.time()
 
+        # Judged as a put: refused before the file is opened when this process knows of the emptying.
+        with _MARKS_LOCK:
+            mark = _mark_of(("embedding", cache_key), declared)
+            if _outdated(mark):
+                logger.debug("Embedding declined: asked before the cache was emptied")
+                return False
         conn = self._get_connection()
         if conn is None:
             return False
         try:
+            # The file's write first, then the marks' lock, and the mark judged again, as a put's.
+            conn.execute("BEGIN IMMEDIATE")
             with _MARKS_LOCK:
-                if _outdated(("embedding", cache_key), declared):
+                _absorb(conn, self._db_path)
+                if _outdated(mark):
                     logger.debug("Embedding declined: asked before the cache was emptied")
                     return False
                 conn.execute(
@@ -1864,25 +1940,34 @@ class SemanticCache:
         """Erase every entry and embedding, overwritten; how many entries. Unlike ``clear``, which degrades to 0, a
         cache whose file is there and cannot be opened or written raises: the user's wipe must never take it for an
         empty one. A file that is not there holds none, and is not created; the schema is never changed here. From
-        then on, an answer whose lookup came before is never put: it may be drawn from what the emptying forgot."""
+        then on, an answer whose lookup came before is never put: it may be drawn from what the emptying forgot -- in
+        this process, and in another on the same folder, whose write reads the file's generation, drawn anew here in
+        the emptying's write."""
         with _MARKS_LOCK:
             _EMPTIED[0] += 1
-        if not Path(self._db_path).exists():
-            return 0
+            if not Path(self._db_path).exists():
+                return 0
         if _safe_connect is None:
             raise RuntimeError("the semantic cache's storage layer is not available, so it cannot be emptied")
+        # The file's write first, then the marks' lock, as a put takes them, and only to draw: no request here
+        # waits, through that lock, on another process's write or on this deletion; the generation remembered as it
+        # is drawn, so no reading here can take it for another process's.
         conn = _safe_connect(self._db_path, check_same_thread=False)
         try:
             conn.execute("PRAGMA secure_delete = ON")
+            conn.execute("BEGIN IMMEDIATE")
+            with _MARKS_LOCK:
+                found, drawn = _draw_generation(conn)
+                _note_generation(self._db_path, found, drawn)
             gone = 0
             if _columns(conn, "cache_entries"):
                 gone = int(conn.execute("DELETE FROM cache_entries").rowcount or 0)
             if _columns(conn, "semantic_embeddings"):
                 conn.execute("DELETE FROM semantic_embeddings")
             conn.commit()
-            return gone
         finally:
             conn.close()
+        return gone
 
     def cleanup_orphans(self, response_cache: Any) -> int:
         """Remove legacy embeddings whose response cache entry is gone.

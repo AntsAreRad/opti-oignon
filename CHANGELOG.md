@@ -3487,6 +3487,32 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] A deletion made by another process on the same data folder
+  refuses the answer a request under way here was about to cache. The
+  server and `oo chat` run the executor in two processes on one data
+  folder, and both delete (the server through its routes, `oo chat` by
+  accepting a proposal that deletes a skill or a note); the count of
+  emptyings each cache judges a put by, and the conversations it forgot,
+  lived in the process: a deletion in one emptied the files, and the
+  other's request under way put its answer, drawn before the deletion,
+  after it. Now each emptying, and each forgetting of a conversation, draws
+  the cache file's generation (SQLite's `user_version`) anew in its own
+  write, before its entries go, and counts the one it replaces when this
+  process had not read it; each put -- the answer, the semantic entry, the
+  question's embedding -- opens its write first, reads the generation
+  there, and counts one it did not draw or read before as an emptying: an
+  emptying that comes during the write waits for it and deletes its entry.
+  Every write of the file takes the file's write lock before the lock the
+  requests here take, and a deletion remembers its own draw inside its
+  write, so its own deletions are counted once however they interleave; a
+  put this process already refuses never opens the file, and no emptying,
+  forgetting or put waiting on another process's write holds a lock the
+  requests here take. The cost, refusals only: a process cannot tell when
+  another's emptying came, so the requests it began before it next reads
+  the file are refused, and so are those it began before its first
+  reading of a file that was ever emptied. xp1-xp6 in the new
+  `tests/test_cache_other_process_contracts.py`.
+
 - [SECURITY] A later call of a chat turn is judged by the turn's beginning
   in the answer caches. Each answer a cache takes is refused when the cache
   was emptied since its request began, but a turn makes many requests -- a

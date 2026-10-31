@@ -11,7 +11,8 @@ call of a turn (a pipeline's step, the agentic executor's next pass), whose prom
 A deletion asks it of its own data folder once a cache's file is there, or once this process loaded a cache, which a
 request may be under way on before its first lookup makes the file (the caller checks, so that nothing is loaded to be
 asked of a folder that holds none in a process that loaded none); a cache that lives in another folder is not this
-store's, and is left.
+store's, and is left. Another process on the same folder -- the server and ``oo chat`` -- is told through the file
+itself: each emptying draws the file's generation anew, and a put there reads it in its own write.
 Nothing of the package is imported to load this module.
 """
 
