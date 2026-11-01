@@ -1316,6 +1316,7 @@ def _compute_session_diff(session_id: str):
         # read whole: nothing is shown
         raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
+        # Unknown, inactive, or destroyed while it was reviewed
         raise HTTPException(status_code=404, detail=str(exc))
 
 

@@ -3487,6 +3487,26 @@ package costs.
 
 ### Fixed
 
+- Reviewing a sandbox's changes keeps it from the idle sweep, and a
+  review that a destroy overtakes says so. The review (the panel's
+  "review changes", the deletion confirmation and the apply's own check)
+  walks the live workspace and compares it with the files recorded when
+  they were copied in: a recorded file it does not find reads as
+  deleted. It ran with its sandbox in no use, so an idle sandbox swept
+  during the walk had the files the walk had not reached yet listed as
+  deleted: a false review, for a sandbox that was gone. An explicit
+  destroy during the walk did the same, and one just before it made the
+  review fail with an internal error (500). Now the walk runs with its
+  sandbox in use, which the sweep skips; being reviewed is not activity,
+  so a sandbox idle past its TTL is swept as before once no review runs.
+  A review that a destroy overtakes answers "Session ... was destroyed
+  while it was reviewed" (404), also inside the apply, which then writes
+  nothing and answers the same instead of a drift (409). When another
+  sandbox is made under the same id meanwhile, the apply never reviews
+  it in its place, nor takes its approvals or deletion confirmations
+  for its own. An unknown or ended sandbox and a walk that fails with
+  its sandbox alive answer as before. rh1-rh3 in the new
+  `tests/test_sandbox_review_in_use_contracts.py`.
 - The agent's file tools keep their sandbox from the idle sweep while they
   work, and each call counts as activity. The agent's tool session is
   unbound, so the sweep destroys it once idle past its TTL with no command

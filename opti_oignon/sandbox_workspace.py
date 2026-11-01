@@ -716,6 +716,8 @@ def generate_workspace_diff(
     session_id: str,
     manager: Any = None,
     max_entries: int | None = None,
+    *,
+    held: Any = None,
 ) -> WorkspaceDiff:
     """Classify the live workspace against the recorded baseline (6.1).
 
@@ -733,26 +735,47 @@ def generate_workspace_diff(
     write-back target -- the result states it; a baseline is never
     invented. The failure mode stays CONSERVATIVE: never less review.
 
+    The walk runs with its session in use (``in_use``): the idle sweep
+    never removes the workspace under it, whose files would read as
+    deleted. Being reviewed is not activity. An explicit destroy is not
+    held off: a review it overtook says so, never a diff of the removal.
+    ``held`` is the session a caller already holds (the apply's): when the
+    id names another one -- the held one destroyed and another made under
+    its id -- the review says the held one was destroyed, never reviews
+    the other.
+
     Raises:
-        ValueError: Unknown/inactive session or missing workspace (404).
+        ValueError: Unknown/inactive session or missing workspace, or one
+            destroyed while it was reviewed (404).
         WorkspaceDiffBoundExceeded: Entry or depth bound exceeded (413).
     """
     mgr = WorkspaceBindings._resolve_manager(manager)
-    workspace = mgr.get_active_workspace_path(session_id)
     if max_entries is None:
         max_entries = getattr(
             getattr(mgr, "_config", None),
             "diff_max_entries",
             _DIFF_MAX_ENTRIES_FALLBACK,
         )
-    store = get_workspace_manifests()
-    baseline = store.get_manifest(session_id)
-    cloned_root = store.get_cloned_root(session_id)
-    cloned_mount = store.get_cloned_mount(session_id)
-
-    live_hashes, live_sizes, skipped_symlinks, skipped_special = (
-        _walk_workspace_hashes(workspace, max_entries)
-    )
+    with mgr.in_use(session_id) as session:
+        if held is not None and session is not held:
+            raise _destroyed_while_reviewed(session_id)
+        store = get_workspace_manifests()
+        baseline = store.get_manifest(session_id)
+        cloned_root = store.get_cloned_root(session_id)
+        cloned_mount = store.get_cloned_mount(session_id)
+        try:
+            live_hashes, live_sizes, skipped_symlinks, skipped_special = (
+                _walk_workspace_hashes(session.workspace_path, max_entries)
+            )
+        except Exception as exc:
+            # The destroy removed the workspace under the walk, which
+            # failed for it: the destroy is the answer, not its trace
+            if not session.active:
+                raise _destroyed_while_reviewed(session_id) from exc
+            raise
+        # A walk the removal overtook read its files as deleted
+        if not session.active:
+            raise _destroyed_while_reviewed(session_id)
 
     baseline_present = baseline is not None
     base = baseline or {}
@@ -803,6 +826,10 @@ def generate_workspace_diff(
         skipped_special=skipped_special,
         diff_hash=compute_workspace_diff_hash(entries),
     )
+
+
+def _destroyed_while_reviewed(session_id: str) -> ValueError:
+    return ValueError(f"Session {session_id} was destroyed while it was reviewed")
 
 
 def _refuse_request_path(rel: str) -> str | None:
@@ -975,8 +1002,9 @@ def apply_workspace_changes(
         WorkspaceReviewDrift: Missing or stale ``diff_hash`` (409).
         WorkspaceApplyTargetError: No target, or a conflicting one (400).
         PermissionError: Explicit target outside the allowlist (403).
-        ValueError: Unknown/inactive session, or a target directory that
-            no longer exists inside a root (404).
+        ValueError: Unknown/inactive session, one destroyed while its
+            review was recomputed, or a target directory that no longer
+            exists inside a root (404).
         WorkspaceDiffBoundExceeded: The recomputed diff exceeds its
             bounds (413).
     """
@@ -990,8 +1018,7 @@ def apply_workspace_changes(
     # held off, and what was written is on the host: the answer stands
     with mgr.in_use(session_id) as session:
         return _apply_reviewed(
-            session_id, diff_hash, mgr, session.workspace_path,
-            target_dir, max_entries,
+            session_id, diff_hash, mgr, session, target_dir, max_entries,
         )
 
 
@@ -999,13 +1026,14 @@ def _apply_reviewed(
     session_id: str,
     diff_hash: str,
     mgr: Any,
-    workspace: str,
+    held: Any,
     target_dir: str | None,
     max_entries: int | None,
 ) -> dict[str, Any]:
-    """The apply of ``apply_workspace_changes``, its session in use."""
+    """The apply of ``apply_workspace_changes``, its session ``held`` in use."""
+    workspace = held.workspace_path
     diff = generate_workspace_diff(
-        session_id, manager=mgr, max_entries=max_entries
+        session_id, manager=mgr, max_entries=max_entries, held=held
     )
     if diff.diff_hash != diff_hash:
         raise WorkspaceReviewDrift(
@@ -1050,7 +1078,9 @@ def _apply_reviewed(
         except Exception:  # pragma: no cover - audit must not break apply
             logger.debug("apply audit failed", exc_info=True)
 
-    confirmed = mgr.get_confirmed_deletions(session_id)
+    # The gates and the activity are the held session's: one made again
+    # under the id after the review lends none of its own
+    confirmed = mgr.get_confirmed_deletions(session_id, held=held)
     applied: list[dict[str, Any]] = []
     deleted: list[dict[str, Any]] = []
     refused: list[dict[str, Any]] = []
@@ -1060,7 +1090,7 @@ def _apply_reviewed(
     for change in diff.entries:
         rel = change.path
         if change.kind in ("added", "modified"):
-            if not mgr.is_file_approved(session_id, rel):
+            if not mgr.is_file_approved(session_id, rel, held=held):
                 skipped_unapproved += 1
                 continue
         else:
@@ -1195,7 +1225,7 @@ def _apply_reviewed(
         _audit_row("apply_write", [rel], f"{action} ({written} bytes)")
 
     try:
-        mgr.touch_activity(session_id)
+        mgr.touch_activity(session_id, held=held)
     except Exception:  # pragma: no cover - activity must not break apply
         logger.debug("apply touch_activity failed", exc_info=True)
 

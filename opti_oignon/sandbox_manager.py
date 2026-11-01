@@ -3101,18 +3101,21 @@ class SandboxManager:
         counts the operation on it (``host_operations``): while it runs the
         idle sweep never takes the session -- ``destroy_sandbox``'s check
         made again with ``idle_for`` declines it, and the sweep's snapshot
-        skips it --, so a copy into the workspace, an apply or a copy out of
-        it that runs past what was left of the idle TTL is never cut by the
-        removal of its workspace. The count is the session's own: a session
-        made again under the same id is not held by an operation on the old
-        one. Being in use is not activity: the operation counts its own (one
-        refused whole counts none). An explicit destroy is not held off: it
-        ends the session as before (``session.active`` turns False).
+        skips it --, so a copy into the workspace, a review, an apply, a copy
+        out of it or an agent's file tool that runs past what was left of the
+        idle TTL is never cut by the removal of its workspace. The count is
+        the session's own: a session made again under the same id is not
+        held by an operation on the old one. Being in use is not activity:
+        the operation counts its own (one refused whole counts none). An
+        explicit destroy is not held off: it ends the session as before
+        (``session.active`` turns False).
 
         Raises:
-            ValueError: If the session is unknown or inactive, or its
-                workspace directory is missing (``_get_active_workspace``);
-                nothing then stays counted.
+            ValueError: If the session the id named when the count was
+                taken is unknown (none was) or inactive, or its workspace
+                directory is missing (``_active_workspace_of``, checked on
+                that session): a session made under the id since is not
+                taken for it; nothing then stays counted.
         """
         with self._lock:
             session = self._sessions.get(session_id)
@@ -3120,7 +3123,8 @@ class SandboxManager:
             if counted:
                 session.host_operations += 1
         try:
-            self._get_active_workspace(session_id)
+            # The session counted is the one checked and yielded
+            self._active_workspace_of(session_id, session)
             yield session
         finally:
             if counted:
@@ -3255,10 +3259,11 @@ class SandboxManager:
         Called from create_sandbox (so a stale workspace never blocks the
         concurrency cap) and list_sessions. A workspace is reaped when ALL
         of: the TTL is enabled (> 0), nothing is running in it, the host is
-        not copying into it, applying from it nor copying out of it
-        (``in_use``; the check made again under the lock declines one), it
-        is not bound to a conversation (an explicit binding is user intent
-        and exempts it), and last_activity is older than the TTL.
+        not copying into it, reviewing it, applying from it nor copying out
+        of it, and no agent's file tool works in it (``in_use``; the check
+        made again under the lock declines one), it is not bound to a
+        conversation (an explicit binding is user intent and exempts it),
+        and last_activity is older than the TTL.
 
         The workspaces a destroy could not remove whole are removed again
         first, whatever the TTL (``_remove_leftovers``).
@@ -4141,10 +4146,17 @@ class SandboxManager:
         )
         logger.info("Files rejected: session=%s", session_id)
 
-    def is_file_approved(self, session_id: str, path: str) -> bool:
-        """Check if a specific file is approved for copy-out."""
+    def is_file_approved(
+        self, session_id: str, path: str, held: SandboxSession | None = None
+    ) -> bool:
+        """Check if a specific file is approved for copy-out.
+
+        With ``held`` -- the session an operation holds (``in_use``) -- that
+        session's approvals are read, never those of one made again under
+        its id meanwhile.
+        """
         with self._lock:
-            session = self._sessions.get(session_id)
+            session = self._sessions.get(session_id) if held is None else held
             if session is None:
                 return False
             return path in session.approved_paths
@@ -4435,10 +4447,13 @@ class SandboxManager:
         )
         return recorded
 
-    def get_confirmed_deletions(self, session_id: str) -> set[str]:
-        """The deletion paths confirmed for apply (a copy)."""
+    def get_confirmed_deletions(
+        self, session_id: str, held: SandboxSession | None = None
+    ) -> set[str]:
+        """The deletion paths confirmed for apply (a copy); with ``held``,
+        those of that session, as ``is_file_approved`` reads its approvals."""
         with self._lock:
-            session = self._sessions.get(session_id)
+            session = self._sessions.get(session_id) if held is None else held
             if session is None:
                 return set()
             return set(session.confirmed_deletions)
@@ -4821,6 +4836,14 @@ class SandboxManager:
         """Get workspace path for an active session or raise."""
         with self._lock:
             session = self._sessions.get(session_id)
+        return self._active_workspace_of(session_id, session)
+
+    @staticmethod
+    def _active_workspace_of(
+        session_id: str, session: SandboxSession | None
+    ) -> str:
+        """The workspace of ``session``, which ``session_id`` named when it
+        was looked up, if it is active and its workspace stands; else raise."""
         if session is None:
             raise ValueError(f"Session not found: {session_id}")
         if not session.active:
