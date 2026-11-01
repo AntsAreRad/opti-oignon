@@ -1153,7 +1153,7 @@ class NotesStore:
                 busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
             finally:
                 conn.close()
-        except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+        except Exception as exc:  # noqa: BLE001 - whatever emptying the log raised, this only says
             logger.warning("notes: a note deleted; the write-ahead log could not be emptied (%s: %s)",
                            type(exc).__name__, exc)
             return

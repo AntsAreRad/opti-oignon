@@ -582,7 +582,7 @@ class CanonicalMemoryStore:
             try:
                 conn.execute("PRAGMA busy_timeout = 0")
                 busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
-            except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+            except Exception as exc:  # noqa: BLE001 - whatever emptying the log raised, this only says
                 logger.warning("%s; the write-ahead log of the facts could not be emptied (%s: %s)",
                                what, type(exc).__name__, exc)
                 return

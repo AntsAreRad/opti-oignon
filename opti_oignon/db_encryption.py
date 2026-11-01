@@ -75,35 +75,57 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # SQLCipher exception alignment
 # ---------------------------------------------------------------------------
-# SQLCipher's bindings raise their own DB-API exception classes, unrelated to
-# the standard-library sqlite3 ones. The codebase guards many migrations and
-# queries with `except sqlite3.OperationalError` (and siblings), which silently
-# stop matching once a connection is SQLCipher-backed. Rebase the SQLCipher
-# exception classes onto their sqlite3 equivalents so those handlers keep
-# working. Done once at import time; applies to every SQLCipher-backed
-# connection in the process.
+# SQLCipher's bindings define their own DB-API exception classes, apart from
+# the standard-library sqlite3 ones until this module aligns them. The codebase
+# guards many migrations and queries with `except sqlite3.OperationalError`
+# (and siblings), which would stop matching once a connection is
+# SQLCipher-backed. Each of the driver's eight error subclasses is given its
+# sqlite3 namesake as a first base, its own bases kept: an
+# `except sqlite3.OperationalError` catches the driver's, and an
+# `except <driver>.DatabaseError` still does. Done once at import time, before
+# any connection to the driver exists (every one is made in this module); it
+# applies to every SQLCipher-backed connection in the process. A subclass that
+# refuses is logged as an error and named in `_UNALIGNED`, never passed over in
+# silence.
+#
+# What stays apart from sqlite3: the driver's root `Error` and its `Warning`,
+# whose base is Exception itself -- CPython changes a class's bases only for
+# bases laid out like its old one, and a sqlite3 class extends Exception's
+# layout. The driver raises its `Warning` for two statements given to one
+# `execute`, and a ValueError for a NUL in a statement's text: neither is a
+# sqlite3.Error (sqlite3 raises ProgrammingError for both). For a parameter it
+# cannot bind it raises its InterfaceError, where sqlite3 raises
+# ProgrammingError: an `except sqlite3.Error` catches it, an
+# `except sqlite3.ProgrammingError` does not. The other failures probed (a
+# constraint, a missing table, a column added twice, a lock, a wrong key, a
+# closed connection) raise the subclass sqlite3 would.
+_UNALIGNED: list[str] = []
+
+
+def _align_errors(dbapi: Any) -> list[str]:
+    """Give each of ``dbapi``'s error subclasses its sqlite3 namesake as a first base; the classes that refuse."""
+    refused = []
+    for name in ("InterfaceError", "DatabaseError", "DataError", "OperationalError",
+                 "IntegrityError", "InternalError", "ProgrammingError", "NotSupportedError"):
+        theirs, ours = getattr(dbapi, name, None), getattr(sqlite3, name, None)
+        if theirs is None or ours is None or issubclass(theirs, ours):
+            continue
+        try:
+            theirs.__bases__ = (ours,) + theirs.__bases__
+        except TypeError as exc:
+            refused.append(f"{dbapi.__name__}.{name}")
+            logger.error("SQLCipher's %s.%s cannot descend from sqlite3.%s (%s): an `except sqlite3.%s` "
+                         "misses it", dbapi.__name__, name, name, exc, name)
+    return refused
+
+
 if SQLCIPHER_AVAILABLE:
     for _dbapi_name in ("sqlcipher3.dbapi2", "pysqlcipher3.dbapi2"):
         try:
             _dbapi = __import__(_dbapi_name, fromlist=["dbapi2"])
         except Exception:
             continue
-        for _exc_name in (
-            "InterfaceError", "DatabaseError", "DataError", "OperationalError",
-            "IntegrityError", "InternalError", "ProgrammingError",
-            "NotSupportedError",
-        ):
-            _sc_exc = getattr(_dbapi, _exc_name, None)
-            _sq_exc = getattr(sqlite3, _exc_name, None)
-            if (
-                _sc_exc is not None
-                and _sq_exc is not None
-                and not issubclass(_sc_exc, _sq_exc)
-            ):
-                try:
-                    _sc_exc.__bases__ = (_sq_exc,)
-                except TypeError:
-                    pass
+        _UNALIGNED.extend(_align_errors(_dbapi))
 
 
 # ---------------------------------------------------------------------------

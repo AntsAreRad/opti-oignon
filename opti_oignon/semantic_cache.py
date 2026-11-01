@@ -201,8 +201,8 @@ def _draw_generation(conn: Any) -> tuple[int, int]:
 
 
 def _columns(conn: Any, table: str) -> set[str]:
-    """The columns ``table`` has, asked of the table itself: never of a driver's error, whose classes the cipher's
-    driver does not share with sqlite3."""
+    """The columns ``table`` has, asked of the table itself: never of a driver's error, so the asking holds
+    whatever the driver raises."""
     return {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
 DEFAULT_AVG_RESPONSE_TOKENS = 250
 

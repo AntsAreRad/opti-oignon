@@ -148,7 +148,7 @@ def empty_index_log(vectors_db: Path | None = None) -> list[str]:
     client = _vector_client(vectors_db)
     try:
         emptied = client.empty_log()
-    except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+    except Exception as exc:  # noqa: BLE001 - whatever emptying the log raised, this only says
         logger.warning("projects: a deletion's chunks removed; the index's write-ahead log could not be emptied "
                        "(%s)", type(exc).__name__)
         return [f"{_INDEX_LABEL} (the store's log not emptied: {type(exc).__name__}; the next deletion tries again)"]

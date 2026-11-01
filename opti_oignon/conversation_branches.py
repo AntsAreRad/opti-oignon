@@ -466,7 +466,7 @@ def _empty_log(conn: sqlite3.Connection, conversation_id: str) -> None:
     try:
         conn.execute("PRAGMA busy_timeout = 0")
         busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
-    except Exception as exc:  # noqa: BLE001 - the cipher driver's errors are not sqlite3's, and this only says
+    except Exception as exc:  # noqa: BLE001 - whatever emptying the log raised, this only says
         logger.warning("the branches of conversation %s forgotten; the write-ahead log could not be emptied (%s: %s)",
                        conversation_id, type(exc).__name__, exc)
         return

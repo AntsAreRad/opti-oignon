@@ -3487,6 +3487,39 @@ package costs.
 
 ### Fixed
 
+- The cipher driver's errors are sqlite3's and stay the driver's own.
+  Every connection to SQLCipher is made in `db_encryption`, which gives
+  each of the driver's eight error classes its sqlite3 namesake as a base
+  when it is imported, so the package's `except sqlite3.OperationalError`
+  and its siblings catch the driver's errors. The namesake replaced the
+  driver's own bases: the driver's `OperationalError` was no longer its
+  `DatabaseError` nor its `Error`, and a class that refused the namesake
+  was passed over in silence. Now the namesake comes first and the
+  driver's bases stay, and a class that refuses is logged as an error and
+  named. What stays apart from sqlite3, as the module now says: the
+  driver's root `Error` and its `Warning`, which cannot take a sqlite3
+  base (their base is `Exception` itself, and CPython changes a class's
+  bases only for bases laid out like its old one); its `Warning` for two
+  statements given to one `execute` and its `ValueError` for a NUL in a
+  statement's text, which no `except sqlite3.Error` catches; and its
+  `InterfaceError` for a parameter it cannot bind, where sqlite3 raises
+  `ProgrammingError`. No handler of the package depends on one of these.
+  dx1-dx3 in the new `tests/test_cipher_driver_errors_contracts.py`.
+
+  Corrected: the entry "A deletion forgets what every store keyed by the
+  conversation ...", thirteen comments, and the message of the change
+  that told another process's deletion to the caches said the opposite:
+  that the cipher driver's errors are not sqlite3's, that the semantic
+  cache's first connection under it failed on a column it already had,
+  and that its handlers do not catch the driver's errors. A probe of the
+  driver without `db_encryption` said so; through `db_encryption`, as
+  every connection is made, the driver's errors were caught by the
+  clauses written for them, but for the cases above. The comments now
+  give the reason each place asks or catches as it does. The contracts
+  of that first entry keep a stand-in driver whose errors are not
+  sqlite3's, and say it of SQLCipher's: a stricter case than the real
+  one, left as written.
+
 - [SECURITY] A deletion made by another process on the same data folder
   refuses the answer a request under way here was about to cache. The
   server and `oo chat` run the executor in two processes on one data

@@ -317,8 +317,8 @@ class ResponseCache:
             """)
             # The conversation each entry came from, '' for a request made outside any: a deletion reaches its
             # answers by it. Every entry an older file holds says its origin is not known (_ORIGIN_UNKNOWN), and
-            # the first forgetting drops them. The table is asked, never a duplicate caught: the cipher's driver
-            # raises its own classes.
+            # the first forgetting drops them. The table is asked, never a duplicate caught: the asking
+            # holds whatever the driver raises.
             if "conversation_id" not in _columns(conn, "response_cache"):
                 conn.execute(
                     "ALTER TABLE response_cache ADD COLUMN conversation_id TEXT NOT NULL "

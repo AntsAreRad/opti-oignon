@@ -922,7 +922,7 @@ class AuditLog:
             )
         """)
         # An older file's rows did not keep their conversation: they are of none, and only a chat coding session's
-        # id still names one. The table is asked, never a duplicate caught: the cipher's driver raises its own classes.
+        # id still names one. The table is asked, never a duplicate caught: the asking holds whatever the driver raises.
         if "conversation_id" not in _columns(conn, "sandbox_audit"):
             conn.execute("ALTER TABLE sandbox_audit ADD COLUMN conversation_id TEXT NOT NULL DEFAULT ''")
         conn.execute("""
