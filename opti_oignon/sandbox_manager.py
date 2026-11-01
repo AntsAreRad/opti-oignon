@@ -50,6 +50,7 @@ Author: Leon
 import contextlib
 import enum
 import errno
+import functools
 import logging
 import os
 import re
@@ -929,6 +930,10 @@ class SandboxSession:
     conversation_id: str | None = None
     network_enabled: bool = False
     last_activity: float = field(default_factory=time.time)
+    # The host's operations in flight on the workspace (SandboxManager.in_use):
+    # a copy into it, an apply or a copy out of it. The idle sweep never takes
+    # the session while one runs. Under the manager's lock.
+    host_operations: int = 0
     timeout_override: int | None = None
     # Deletions confirmed for apply-to-host. PARALLEL to
     # approved_paths by design: approve_files validates os.path.isfile so a
@@ -2350,6 +2355,47 @@ def _systemd_run_prefix(config: SandboxConfig) -> list[str]:
     ]
 
 
+def _copying_in(copy):
+    """A copy into a session's workspace, ``copy(self, session_id, ...)``, run with its session in use
+    (``SandboxManager.in_use``): the idle sweep never takes the workspace while it is written. An explicit destroy is
+    not held off; when one ended the session meanwhile, the copy answers so (``ValueError``), whether it returned --
+    with files that went with the workspace -- or failed for the removal."""
+
+    @functools.wraps(copy)
+    def copied(self, session_id, *args, **kwargs):
+        with self.in_use(session_id) as session:
+            try:
+                done = copy(self, session_id, *args, **kwargs)
+            except Exception as exc:
+                # The destroy removed the workspace under the copy, which
+                # failed for it: the destroy is the answer, not its trace
+                if not session.active:
+                    raise _destroyed_during(session_id) from exc
+                raise
+            if not session.active:
+                raise _destroyed_during(session_id)
+            return done
+
+    return copied
+
+
+def _destroyed_during(session_id: str) -> ValueError:
+    return ValueError(f"Session {session_id} was destroyed while files were copied into it")
+
+
+def _copying_out(copy):
+    """A copy out of a session's workspace to the host, ``copy(self, session_id, ...)``, run with its session in use
+    (``SandboxManager.in_use``): the idle sweep never takes the workspace while it is read. An explicit destroy is not
+    held off, and what was copied is on the host: the answer stands."""
+
+    @functools.wraps(copy)
+    def copied(self, session_id, *args, **kwargs):
+        with self.in_use(session_id):
+            return copy(self, session_id, *args, **kwargs)
+
+    return copied
+
+
 # ---------------------------------------------------------------------------
 # Sandbox Manager
 # ---------------------------------------------------------------------------
@@ -2811,8 +2857,9 @@ class SandboxManager:
             session_id: Session to destroy.
             idle_for: The idle sweep's TTL: the session is destroyed only if,
                 under the lock that ends it, it is still unbound, running
-                nothing and idle for longer than this (its decision was taken
-                on a snapshot; a command may have started since).
+                nothing, in use by no host operation (``in_use``) and idle
+                for longer than this (its decision was taken on a snapshot; a
+                command or a copy may have started since).
 
         Returns:
             True if destroyed, False if session not found (or, with
@@ -2826,6 +2873,7 @@ class SandboxManager:
                 not session.active
                 or session.bound_conversation_id is not None
                 or self._running_procs.get(session_id)
+                or session.host_operations
                 or time.time() - session.last_activity <= idle_for
             ):
                 return False
@@ -2994,6 +3042,40 @@ class SandboxManager:
             if session is not None:
                 session.last_activity = time.time()
 
+    @contextlib.contextmanager
+    def in_use(self, session_id: str):
+        """Count a host operation on an active session's workspace while it runs.
+
+        Yields the session (its ``workspace_path`` is the workspace) and
+        counts the operation on it (``host_operations``): while it runs the
+        idle sweep never takes the session -- ``destroy_sandbox``'s check
+        made again with ``idle_for`` declines it, and the sweep's snapshot
+        skips it --, so a copy into the workspace, an apply or a copy out of
+        it that runs past what was left of the idle TTL is never cut by the
+        removal of its workspace. The count is the session's own: a session
+        made again under the same id is not held by an operation on the old
+        one. Being in use is not activity: the operation counts its own (one
+        refused whole counts none). An explicit destroy is not held off: it
+        ends the session as before (``session.active`` turns False).
+
+        Raises:
+            ValueError: If the session is unknown or inactive, or its
+                workspace directory is missing (``_get_active_workspace``);
+                nothing then stays counted.
+        """
+        with self._lock:
+            session = self._sessions.get(session_id)
+            counted = session is not None and session.active
+            if counted:
+                session.host_operations += 1
+        try:
+            self._get_active_workspace(session_id)
+            yield session
+        finally:
+            if counted:
+                with self._lock:
+                    session.host_operations -= 1
+
     def reconcile_workspaces(self) -> int:
         """Reap orphaned workspace directories under workspace_base.
 
@@ -3121,9 +3203,11 @@ class SandboxManager:
 
         Called from create_sandbox (so a stale workspace never blocks the
         concurrency cap) and list_sessions. A workspace is reaped when ALL
-        of: the TTL is enabled (> 0), nothing is running in it, it is not
-        bound to a conversation (an explicit binding is user intent and
-        exempts it), and last_activity is older than the TTL.
+        of: the TTL is enabled (> 0), nothing is running in it, the host is
+        not copying into it, applying from it nor copying out of it
+        (``in_use``; the check made again under the lock declines one), it
+        is not bound to a conversation (an explicit binding is user intent
+        and exempts it), and last_activity is older than the TTL.
 
         The workspaces a destroy could not remove whole are removed again
         first, whatever the TTL (``_remove_leftovers``).
@@ -3143,6 +3227,7 @@ class SandboxManager:
                 if s.active
                 and s.bound_conversation_id is None
                 and s.session_id not in self._running_procs
+                and not s.host_operations
                 and (now - s.last_activity) > ttl
             ]
         reaped = 0
@@ -3206,6 +3291,7 @@ class SandboxManager:
         """
         self._validator.register_created_file(relative_path, content)
 
+    @_copying_in
     def inject_files(
         self,
         session_id: str,
@@ -3230,7 +3316,8 @@ class SandboxManager:
             List of paths (inside workspace) of successfully copied files.
 
         Raises:
-            ValueError: If session not found or inactive.
+            ValueError: If session not found or inactive, or destroyed while
+                the files were copied (``_copying_in``).
         """
         workspace = self._get_active_workspace(session_id)
         injected: list[str] = []
@@ -3274,8 +3361,10 @@ class SandboxManager:
             injected.append(resolved)
             logger.debug("Injected file: %s -> %s", src_path, resolved)
 
+        self.touch_activity(session_id)
         return injected
 
+    @_copying_in
     def inject_directory(
         self,
         session_id: str,
@@ -3308,7 +3397,8 @@ class SandboxManager:
             Number of files copied.
 
         Raises:
-            ValueError: If session not found, inactive, or path invalid.
+            ValueError: If session not found, inactive, or path invalid, or
+                destroyed while the tree was copied (``_copying_in``).
             shutil.Error: If some entries could not be copied.
         """
         workspace = self._get_active_workspace(session_id)
@@ -3400,6 +3490,7 @@ class SandboxManager:
             return False, "Filename resolves to a reserved name"
         return True, base
 
+    @_copying_in
     def upload_files(
         self,
         session_id: str,
@@ -3424,7 +3515,8 @@ class SandboxManager:
         sandbox puts at its name is refused, never followed.
 
         Returns {"written": [{path, name, size, sha256}], "refused":
-        [{name, reason}], "written_bytes": int}.
+        [{name, reason}], "written_bytes": int}; a destroy that ended the
+        session meanwhile is answered ``ValueError`` (``_copying_in``).
         """
         workspace = self._get_active_workspace(session_id)
         cfg = self._config
@@ -3658,6 +3750,7 @@ class SandboxManager:
                         )
         return total_bytes, total_files
 
+    @_copying_in
     def clone_directory(
         self,
         session_id: str,
@@ -3690,7 +3783,9 @@ class SandboxManager:
         stays inside the workspace.
 
         ``inject_directory`` keeps ``copytree``'s source semantics (a
-        link in the host source is followed); this path skips them.
+        link in the host source is followed); this path skips them. A
+        destroy that ended the session meanwhile is answered
+        ``ValueError`` (``_copying_in``).
         """
         workspace = self._get_active_workspace(session_id)
         src = self._resolve_share_path(src_path)
@@ -4297,6 +4392,7 @@ class SandboxManager:
                 return set()
             return set(session.confirmed_deletions)
 
+    @_copying_out
     def copy_out_file(
         self,
         session_id: str,
@@ -4388,6 +4484,7 @@ class SandboxManager:
             "size": file_size,
         }
 
+    @_copying_out
     def copy_out_batch(
         self,
         session_id: str,

@@ -1168,9 +1168,11 @@ def upload_workspace_files(
     except _QuotaError as exc:
         raise HTTPException(status_code=413, detail=str(exc))
     except ValueError as exc:
-        # The session was validated above; a remaining ValueError is an
-        # invalid destination subdirectory.
-        raise HTTPException(status_code=400, detail=str(exc))
+        # The session was validated above: a destroy that ended it while
+        # the files were copied is 404; any other ValueError is a refused
+        # destination subdirectory (400), as before.
+        code = 404 if "was destroyed" in str(exc) else 400
+        raise HTTPException(status_code=code, detail=str(exc))
 
     manifest_entries = {
         w["relative_path"]: w["sha256"] for w in result["written"]
@@ -1262,7 +1264,8 @@ def clone_host_directory(
         _audit_refusal(str(exc))
         # "Invalid destination" is a caller error on the workspace side
         # (400); any other ValueError is a missing/non-directory source
-        # inside the allowlisted roots (404).
+        # inside the allowlisted roots, or a destroy that ended the session
+        # while it cloned (404).
         code = 400 if "Invalid destination" in str(exc) else 404
         raise HTTPException(status_code=code, detail=str(exc))
 

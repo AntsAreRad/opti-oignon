@@ -3487,6 +3487,28 @@ package costs.
 
 ### Fixed
 
+- The idle sweep never takes a sandbox workspace while the host copies
+  into it or out of it. It destroyed an unbound session idle past its TTL
+  that ran no command, and the host's own work on a workspace is no
+  command: an upload, a copy of files or of a folder, a clone of a shared
+  folder, the apply of reviewed changes and the copy-out of approved files
+  counted as activity only when they ended (the copy of files and the
+  copy-out never), and nothing marked them as running. A list of the
+  panel's -- each one sweeps -- that came while one ran removed the
+  workspace under it: an upload's files went with the tree while the
+  upload answered that it wrote them, a clone was cut, an apply or a
+  copy-out wrote part of what was asked to the host and dropped the rest.
+  Now each runs with its session in use, which the sweep skips and its
+  check made again under the lock declines; being in use is no activity,
+  so an operation refused whole leaves an idle session as idle as it was,
+  and the copy of files counts as activity when it ends, as the other
+  copies in do. An explicit destroy is not held off: a copy into the
+  workspace it overtakes answers that the session was destroyed -- never
+  with files that went with the workspace, nor with the error the removal
+  caused (the upload's route answers it 404) --, while an apply or a
+  copy-out keeps its answer, what it wrote being on the host. The agent's
+  file tools are not held this way. hu1-hu4 in the new
+  `tests/test_sandbox_host_writes_in_use_contracts.py`.
 - The tempdir backend runs each command in a PID namespace of its own
   where the system allows it, so that nothing a command starts outlives
   it. A command ran as `unshare --user --net -- bash -c ...`: a background

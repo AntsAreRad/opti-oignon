@@ -985,8 +985,25 @@ def apply_workspace_changes(
             "Apply requires the reviewed diff_hash; run the diff first"
         )
     mgr = WorkspaceBindings._resolve_manager(manager)
-    workspace = mgr.get_active_workspace_path(session_id)
+    # In use from the review's recomputation to the last write: the idle
+    # sweep never removes the workspace under the apply. A destroy is not
+    # held off, and what was written is on the host: the answer stands
+    with mgr.in_use(session_id) as session:
+        return _apply_reviewed(
+            session_id, diff_hash, mgr, session.workspace_path,
+            target_dir, max_entries,
+        )
 
+
+def _apply_reviewed(
+    session_id: str,
+    diff_hash: str,
+    mgr: Any,
+    workspace: str,
+    target_dir: str | None,
+    max_entries: int | None,
+) -> dict[str, Any]:
+    """The apply of ``apply_workspace_changes``, its session in use."""
     diff = generate_workspace_diff(
         session_id, manager=mgr, max_entries=max_entries
     )
