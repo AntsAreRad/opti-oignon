@@ -31,7 +31,7 @@ Usage examples::
     oo garden sow
     oo garden lab laws
     oo config
-    oo config set api_url http://remote:8001
+    oo config set api_url http://remote:8001   (the server lists remote under api.hosts)
 """
 
 import json
@@ -1195,7 +1195,7 @@ def config_set(ctx: click.Context, key: str, value: str) -> None:
     """Set a configuration value.
 
     Examples:
-        oo config set api_url http://remote:8001
+        oo config set api_url http://remote:8001   (the server lists remote under api.hosts)
         oo config set default_model llama3
         oo config set output_format json
         oo config set animations false

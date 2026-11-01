@@ -458,6 +458,19 @@ app.add_middleware(
     allow_origin_regex=_LOCALHOST_RE.pattern if _cors_credentials else None,
 )
 
+# ---------------------------------------------------------------------------
+# Host gate (DNS rebinding)
+#
+# The API answers only the names this machine is served as: a loopback name
+# or one listed under api.hosts of security.yaml. Added last, it runs first,
+# outside CORS, the security headers, the authentication and CSRF. One that
+# cannot be registered stops the app here.
+# ---------------------------------------------------------------------------
+from .host_gate import HostGateMiddleware  # noqa: E402
+
+app.add_middleware(HostGateMiddleware)
+logger.info("Host gate registered (loopback names and api.hosts)")
+
 # Router registration
 app.include_router(conversations_router)
 app.include_router(models_router)

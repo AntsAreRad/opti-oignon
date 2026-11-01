@@ -51,6 +51,11 @@ remote_access:
   enabled: false
 ```
 
+A machine reached under any name but `localhost`, `127.0.0.1` or `[::1]`
+(remote access, a LAN address) lists that name under `api.hosts` in the same
+file and restarts the server, or the API refuses its requests (see the
+Security Guide).
+
 Switching modes is asymmetric by design:
 
 - **Escalation (Daily -> Bulbe)** is immediate and requires a single

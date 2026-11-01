@@ -84,7 +84,12 @@ def cmd_api(args):
         pass
 
     print(f"Starting Opti-Oignon API on {actual_host}:{args.port}")
-    print(f"  Docs: http://{actual_host}:{args.port}/docs")
+    # The API answers only the names it is served as (api/host_gate.py): an
+    # address that binds every interface is no name to browse to
+    shown = "localhost" if actual_host in ("0.0.0.0", "::", "") else actual_host
+    print(f"  Docs: http://{shown}:{args.port}/docs")
+    if shown not in ("localhost", "127.0.0.1", "::1"):
+        print("  (answered only if listed under api.hosts in security.yaml)")
 
     # Build TLS config if remote access is allowed (Daily mode only)
     ssl_kwargs = _get_tls_kwargs()

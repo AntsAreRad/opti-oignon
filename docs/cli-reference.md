@@ -385,7 +385,7 @@ View and modify CLI configuration.
 
 ```bash
 oo config                          # show current config
-oo config set api_url http://remote:8000
+oo config set api_url http://remote:8000   # the server lists `remote` under api.hosts in security.yaml
 oo config set animations false
 oo config set animation_interval_ms 200
 oo config reset                    # reset to defaults

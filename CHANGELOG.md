@@ -3487,6 +3487,18 @@ package costs.
 
 ### Fixed
 
+- The API now answers only the names the machine is served as. A web
+  page from anywhere could rebind its own name to this machine (DNS
+  rebinding) and then reach the local API as its own site: CORS never
+  applied, and in single-user Daily mode the page acted as the local
+  user -- reading conversations, changing settings, running sandbox
+  commands. A request or a websocket addressed to any name but
+  `localhost`, `127.0.0.1` or `[::1]` is now refused before anything
+  else runs. A machine reached under other names (a LAN name, an
+  address) lists them under `api.hosts` in `security.yaml` and restarts
+  the server, or only the loopback names answer: see SECURITY.md.
+  hg1-hg3 in the new
+  `tests/test_api_answers_only_its_host_names_contracts.py`.
 - A copy into or out of a sandbox works on the sandbox it started with.
   The host's copies -- an upload, a copy of files or of a folder, a
   clone, and the copy of approved files back to the host -- found their

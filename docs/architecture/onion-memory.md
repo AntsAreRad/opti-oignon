@@ -1152,7 +1152,10 @@ auth store as the platform's own reads do.
 
 Every garden route first checks where a request comes from. Its Host
 header, exactly one, must name this machine as `127.0.0.1`, `localhost` or
-`[::1]`, or a name listed in `api.hosts` in `config/allium.yaml`: exact
+`[::1]`, or a name listed in `api.hosts` in `config/allium.yaml` -- and,
+since the whole API answers only the loopback names and the names listed
+in `api.hosts` of `config/security.yaml` (the Host gate, see SECURITY.md),
+in that list too: exact
 lowercase names or IP literals, with no port, scheme or wildcard, an IPv4
 address written as its dotted quad. Ports are
 never compared (a rebound name is the attacker's, the port is not), and

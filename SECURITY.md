@@ -56,6 +56,28 @@ timing oracle prevention (dummy bcrypt on invalid usernames). Rate
 limiting with exponential lockout. CSRF double-submit cookie on all
 state-changing endpoints.
 
+The API answers only the names the machine is served as: a request, or a
+websocket handshake, whose Host header is not `localhost`, `127.0.0.1` or
+`[::1]` (any port) is refused before anything else runs, so a web page
+that rebinds its own name to this machine (DNS rebinding) reaches nothing.
+A machine served under other names lists them in `security.yaml`:
+
+```yaml
+api:
+  hosts: ["oo.lan", "192.168.1.20"]
+```
+
+A list that cannot be read leaves the loopback names alone. The names are
+read when the server starts: a newly listed name needs a restart. A listed
+name is only as safe as its resolution: on a local network, where another
+device can answer for a `.local` or local DNS name, prefer an IP literal.
+The garden's routes keep their own list (`api.hosts` in `allium.yaml`),
+checked after this one: a name the garden serves is listed in both. A
+reverse proxy in front of the API forwards the browser's Host (nginx:
+`proxy_set_header Host $host`); one that rewrites it to a loopback name
+(nginx's default with `proxy_pass http://127.0.0.1:8001`) turns the gate
+off.
+
 ### Layer 2 -- Encryption at rest
 
 AES-256-GCM encryption for sensitive data fields, conversation messages
