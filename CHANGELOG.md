@@ -3487,6 +3487,17 @@ package costs.
 
 ### Fixed
 
+- A web page of another site can no longer send a state-changing request
+  through the local API. Any page could post a form, or send a request
+  it does not ask to read, to `127.0.0.1` itself; in single-user Daily
+  mode such a request ran as the local user, the cross-site request
+  check being skipped there. Every request but a GET, a HEAD or an
+  OPTIONS that a browser sends for a page of another site -- by its
+  `Origin`, or its `Sec-Fetch-Site` when it sends no Origin -- is now
+  refused, in every mode. Pages of this machine and command-line clients
+  are answered as before; a page served under a name listed under
+  `api.hosts` changes something only over https. xs1-xs3 in the new
+  `tests/test_api_changes_nothing_for_another_site_contracts.py`.
 - The API now answers only the names the machine is served as. A web
   page from anywhere could rebind its own name to this machine (DNS
   rebinding) and then reach the local API as its own site: CORS never

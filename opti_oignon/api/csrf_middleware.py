@@ -70,11 +70,13 @@ def _is_single_user_unauthenticated() -> bool:
     """Return True when the app runs in single-user mode outside Bulbe.
 
     in single-user mode (non-Bulbe) the auth middleware bypasses
-    authentication entirely, so there is no session cookie and no
-    cross-site request to forge. CSRF double-submit validation would only
-    reject legitimate same-origin POSTs, so it is skipped here -- exactly as
-    auth is skipped in auth_middleware. In Bulbe mode, full CSRF enforcement
-    is retained regardless of single_user_mode.
+    authentication entirely, so there is no session cookie, and the
+    double-submit check would only reject legitimate same-origin POSTs: it
+    is skipped here -- exactly as auth is skipped in auth_middleware. A
+    request still needs no cookie to be forged: the outermost gate
+    (``host_gate.site_allowed``) refuses, in every mode, a state-changing
+    request a page of another site sends. In Bulbe mode, full CSRF
+    enforcement is retained regardless of single_user_mode.
     """
     try:
         from opti_oignon.auth import auth_manager as mgr
@@ -124,8 +126,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         """Validate CSRF token before processing state-changing requests."""
-        # Skip in single-user mode (non-Bulbe) -- no auth session exists,
-        # so there is nothing for CSRF to protect (parity with auth_middleware).
+        # Skip in single-user mode (non-Bulbe) -- no auth session exists, so
+        # no token to check (parity with auth_middleware); a page of another
+        # site is refused before this, by the outermost gate (host_gate).
         if _is_single_user_unauthenticated():
             return await call_next(request)
 

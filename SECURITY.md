@@ -53,8 +53,10 @@ cookies with server-side algorithm enforcement. Multi-user RBAC with
 per-user data isolation (separate encryption keys derived via Argon2id).
 Optional 2FA via WebAuthn/FIDO2 and TOTP with recovery codes. Login
 timing oracle prevention (dummy bcrypt on invalid usernames). Rate
-limiting with exponential lockout. CSRF double-submit cookie on all
-state-changing endpoints.
+limiting with exponential lockout. CSRF double-submit cookie on the
+state-changing endpoints of a signed-in browser session (in single-user
+Daily mode, which has no session cookie, and for the few routes it exempts,
+the gate's origin check below is what refuses another site).
 
 The API answers only the names the machine is served as: a request, or a
 websocket handshake, whose Host header is not `localhost`, `127.0.0.1` or
@@ -66,6 +68,17 @@ A machine served under other names lists them in `security.yaml`:
 api:
   hosts: ["oo.lan", "192.168.1.20"]
 ```
+
+A page of another site can still send a request to the loopback address
+itself (a form, a `fetch` that does not ask to read the answer): the same
+gate refuses every state-changing request (any method but GET, HEAD and
+OPTIONS) whose `Origin` is neither a page of this machine (a loopback name,
+on any port) nor a listed name over `https` (a page served under a listed
+name over plain `http` changes nothing: serve remote access over TLS), and,
+with no `Origin`, one whose `Sec-Fetch-Site` is not `same-origin` or
+`none`. A client that sends neither header is no current browser (the CLI,
+curl) and is answered. A GET is not asked where it comes from: a route must
+not change anything on a GET.
 
 A list that cannot be read leaves the loopback names alone. The names are
 read when the server starts: a newly listed name needs a restart. A listed
