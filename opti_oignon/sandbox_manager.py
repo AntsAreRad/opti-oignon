@@ -2381,16 +2381,21 @@ def _systemd_run_prefix(config: SandboxConfig) -> list[str]:
 
 
 def _copying_in(copy):
-    """A copy into a session's workspace, ``copy(self, session_id, ...)``, run with its session in use
-    (``SandboxManager.in_use``): the idle sweep never takes the workspace while it is written. An explicit destroy is
-    not held off; when one ended the session meanwhile, the copy answers so (``ValueError``), whether it returned --
-    with files that went with the workspace -- or failed for the removal."""
+    """A copy into a session's workspace, ``copy(self, session_id, ..., _held=session)``, run with its session in use
+    (``SandboxManager.in_use``): the idle sweep never takes the workspace while it is written. The copy works on the
+    session held (``_held``: its workspace, its activity), never on one made again under the id meanwhile. An explicit
+    destroy is not held off; when one ended the session meanwhile, the copy answers so (``ValueError``), whether it
+    returned -- with files that went with the workspace -- or failed for the removal."""
 
     @functools.wraps(copy)
     def copied(self, session_id, *args, **kwargs):
         with self.in_use(session_id) as session:
+            # A destroy that came since the hold checked the session: nothing
+            # is written into its workspace, removed or still standing
+            if not session.active:
+                raise _destroyed_during(session_id)
             try:
-                done = copy(self, session_id, *args, **kwargs)
+                done = copy(self, session_id, *args, _held=session, **kwargs)
             except Exception as exc:
                 # The destroy removed the workspace under the copy, which
                 # failed for it: the destroy is the answer, not its trace
@@ -2409,14 +2414,20 @@ def _destroyed_during(session_id: str) -> ValueError:
 
 
 def _copying_out(copy):
-    """A copy out of a session's workspace to the host, ``copy(self, session_id, ...)``, run with its session in use
-    (``SandboxManager.in_use``): the idle sweep never takes the workspace while it is read. An explicit destroy is not
-    held off, and what was copied is on the host: the answer stands."""
+    """A copy out of a session's workspace to the host, ``copy(self, session_id, ..., _held=session)``, run with its
+    session in use (``SandboxManager.in_use``): the idle sweep never takes the workspace while it is read. The copy
+    works on the session held (``_held``: its workspace, its approvals), never on one made again under the id
+    meanwhile; one called with ``_held`` (the batch's own files) works on that session, already held. An explicit
+    destroy is not held off, and what was copied is on the host: the answer stands."""
 
     @functools.wraps(copy)
-    def copied(self, session_id, *args, **kwargs):
-        with self.in_use(session_id):
-            return copy(self, session_id, *args, **kwargs)
+    def copied(self, session_id, *args, _held=None, **kwargs):
+        if _held is not None:
+            if _held.session_id != session_id:
+                raise ValueError(f"Session {session_id} is not the session held")
+            return copy(self, session_id, *args, _held=_held, **kwargs)
+        with self.in_use(session_id) as session:
+            return copy(self, session_id, *args, _held=session, **kwargs)
 
     return copied
 
@@ -3352,6 +3363,8 @@ class SandboxManager:
         self,
         session_id: str,
         file_paths: list[str],
+        *,
+        _held: SandboxSession,
     ) -> list[str]:
         """Copy files from the host into the sandbox workspace.
 
@@ -3375,7 +3388,7 @@ class SandboxManager:
             ValueError: If session not found or inactive, or destroyed while
                 the files were copied (``_copying_in``).
         """
-        workspace = self._get_active_workspace(session_id)
+        workspace = _held.workspace_path
         injected: list[str] = []
 
         # Per-workspace disk soft quota. Compute the incoming size up
@@ -3417,7 +3430,7 @@ class SandboxManager:
             injected.append(resolved)
             logger.debug("Injected file: %s -> %s", src_path, resolved)
 
-        self.touch_activity(session_id)
+        self.touch_activity(session_id, held=_held)
         return injected
 
     @_copying_in
@@ -3426,6 +3439,8 @@ class SandboxManager:
         session_id: str,
         src_dir: str,
         dest_subdir: str = "",
+        *,
+        _held: SandboxSession,
     ) -> int:
         """Copy a directory tree into the sandbox workspace.
 
@@ -3457,7 +3472,7 @@ class SandboxManager:
                 destroyed while the tree was copied (``_copying_in``).
             shutil.Error: If some entries could not be copied.
         """
-        workspace = self._get_active_workspace(session_id)
+        workspace = _held.workspace_path
 
         if not os.path.isdir(src_dir):
             raise ValueError(f"Source is not a directory: {src_dir}")
@@ -3488,7 +3503,7 @@ class SandboxManager:
         if errors:
             raise shutil.Error(errors)
 
-        self.touch_activity(session_id)
+        self.touch_activity(session_id, held=_held)
 
         dest_final = os.path.join(workspace, *(base + top))
         logger.debug(
@@ -3552,6 +3567,8 @@ class SandboxManager:
         session_id: str,
         items: list[tuple[str, Any, int]],
         dest_subdir: str = "",
+        *,
+        _held: SandboxSession,
     ) -> dict[str, Any]:
         """Write user-uploaded file streams into the workspace (5.1).
 
@@ -3574,7 +3591,7 @@ class SandboxManager:
         [{name, reason}], "written_bytes": int}; a destroy that ended the
         session meanwhile is answered ``ValueError`` (``_copying_in``).
         """
-        workspace = self._get_active_workspace(session_id)
+        workspace = _held.workspace_path
         cfg = self._config
 
         if len(items) > cfg.upload_max_files:
@@ -3655,7 +3672,7 @@ class SandboxManager:
         finally:
             os.close(folder)
 
-        self.touch_activity(session_id)
+        self.touch_activity(session_id, held=_held)
         self._audit.log_approval(
             session_id,
             action="workspace_upload",
@@ -3812,6 +3829,8 @@ class SandboxManager:
         session_id: str,
         src_path: str,
         dest_subdir: str = "",
+        *,
+        _held: SandboxSession,
     ) -> dict[str, Any]:
         """Clone an allowlisted host directory into the workspace (spec
         5.2b), symlink-safe, with the section 6.1 baseline hashes computed
@@ -3843,7 +3862,7 @@ class SandboxManager:
         destroy that ended the session meanwhile is answered
         ``ValueError`` (``_copying_in``).
         """
-        workspace = self._get_active_workspace(session_id)
+        workspace = _held.workspace_path
         src = self._resolve_share_path(src_path)
 
         if dest_subdir:
@@ -3949,7 +3968,7 @@ class SandboxManager:
             finally:
                 os.close(folder)
 
-        self.touch_activity(session_id)
+        self.touch_activity(session_id, held=_held)
         self._audit.log_approval(
             session_id,
             action="host_clone",
@@ -4464,6 +4483,8 @@ class SandboxManager:
         session_id: str,
         path: str,
         dest_dir: str,
+        *,
+        _held: SandboxSession,
     ) -> dict[str, Any]:
         """Copy a single approved file from the sandbox to the host.
 
@@ -4482,10 +4503,15 @@ class SandboxManager:
             ValueError: If session not found, inactive, or path invalid.
             PermissionError: If file not approved.
         """
-        workspace = self._get_active_workspace(session_id)
+        workspace = _held.workspace_path
+        # A destroy that ended the session held stops the copy-out here, its
+        # workspace removed or still standing (a leftover, or its removal
+        # under way), as the session's lookup by id stopped it
+        if not _held.active:
+            raise ValueError(f"Session is inactive: {session_id}")
 
         # Check approval
-        if not self.is_file_approved(session_id, path):
+        if not self.is_file_approved(session_id, path, held=_held):
             self._audit.log_approval(
                 session_id,
                 action="copy_out_denied",
@@ -4513,6 +4539,10 @@ class SandboxManager:
         # this one takes a free name. Content, then the source's times and mode, set on the export's own descriptor --
         # the mode without setuid, setgid or sticky, nor write for others than its owner; an export that fails is
         # removed.
+        # Again right before the source is opened: a destroy that came while
+        # the gates were read stops it too
+        if not _held.active:
+            raise ValueError(f"Session is inactive: {session_id}")
         root = os.path.realpath(workspace)
         src_fd = _open_beneath(root, os.path.relpath(resolved_src, root))
         with os.fdopen(src_fd, "rb") as src:
@@ -4556,6 +4586,8 @@ class SandboxManager:
         session_id: str,
         paths: list[str],
         dest_dir: str,
+        *,
+        _held: SandboxSession,
     ) -> list[dict[str, Any]]:
         """Copy multiple approved files from the sandbox to the host.
 
@@ -4577,14 +4609,14 @@ class SandboxManager:
         skipped: list[str] = []
 
         for p in paths:
-            if not self.is_file_approved(session_id, p):
+            if not self.is_file_approved(session_id, p, held=_held):
                 skipped.append(p)
                 logger.warning(
                     "Batch copy-out skipped (not approved): %s", p,
                 )
                 continue
             try:
-                result = self.copy_out_file(session_id, p, dest_dir)
+                result = self.copy_out_file(session_id, p, dest_dir, _held=_held)
                 results.append(result)
             except (ValueError, OSError) as exc:
                 logger.warning(

@@ -3487,6 +3487,17 @@ package costs.
 
 ### Fixed
 
+- A copy into or out of a sandbox works on the sandbox it started with.
+  The host's copies -- an upload, a copy of files or of a folder, a
+  clone, and the copy of approved files back to the host -- found their
+  sandbox by name while they ran: when the sandbox was destroyed and
+  another made under the same name in that instant (a client that names
+  its sandbox, or the chat's coding agent after a sweep), a copy in
+  wrote into the new sandbox while answering that the old one was
+  destroyed, and a copy out sent the new sandbox's approved files to the
+  host. A destroy still stops a copy out, even while the old sandbox's
+  folder is being removed. ho1-ho3 in the new
+  `tests/test_sandbox_copies_work_on_the_held_session_contracts.py`.
 - A sandbox made again under the name of one that ended no longer
   inherits its review baseline. The files recorded when they were copied
   in, and the folder a clone came from (the apply's default target),
