@@ -44,6 +44,20 @@ actions:
 Every copy-in records a baseline manifest (per-file hashes). The model
 cannot reach into the host on its own; copy-in is never model-triggerable.
 
+No copy into a workspace -- an upload, a clone, or the files and project
+a request or a coding task injects -- writes through a link the sandbox
+put there. Each folder is reached one component at a time without
+following a link, and a link on the way to a destination folder is
+refused, even one that stays inside the workspace, as is a destination
+folder written with `..`. An upload or a clone creates each file only
+where nothing stands. An injected file over a regular file of the
+workspace is written in place; a link or a second name at its name is
+replaced, never written through. An injected project still follows the
+links inside the host folder it copies; a clone skips them. The file
+tools the agents and the sandbox's execute route use still check a path
+and then write it by path: a link the sandbox puts there in between,
+while one of its commands runs, is followed.
+
 ## Diff review and apply
 
 Copy-out is approval-gated, refined into a diff model. The review compares

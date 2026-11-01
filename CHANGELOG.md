@@ -3487,6 +3487,39 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] A copy into a sandbox never writes through a link the sandbox
+  put in its workspace. A coding task's project was copied into its
+  workspace with `shutil.copytree`, merged into what was there: a link the
+  sandbox's code had left at the project's name, or below it at a name the
+  project also holds, sent the copy onto host files, made host folders and
+  changed host folders' modes; a project path ending in `..` landed beside
+  the workspace. An injected file (`POST /api/sandbox/inject`) was written
+  through a link put at its name after its check, through a link to
+  another file of the workspace, and in place into a second name of a host
+  file. An upload and a clone, which refuse a name already taken, still
+  opened each file by path after that check: a link put there while a
+  command ran was followed, and the clone copied its status through it.
+  Now every copy into a workspace reaches its folders one component at a
+  time without following a link (a link on the way to a destination folder
+  is refused, even one that stays inside the workspace, and so is a
+  destination folder written with `..`), an upload or a clone creates each
+  file only where nothing stands, and a clone that meets something put at
+  a folder's place while it ran is refused (409, as when it met a file
+  there). An injected file over a regular file with one name is written in
+  place, through no link, as before (a file injected onto itself is
+  refused, as before); any other entry at its name -- a link, a second
+  name, a file its owner may not write -- is replaced by a copy written
+  under a fresh name and renamed over it, never written through; a folder
+  at its name is refused. An injected project still follows the links of
+  the host folder it copies, copies the rest when an entry fails and names
+  the failures, and counts the files it wrote (it counted every file under
+  its destination); a link in it back to a folder above it, and a device
+  in it (which the copy read), are refused. Copies keep their source's
+  permission bits and times, no longer its setuid, setgid and sticky bits
+  nor its extended attributes. The file tools the agents and `POST
+  /api/sandbox/execute` use, which check a path and then write it by path,
+  are not changed here. in1-in5 in the new
+  `tests/test_sandbox_copy_in_through_no_link_contracts.py`.
 - [SECURITY] An export or a code run's copy out of a sandbox never
   overwrites a file, nor goes through a link. A code run's images were
   copied into the code output directory under the second and the file's

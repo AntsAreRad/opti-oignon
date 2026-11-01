@@ -1656,6 +1656,203 @@ def _open_beneath(root: str, relative: str) -> int:
     return handle
 
 
+def _workspace_parts(requested: str) -> list[str]:
+    """The components of a path the user names in a workspace, relative or under ``/workspace``: ``""`` and ``.``
+    dropped, ``..`` refused (``OSError``) -- a path is walked as written, never folded first."""
+    if requested == "/workspace" or requested.startswith("/workspace/"):
+        requested = requested[len("/workspace"):]
+    elif os.path.isabs(requested):
+        raise OSError(errno.EINVAL, f"not a path beneath the workspace: {requested}")
+    parts = [part for part in requested.split(os.sep) if part not in ("", ".")]
+    if ".." in parts:
+        raise OSError(errno.EINVAL, f"not a path beneath the workspace: {requested}")
+    return parts
+
+
+def _folder_beneath(root: str, parts: list[str], make: bool = False) -> int:
+    """A descriptor (``O_PATH``) of the folder ``parts`` name under ``root``, reached one component at a time without
+    following a link: a link or anything but a folder on the way is refused (``OSError``), never followed -- even a
+    link that stays inside the workspace. With ``make``, a missing folder is made beneath its parent, as ``makedirs``
+    made it (mode 0o777 under the umask)."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(root, directory)
+    try:
+        for part in parts:
+            if make:
+                try:
+                    os.mkdir(part, 0o777, dir_fd=fd)
+                except FileExistsError:
+                    pass
+            inner = os.open(part, directory | nofollow, dir_fd=fd)
+            os.close(fd)
+            fd = inner
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd
+
+
+def _plain_name(name: str) -> str:
+    """``name`` when it names an entry of one folder, else ``OSError``."""
+    if not name or name in (".", "..") or os.sep in name or "\x00" in name:
+        raise OSError(errno.EINVAL, f"not a file name: {name!r}")
+    return name
+
+
+def _new_file_beneath(folder: int, name: str, mode: int = 0o666) -> int:
+    """A descriptor open for writing on a new file ``name`` in ``folder`` (a descriptor): never a file already there,
+    nor through a link at the name (``O_EXCL``, ``O_NOFOLLOW``)."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    return os.open(_plain_name(name), flags, mode, dir_fd=folder)
+
+
+def _pour(source: int, out: int, st: os.stat_result) -> int:
+    """Copy every byte of the descriptor ``source`` to the descriptor ``out``, then give ``out`` the permission bits
+    of ``st`` (without setuid, setgid or sticky) and its times; the bytes written."""
+    written = 0
+    while True:
+        chunk = os.read(source, _COPYIN_CHUNK_BYTES)
+        if not chunk:
+            break
+        view = memoryview(chunk)
+        while view:
+            view = view[os.write(out, view):]
+        written += len(chunk)
+    os.fchmod(out, stat.S_IMODE(st.st_mode) & 0o777)
+    os.utime(out, ns=(st.st_atime_ns, st.st_mtime_ns))
+    return written
+
+
+def _open_in_place(folder: int, name: str) -> int | None:
+    """A descriptor open for writing on the file at ``name`` in ``folder`` (a descriptor) when it is a regular file
+    with one name, opened without following a link and without waiting; else None -- nothing there, a link, a
+    folder, a FIFO, a second name of another file, or a file its owner may not write."""
+    flags = os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        out = os.open(name, flags, dir_fd=folder)
+    except OSError:
+        return None
+    st = os.fstat(out)
+    if stat.S_ISREG(st.st_mode) and st.st_nlink == 1:
+        return out
+    os.close(out)
+    return None
+
+
+def _replace_beneath(folder: int, name: str, source: str) -> int:
+    """Copy the host file ``source`` to ``name`` in ``folder`` (a descriptor); the bytes written, with the source's
+    permission bits (without setuid, setgid or sticky) and times. A regular file with one name already at ``name`` is
+    written in place, as ``copytree`` wrote over it (a folder its owner may not write still takes it), through a
+    descriptor opened without following a link -- unless it is the source itself, refused as ``copy2`` refused it.
+    Anything else -- nothing, a link, a second name of a host file, a file its owner may not write, a FIFO -- is
+    replaced as an entry: the copy is written under a fresh name beside ``name``, then renamed over it, never written
+    through what stood there. A folder at the name is refused (``OSError``), and so is a source that is not a regular
+    file -- a FIFO, a device -- at once (``O_NONBLOCK``: never waited on). A fresh copy that fails is removed and the
+    name left as it was; a file written in place is left as far as the write got, as ``copytree`` left it."""
+    _plain_name(name)
+    handle = os.open(source, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    try:
+        st = os.fstat(handle)
+        if not stat.S_ISREG(st.st_mode):
+            raise OSError(errno.EINVAL, f"not a regular file: {source}")
+        out = _open_in_place(folder, name)
+        if out is not None:
+            try:
+                there = os.fstat(out)
+                if (there.st_dev, there.st_ino) == (st.st_dev, st.st_ino):
+                    # Truncated, the source would be read empty
+                    raise OSError(errno.EINVAL, f"the source is the file at its name: {source}")
+                os.ftruncate(out, 0)
+                return _pour(handle, out, st)
+            finally:
+                os.close(out)
+        for _ in range(_DRAWN_TRIES):
+            fresh = f".copy-in-{secrets.token_hex(8)}"
+            try:
+                out = _new_file_beneath(folder, fresh, 0o600)
+                break
+            except FileExistsError:
+                continue
+        else:
+            raise FileExistsError(f"no free name beside {name}")
+        try:
+            try:
+                written = _pour(handle, out, st)
+            finally:
+                os.close(out)
+            os.replace(fresh, name, src_dir_fd=folder, dst_dir_fd=folder)
+        except BaseException:
+            try:
+                os.unlink(fresh, dir_fd=folder)
+            except OSError:
+                pass
+            raise
+        return written
+    finally:
+        os.close(handle)
+
+
+def _copy_tree_beneath(src: str, root: str, parts: list[str]) -> tuple[int, list[tuple[str, str, str]]]:
+    """Copy the host folder ``src`` to the folder ``parts`` name under ``root``, merged into what is there; the files
+    written, and the failures. The source is read as ``shutil.copytree`` read it (a link in it followed: a file link
+    copied as its content, a folder link as the folder; a dangling one a failure); the destination is written only
+    beneath ``root`` and through no link (``_folder_beneath``, ``_replace_beneath``): a link at a folder's place
+    refuses that folder, one at a file's name is replaced by the file. A source folder reached again below itself
+    through a link is refused, where ``copytree`` recursed until the path failed. Each failure is recorded as
+    ``copytree`` recorded it -- (source, destination, reason) -- and the rest copied; a folder's permission bits and
+    times are set after its content, as ``copystat`` set them."""
+    written = 0
+    errors: list[tuple[str, str, str]] = []
+    # (source folder, its destination's parts, the source folders above it, its content done)
+    stack: list[tuple[str, list[str], tuple[tuple[int, int], ...], bool]] = [(src, parts, (), False)]
+    while stack:
+        current, here, above, done = stack.pop()
+        shown = os.path.join(root, *here)
+        if done:
+            try:
+                st = os.stat(current)
+                folder = _folder_beneath(root, here)
+                try:
+                    own = os.open(".", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0), dir_fd=folder)
+                finally:
+                    os.close(folder)
+                try:
+                    os.fchmod(own, stat.S_IMODE(st.st_mode) & 0o777)
+                    os.utime(own, ns=(st.st_atime_ns, st.st_mtime_ns))
+                finally:
+                    os.close(own)
+            except OSError as why:
+                errors.append((current, shown, str(why)))
+            continue
+        try:
+            st = os.stat(current)
+            identity = (st.st_dev, st.st_ino)
+            if identity in above:
+                raise OSError(errno.ELOOP, f"a link back to a folder above it: {current}")
+            with os.scandir(current) as it:
+                entries = list(it)
+            folder = _folder_beneath(root, here, make=True)
+        except OSError as why:
+            errors.append((current, shown, str(why)))
+            continue
+        try:
+            stack.append((current, here, above, True))
+            for entry in entries:
+                target = os.path.join(shown, entry.name)
+                try:
+                    if entry.is_dir():
+                        stack.append((entry.path, here + [entry.name], above + (identity,), False))
+                    else:
+                        _replace_beneath(folder, entry.name, entry.path)
+                        written += 1
+                except OSError as why:
+                    errors.append((entry.path, target, str(why)))
+        finally:
+            os.close(folder)
+    return written, errors
+
+
 # ---------------------------------------------------------------------------
 # Bwrap command builder
 # ---------------------------------------------------------------------------
@@ -2678,7 +2875,12 @@ class SandboxManager:
 
         Only existing, readable files are copied. Files are placed
         in the workspace root, preserving only the filename (no
-        directory structure from the source).
+        directory structure from the source). A regular file with one
+        name already at the name is written in place, through no link;
+        any other entry -- a link or a second name the sandbox put there
+        -- is replaced by a copy renamed over it, never written through.
+        A folder at the name, a source that is that very file, or a copy
+        that fails, is skipped and logged.
 
         Args:
             session_id: Target sandbox session.
@@ -2716,13 +2918,19 @@ class SandboxManager:
                 continue
 
             filename = os.path.basename(src_real)
-            # Prevent overwriting with a name that escapes
-            valid, resolved, err = validate_sandbox_path(workspace, filename)
-            if not valid:
-                logger.warning("Inject blocked (path validation): %s", err)
+            # A file of the workspace written in place; a link the
+            # sandbox put at the name, or a second name of a host file,
+            # replaced by a copy renamed over it, never written through
+            try:
+                folder = _folder_beneath(workspace, [])
+                try:
+                    _replace_beneath(folder, filename, src_real)
+                finally:
+                    os.close(folder)
+            except OSError as exc:
+                logger.warning("Inject refused: %s (%s)", src_path, exc)
                 continue
-
-            shutil.copy2(src_real, resolved)
+            resolved = os.path.join(os.path.realpath(workspace), filename)
             injected.append(resolved)
             logger.debug("Injected file: %s -> %s", src_path, resolved)
 
@@ -2736,6 +2944,21 @@ class SandboxManager:
     ) -> int:
         """Copy a directory tree into the sandbox workspace.
 
+        The tree lands at ``[dest_subdir/]<basename(src_dir)>``, merged
+        into what is there, as ``shutil.copytree(dirs_exist_ok=True)``
+        landed it: a link in the HOST source is followed, each failure
+        is recorded while the rest is copied, and ``shutil.Error``
+        names them at the end. The WORKSPACE side is walked without
+        following a link (``_copy_tree_beneath``): a link the sandbox
+        put at a folder's place refuses that folder, one at a file's
+        name is replaced by the file, and nothing is written outside
+        the workspace. Where they part: a device in the source (or a
+        link to one), which ``copytree`` read, is refused like a FIFO
+        or a socket; a link in the source back to a folder above it is
+        refused; a file the workspace's owner may not write is replaced
+        rather than refused; a source path ending in ``..`` or a
+        ``dest_subdir`` with ``..`` is refused.
+
         Args:
             session_id: Target sandbox session.
             src_dir: Host directory to copy.
@@ -2746,6 +2969,7 @@ class SandboxManager:
 
         Raises:
             ValueError: If session not found, inactive, or path invalid.
+            shutil.Error: If some entries could not be copied.
         """
         workspace = self._get_active_workspace(session_id)
 
@@ -2753,26 +2977,34 @@ class SandboxManager:
             raise ValueError(f"Source is not a directory: {src_dir}")
 
         if dest_subdir:
-            valid, dest_path, err = validate_sandbox_path(
+            valid, _dest_path, err = validate_sandbox_path(
                 workspace, dest_subdir
             )
             if not valid:
                 raise ValueError(f"Invalid destination: {err}")
-        else:
-            dest_path = workspace
+        # Walked as written: a source named ``x/..`` would land beside
+        # the workspace
+        try:
+            base = _workspace_parts(dest_subdir)
+            top = _workspace_parts(os.path.basename(src_dir))
+        except OSError as exc:
+            raise ValueError(f"Invalid destination: {exc}") from exc
 
         # Per-workspace disk soft quota on the incoming tree.
         incoming = self._workspace_disk_use(src_dir)
         self._check_disk_quota(session_id, workspace, incoming)
 
-        # Copy tree
-        dest_final = os.path.join(dest_path, os.path.basename(src_dir))
-        shutil.copytree(src_dir, dest_final, dirs_exist_ok=True)
+        try:
+            os.close(_folder_beneath(workspace, base, make=True))
+        except OSError as exc:
+            raise ValueError(f"Invalid destination: {exc}") from exc
+        count, errors = _copy_tree_beneath(src_dir, workspace, base + top)
+        if errors:
+            raise shutil.Error(errors)
 
         self.touch_activity(session_id)
 
-        # Count files
-        count = sum(1 for _, _, files in os.walk(dest_final) for _ in files)
+        dest_final = os.path.join(workspace, *(base + top))
         logger.debug(
             "Injected directory: %s -> %s (%d files)",
             src_dir,
@@ -2845,7 +3077,11 @@ class SandboxManager:
         collisions are refused PER FILE (never overwritten, never renamed)
         and reported honestly; valid files are written in bounded chunks
         with an on-the-fly sha256 so the caller can record the baseline
-        manifest (section 6.1) without a second read.
+        manifest (section 6.1) without a second read. The destination
+        folder is reached as written, without following a link: a link
+        on the way, or ``..``, refuses the upload (ValueError); each file
+        is created only where nothing stands (``O_EXCL``), so a link the
+        sandbox puts at its name is refused, never followed.
 
         Returns {"written": [{path, name, size, sha256}], "refused":
         [{name, reason}], "written_bytes": int}.
@@ -2869,56 +3105,67 @@ class SandboxManager:
         self._check_disk_quota(session_id, workspace, incoming)
 
         if dest_subdir:
-            valid, dest_root, err = validate_sandbox_path(
+            valid, _dest_root, err = validate_sandbox_path(
                 workspace, dest_subdir
             )
             if not valid:
                 raise ValueError(f"Invalid destination: {err}")
-            os.makedirs(dest_root, exist_ok=True)
-        else:
-            dest_root = workspace
+        # The folder is reached without following a link and each file
+        # created where no entry stands (O_EXCL): a link the sandbox
+        # puts at a name after any check is refused, never followed
+        try:
+            base = _workspace_parts(dest_subdir)
+            folder = _folder_beneath(workspace, base, make=True)
+        except OSError as exc:
+            raise ValueError(f"Invalid destination: {exc}") from exc
+        dest_root = os.path.join(os.path.realpath(workspace), *base)
 
         written: list[dict[str, Any]] = []
         refused: list[dict[str, str]] = []
         written_bytes = 0
         import hashlib
 
-        for name, stream, _size in items:
-            ok, clean = self.sanitize_upload_filename(name)
-            if not ok:
-                refused.append({"name": name, "reason": clean})
-                continue
-            rel = (
-                os.path.join(dest_subdir, clean) if dest_subdir else clean
-            )
-            valid, resolved, err = validate_sandbox_path(workspace, rel)
-            if not valid:
-                refused.append({"name": name, "reason": err})
-                continue
-            if os.path.lexists(resolved):
-                refused.append({
-                    "name": name,
-                    "reason": "Destination already exists (not overwritten)",
+        try:
+            for name, stream, _size in items:
+                ok, clean = self.sanitize_upload_filename(name)
+                if not ok:
+                    refused.append({"name": name, "reason": clean})
+                    continue
+                rel = (
+                    os.path.join(dest_subdir, clean) if dest_subdir else clean
+                )
+                resolved = os.path.join(dest_root, clean)
+                digest = hashlib.sha256()
+                try:
+                    handle = _new_file_beneath(folder, clean)
+                except FileExistsError:
+                    refused.append({
+                        "name": name,
+                        "reason": "Destination already exists (not overwritten)",
+                    })
+                    continue
+                except OSError as exc:
+                    refused.append({"name": name, "reason": str(exc)})
+                    continue
+                size_written = 0
+                with os.fdopen(handle, "wb") as out:
+                    while True:
+                        chunk = stream.read(_COPYIN_CHUNK_BYTES)
+                        if not chunk:
+                            break
+                        out.write(chunk)
+                        digest.update(chunk)
+                        size_written += len(chunk)
+                written_bytes += size_written
+                written.append({
+                    "path": resolved,
+                    "relative_path": rel.replace(os.sep, "/"),
+                    "name": clean,
+                    "size": size_written,
+                    "sha256": digest.hexdigest(),
                 })
-                continue
-            digest = hashlib.sha256()
-            size_written = 0
-            with open(resolved, "wb") as out:
-                while True:
-                    chunk = stream.read(_COPYIN_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    out.write(chunk)
-                    digest.update(chunk)
-                    size_written += len(chunk)
-            written_bytes += size_written
-            written.append({
-                "path": resolved,
-                "relative_path": rel.replace(os.sep, "/"),
-                "name": clean,
-                "size": size_written,
-                "sha256": digest.hexdigest(),
-            })
+        finally:
+            os.close(folder)
 
         self.touch_activity(session_id)
         self._audit.log_approval(
@@ -3092,22 +3339,35 @@ class SandboxManager:
         the seam the diff review consumes. The destination
         ``<workspace>/[dest_subdir/]<basename(src)>`` must not already
         exist (FileExistsError -> the route's 409): explicit, never merged.
+        The workspace side is written through no link: each folder is
+        reached beneath the workspace without following one, the
+        destination made only where nothing stands, each file created
+        only where nothing stands (``O_EXCL``) -- a link or a file the
+        sandbox puts at a file's name in a folder of the clone while it
+        runs is refused and the file skipped; one put at a folder's
+        place refuses the clone (FileExistsError), its target never
+        written. A ``dest_subdir`` with ``..`` is refused, even one that
+        stays inside the workspace.
 
-        ``inject_directory`` (approval semantics, copytree) is deliberately
-        left byte-identical; this path owns the symlink-safe discipline.
+        ``inject_directory`` keeps ``copytree``'s source semantics (a
+        link in the host source is followed); this path skips them.
         """
         workspace = self._get_active_workspace(session_id)
         src = self._resolve_share_path(src_path)
 
         if dest_subdir:
-            valid, dest_parent, err = validate_sandbox_path(
+            valid, _dest_parent, err = validate_sandbox_path(
                 workspace, dest_subdir
             )
             if not valid:
                 raise ValueError(f"Invalid destination: {err}")
-        else:
-            dest_parent = workspace
-        dest_final = os.path.join(dest_parent, os.path.basename(src))
+        try:
+            base = _workspace_parts(dest_subdir)
+        except OSError as exc:
+            raise ValueError(f"Invalid destination: {exc}") from exc
+        dest_parent = os.path.join(os.path.realpath(workspace), *base)
+        top = os.path.basename(src)
+        dest_final = os.path.join(dest_parent, top)
         if os.path.lexists(dest_final):
             raise FileExistsError(
                 f"Clone destination already exists: {dest_final}"
@@ -3124,48 +3384,79 @@ class SandboxManager:
         skipped_symlinks = 0
         skipped_special = 0
         manifest: dict[str, str] = {}
-        dest_rel_root = os.path.relpath(dest_final, workspace)
+        dest_rel_root = "/".join(base + [top])
 
-        os.makedirs(dest_parent, exist_ok=True)
-        stack: list[tuple[str, str]] = [(src, dest_final)]
+        try:
+            parent = _folder_beneath(workspace, base, make=True)
+        except OSError as exc:
+            raise ValueError(f"Invalid destination: {exc}") from exc
+        try:
+            # Made only where nothing stands, a link included
+            os.mkdir(top, 0o777, dir_fd=parent)
+        finally:
+            os.close(parent)
+        stack: list[tuple[str, list[str]]] = [(src, base + [top])]
         while stack:
-            cur_src, cur_dst = stack.pop()
-            os.makedirs(cur_dst, exist_ok=True)
-            with os.scandir(cur_src) as it:
-                for entry in it:
-                    target = os.path.join(cur_dst, entry.name)
-                    try:
-                        if entry.is_symlink():
-                            skipped_symlinks += 1
+            cur_src, here = stack.pop()
+            try:
+                folder = _folder_beneath(workspace, here, make=True)
+            except NotADirectoryError as exc:
+                # Something the sandbox put at a folder's place while the
+                # clone ran: refused, never followed -- the route's 409,
+                # as when makedirs met a file there
+                raise FileExistsError(
+                    f"Clone destination folder replaced while the clone "
+                    f"ran: {'/'.join(here)}"
+                ) from exc
+            try:
+                with os.scandir(cur_src) as it:
+                    for entry in it:
+                        rel = "/".join(here + [entry.name])
+                        try:
+                            if entry.is_symlink():
+                                skipped_symlinks += 1
+                                continue
+                            if entry.is_dir(follow_symlinks=False):
+                                stack.append((entry.path, here + [entry.name]))
+                                continue
+                            if not entry.is_file(follow_symlinks=False):
+                                skipped_special += 1
+                                continue
+                            digest = hashlib.sha256()
+                            with open(entry.path, "rb") as fin, \
+                                    os.fdopen(
+                                        _new_file_beneath(folder, entry.name),
+                                        "wb",
+                                    ) as fout:
+                                while True:
+                                    chunk = fin.read(_COPYIN_CHUNK_BYTES)
+                                    if not chunk:
+                                        break
+                                    fout.write(chunk)
+                                    digest.update(chunk)
+                                    copied_bytes += len(chunk)
+                                # The status set on the copy itself,
+                                # after its last byte
+                                fout.flush()
+                                st = os.fstat(fin.fileno())
+                                os.fchmod(
+                                    fout.fileno(),
+                                    stat.S_IMODE(st.st_mode) & 0o777,
+                                )
+                                os.utime(
+                                    fout.fileno(),
+                                    ns=(st.st_atime_ns, st.st_mtime_ns),
+                                )
+                            copied_files += 1
+                            manifest[rel] = digest.hexdigest()
+                        except OSError as exc:
+                            logger.warning(
+                                "Clone skipped (read/write error): %s (%s)",
+                                entry.path, exc,
+                            )
                             continue
-                        if entry.is_dir(follow_symlinks=False):
-                            stack.append((entry.path, target))
-                            continue
-                        if not entry.is_file(follow_symlinks=False):
-                            skipped_special += 1
-                            continue
-                        digest = hashlib.sha256()
-                        with open(entry.path, "rb") as fin, \
-                                open(target, "wb") as fout:
-                            while True:
-                                chunk = fin.read(_COPYIN_CHUNK_BYTES)
-                                if not chunk:
-                                    break
-                                fout.write(chunk)
-                                digest.update(chunk)
-                                copied_bytes += len(chunk)
-                        shutil.copystat(entry.path, target)
-                        copied_files += 1
-                        rel = os.path.relpath(target, workspace)
-                        manifest[rel.replace(os.sep, "/")] = (
-                            digest.hexdigest()
-                        )
-                    except OSError as exc:
-                        logger.warning(
-                            "Clone skipped (read/write error): %s (%s)",
-                            entry.path, exc,
-                        )
-                        continue
+            finally:
+                os.close(folder)
 
         self.touch_activity(session_id)
         self._audit.log_approval(
