@@ -90,11 +90,12 @@ def _spawning(manager, sid, script, answers):
 
 
 def _state(pid):
-    """The state letter of process ``pid`` ("Z": ended, not reaped), None once it is gone."""
+    """The state letter of process ``pid`` ("Z": ended, not reaped), None once it is gone -- reaped before its file
+    was opened, or between its opening and its reading (ESRCH)."""
     try:
         with open(f"/proc/{pid}/stat", encoding="ascii") as stat_file:
             return stat_file.read().rsplit(")", 1)[1].split()[0]
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return None
 
 

@@ -23,6 +23,7 @@ tool_registry and tool_executor interfaces.
 Author: Leon
 """
 
+import contextlib
 import difflib
 import errno
 import io
@@ -88,6 +89,62 @@ def _resolve_path(
         return False, "", f"Path rejected: {err}"
 
     return True, resolved, ""
+
+
+# ---------------------------------------------------------------------------
+# Helper: hold a tool's session while it works in its workspace
+# ---------------------------------------------------------------------------
+
+def _held(
+    sandbox_mgr: SandboxManager,
+    session_id: str,
+    work,
+    *,
+    writes: bool = False,
+) -> str:
+    """``work()`` -- a tool's answer -- run with its session in use
+    (``SandboxManager.in_use``).
+
+    The idle sweep never takes the session while the tool reads or writes its
+    workspace, and the call counts as activity on the session it held when it
+    ends, its answer an error or not: the agent calling a tool is the agent
+    working. A session unknown, inactive or without its workspace is not
+    held: ``work`` answers it as before, and nothing is counted. An explicit
+    destroy is not held off: a tool that writes (``writes``) whose session it
+    ended meanwhile answers so, whatever its write did -- landed in a
+    workspace being removed, or failed for the removal, an answer or an
+    exception; a read keeps its own answer.
+    """
+    if sandbox_mgr is None:
+        return work()
+    with contextlib.ExitStack() as stack:
+        try:
+            session = stack.enter_context(sandbox_mgr.in_use(session_id))
+        except ValueError:
+            return work()
+        destroyed = (
+            f"Error: Session {session_id} was destroyed while the file "
+            f"was written"
+        )
+        try:
+            answer = work()
+        except Exception:
+            # The destroy removed the workspace under the write, which failed
+            # for it: the destroy is the answer, not its trace
+            if writes and not session.active:
+                logger.debug(
+                    "write in %s failed under its destroy", session_id,
+                    exc_info=True,
+                )
+                return destroyed
+            raise
+        finally:
+            # Counted before the session is let go: a sweep in between would
+            # find it idle and in use by nothing
+            sandbox_mgr.touch_activity(session_id, held=session)
+        if writes and not session.active:
+            return destroyed
+        return answer
 
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
@@ -331,6 +388,8 @@ def _handle_sandbox_view(
 
     For files: returns content, optionally filtered to a line range.
     For directories: returns a listing of entries (files and subdirs).
+    The read runs with its session in use and counts as activity
+    (``_held``); a destroy that overtakes it leaves its answer standing.
 
     Args:
         session_id: Active sandbox session ID.
@@ -344,7 +403,20 @@ def _handle_sandbox_view(
     mgr = _sandbox_manager or _default_sandbox_manager
     if mgr is None:
         return "Error: Sandbox manager not available"
+    return _held(
+        mgr, session_id,
+        lambda: _view(mgr, session_id, path, start_line, end_line),
+    )
 
+
+def _view(
+    mgr: SandboxManager,
+    session_id: str,
+    path: str,
+    start_line: int,
+    end_line: int,
+) -> str:
+    """``_handle_sandbox_view``'s read, its session held."""
     ok, resolved, err = _resolve_path(mgr, session_id, path)
     if not ok:
         return f"Error: {err}"
@@ -485,7 +557,9 @@ def _handle_sandbox_create_file(
     Parent directories are created automatically. The path must stay
     within the sandbox workspace. The file and its folders are reached
     without following a link: a link put on the checked path after the
-    check is refused, never written through.
+    check is refused, never written through. The write runs with its
+    session in use and counts as activity (``_held``); a destroy that
+    overtakes it is the answer.
 
     Args:
         session_id: Active sandbox session ID.
@@ -498,7 +572,20 @@ def _handle_sandbox_create_file(
     mgr = _sandbox_manager or _default_sandbox_manager
     if mgr is None:
         return "Error: Sandbox manager not available"
+    return _held(
+        mgr, session_id,
+        lambda: _create_file(mgr, session_id, path, content),
+        writes=True,
+    )
 
+
+def _create_file(
+    mgr: SandboxManager,
+    session_id: str,
+    path: str,
+    content: str,
+) -> str:
+    """``_handle_sandbox_create_file``'s write, its session held."""
     ok, resolved, err = _resolve_path(mgr, session_id, path)
     if not ok:
         return f"Error: {err}"
@@ -748,6 +835,8 @@ def _handle_sandbox_str_replace(
     accidental mass replacements). Use new_str="" to delete the match.
     The file is opened once, without following a link, and read and
     rewritten through that descriptor: the file written is the file read.
+    The edit runs with its session in use and counts as activity
+    (``_held``); a destroy that overtakes it is the answer.
 
     Args:
         session_id: Active sandbox session ID.
@@ -762,7 +851,21 @@ def _handle_sandbox_str_replace(
     mgr = _sandbox_manager or _default_sandbox_manager
     if mgr is None:
         return "Error: Sandbox manager not available"
+    return _held(
+        mgr, session_id,
+        lambda: _str_replace(mgr, session_id, path, old_str, new_str),
+        writes=True,
+    )
 
+
+def _str_replace(
+    mgr: SandboxManager,
+    session_id: str,
+    path: str,
+    old_str: str,
+    new_str: str,
+) -> str:
+    """``_handle_sandbox_str_replace``'s edit, its session held."""
     ok, resolved, err = _resolve_path(mgr, session_id, path)
     if not ok:
         return f"Error: {err}"

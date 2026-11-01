@@ -3487,6 +3487,26 @@ package costs.
 
 ### Fixed
 
+- The agent's file tools keep their sandbox from the idle sweep while they
+  work, and each call counts as activity. The agent's tool session is
+  unbound, so the sweep destroys it once idle past its TTL with no command
+  running; `create_file`, `str_replace`, `view`, `grep`, `glob` and `ls`
+  counted no activity and did not mark the workspace in use. An agent that
+  wrote and read files without running a command in between was idle to
+  the sweep: its session could be destroyed between two calls (the next
+  answered "Session not found", the work gone) or under a write (the tool
+  answered "File created" for a file in a removed workspace). Now each
+  runs with its session in use, and its end counts as activity on that
+  session even when it answers an error (a path out of the workspace, no
+  match): the agent calling a tool is the agent working. The same handlers
+  serve the sandbox panel's tool route, the global tool registry's sandbox
+  tools, the chat's coding agent, the quick sandbox, the chat's code check
+  and the eval runner's fixtures, which hold and count alike. A write that
+  the user's destroy or the emergency stop overtakes answers "Session ...
+  was destroyed while the file was written", also where the write failed
+  for the removal; a read keeps its own answer. A session already ended is
+  answered as before. fh1-fh3 in the new
+  `tests/test_sandbox_agent_file_tools_in_use_contracts.py`.
 - A sandbox command the stop button or its sandbox's destroy ended says
   so. It was answered as any command a signal ended: its return code, its
   output so far, and nothing else, through the destroy route, the panel's

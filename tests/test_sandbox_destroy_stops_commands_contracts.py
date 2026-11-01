@@ -59,11 +59,12 @@ _SLEEP = "40"
 
 
 def _alive(pid):
-    """Whether the process ``pid`` still runs (a zombie does not)."""
+    """Whether the process ``pid`` still runs (a zombie does not, nor one reaped between its file's opening and its
+    reading: ESRCH)."""
     try:
         with open(f"/proc/{pid}/stat", encoding="ascii") as stat_file:
             return stat_file.read().rsplit(")", 1)[1].split()[0] != "Z"
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return False
 
 

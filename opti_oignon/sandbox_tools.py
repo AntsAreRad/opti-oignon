@@ -28,6 +28,7 @@ Author: Leon
 
 import errno
 import fnmatch
+import functools
 import logging
 import os
 import re
@@ -71,6 +72,13 @@ except ImportError:
     _handle_sandbox_view = None
     _handle_sandbox_create_file = None
     _handle_sandbox_str_replace = None
+
+try:
+    from opti_oignon.file_tools import _held
+except ImportError:
+    def _held(sandbox_mgr, session_id, work, *, writes=False):
+        """Without the file tools, ``work()`` unheld."""
+        return work()
 
 try:
     from opti_oignon.tool_registry import ToolDefinition, ToolParam, ToolRegistry
@@ -174,6 +182,24 @@ def _resolve_workspace_path(
     if not valid:
         return False, workspace, "", f"Path rejected: {err}"
     return True, workspace, resolved, ""
+
+
+def _holding(read):
+    """A read tool of the agent's session (``grep``, ``glob``, ``ls``) run
+    with the session in use, counted as activity when it ends (the file
+    tools' ``_held``): the idle sweep never takes the workspace under it.
+    Its own session is checked first, as the file tools do: one already ended
+    holds and counts nothing, not even a session made again under its id."""
+
+    @functools.wraps(read)
+    def held(self, *args, **kwargs):
+        self._check_active()
+        return _held(
+            self._mgr, self._session_id,
+            lambda: read(self, *args, **kwargs),
+        )
+
+    return held
 
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
@@ -1010,9 +1036,11 @@ class SandboxToolSession:
     # validate_sandbox_path, then reached beneath the workspace through no
     # link (_open_resolved, glob's pattern walked so too), active session required,
     # deterministic sorted output, truncated flags, null-byte binary sniff,
-    # 1 MiB skip.
+    # 1 MiB skip. Each runs with the session in use and counts as activity
+    # (_holding).
     # -----------------------------------------------------------------
 
+    @_holding
     def grep(
         self,
         pattern: str,
@@ -1106,6 +1134,7 @@ class SandboxToolSession:
             return header
         return header + "\n" + "\n".join(match_lines)
 
+    @_holding
     def glob(self, pattern: str, path: str = ".", *, max_results: int = 200) -> str:
         """Find workspace files by glob pattern, newest first then by name."""
         self._check_active()
@@ -1155,6 +1184,7 @@ class SandboxToolSession:
             return header
         return header + "\n" + "\n".join(rel for _mtime, rel in shown)
 
+    @_holding
     def ls(self, path: str = ".", *, max_entries: int = 200) -> str:
         """List a workspace directory: 'type size name', dirs first, name-sorted."""
         self._check_active()

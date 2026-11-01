@@ -3079,11 +3079,18 @@ class SandboxManager:
                 session.bound_conversation_id = conversation_id
                 session.last_activity = time.time()
 
-    def touch_activity(self, session_id: str) -> None:
-        """Record activity on a workspace (drives the idle TTL)."""
+    def touch_activity(
+        self, session_id: str, held: SandboxSession | None = None
+    ) -> None:
+        """Record activity on a workspace (drives the idle TTL).
+
+        With ``held`` -- the session an operation holds (``in_use``) -- only
+        that session is touched: one destroyed and made again under its id
+        meanwhile is not, its own activity left as it was.
+        """
         with self._lock:
             session = self._sessions.get(session_id)
-            if session is not None:
+            if session is not None and (held is None or session is held):
                 session.last_activity = time.time()
 
     @contextlib.contextmanager
