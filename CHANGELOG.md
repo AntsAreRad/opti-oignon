@@ -3487,6 +3487,23 @@ package costs.
 
 ### Fixed
 
+- A sandbox command the stop button or its sandbox's destroy ended says
+  so. It was answered as any command a signal ended: its return code, its
+  output so far, and nothing else, through the destroy route, the panel's
+  stop, `cleanup_all` and the emergency stop's "destroy sandboxes" step
+  alike; the panel, the chat's code execution and the agent's bash tool,
+  which hands the answer to the model, could not tell it from a command
+  that killed itself or ran out of memory. Now its stderr ends with
+  "Command stopped by the stop button" or "Command stopped: its sandbox
+  was destroyed", after its truncation mark when it was cut (the agent's
+  bash tool adds its own note of the cut after it, as before), and the
+  answer's `stopped` says which; the first of a stop and a destroy that
+  both came is the one told. Its return code and its output so far are as
+  before. A command whose leader had already ended when the stop or the
+  destroy came -- on its own or by its own signal, even with jobs still
+  holding its output, which the stop or the destroy then ends --, one that
+  killed itself, and one that timed out are answered as before. sb1-sb3 in
+  the new `tests/test_sandbox_stopped_command_says_so_contracts.py`.
 - The idle sweep never takes a sandbox workspace while the host copies
   into it or out of it. It destroyed an unbound session idle past its TTL
   that ran no command, and the host's own work on a workspace is no

@@ -563,6 +563,20 @@ def _kill_group(proc: subprocess.Popen) -> None:
         pass
 
 
+def _leader_running(proc: subprocess.Popen) -> bool:
+    """Whether ``proc``, the leader of a command's group, still runs: not reaped, and not ended either -- a leader
+    that exited, or died of its own signal, is a zombie until its spawn reaps it, which may come long after (a job of
+    its group holding its output) or a few milliseconds after (its thread waiting for the interpreter). Peeked at with
+    ``WNOWAIT``: the spawn still reaps it and reads its status."""
+    if proc.returncode is not None:
+        return False
+    try:
+        return os.waitid(os.P_PID, proc.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT) is None
+    except ChildProcessError:
+        # Reaped meanwhile, by its spawn
+        return False
+
+
 def _release_holds(holds: dict[str, int | None]) -> None:
     """Close every descriptor of ``holds``: the workspaces they held are orphans the next start removes."""
     for fd in list(holds.values()):
@@ -966,6 +980,17 @@ class CommandResult:
     truncated_stdout: bool = False
     truncated_stderr: bool = False
     isolation_backend: str = ""
+    # Why a stop or a destroy killed the command, "stop" or "destroy" (its
+    # stderr ends with _STOPPED_LINES' line): its leader ran when it came, and
+    # died of its kill; "" when none did
+    stopped: str = ""
+
+
+# The line a command's stderr ends with when a stop or a destroy killed it
+_STOPPED_LINES = {
+    "stop": "Command stopped by the stop button",
+    "destroy": "Command stopped: its sandbox was destroyed",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -2425,6 +2450,11 @@ class SandboxManager:
         # once, each kept. A session with an entry is "running"; without
         # (an empty set is dropped), "idle".
         self._running_procs: dict[str, set[subprocess.Popen]] = {}
+        # Why a running process was killed, "stop" or "destroy" (_STOPPED_LINES), marked under the lock by
+        # stop_command and destroy_sandbox before they kill it (a leader still running: _leader_running), the first
+        # mark kept; taken out by the spawn that tracked it when it ends, so no mark outlives its process, and handed
+        # on with its answer when its leader died of the kill (SIGKILL).
+        self._stopped: dict[subprocess.Popen, str] = {}
         # Each live session's hold on its workspace (_hold_workspace), released by destroy_sandbox, or when this
         # manager is dropped with sessions still live.
         self._holds: dict[str, int] = {}
@@ -2845,8 +2875,9 @@ class SandboxManager:
     def destroy_sandbox(self, session_id: str, *, idle_for: float | None = None) -> bool:
         """Destroy a sandbox and remove all its files.
 
-        The session's running commands are killed first (``_kill_group``):
-        none runs on in a destroyed workspace, nor refills it while it is
+        The session's running commands are killed first (``_kill_group``),
+        each one's answer saying so (``CommandResult.stopped``): none runs on
+        in a destroyed workspace, nor refills it while it is
         removed (a process that outlived its command dies with it in a PID
         namespace; without one, it is out of reach: see ``_kill_group``). A folder the sandbox froze is given back its owner's rights
         on the way (``_remove_tree``). A workspace that still stands is kept, with
@@ -2883,6 +2914,12 @@ class SandboxManager:
             # They stay registered until they end, so that a second destroy
             # racing this one kills them too before it removes
             running = list(self._running_procs.get(session_id, ()))
+            # Each one's answer says the destroy ended it (a stop that came
+            # first keeps its own word), unless its leader had already ended
+            # on its own (_leader_running)
+            for proc in running:
+                if _leader_running(proc):
+                    self._stopped.setdefault(proc, "destroy")
             # Log pending approved paths that were never copied out
             pending_approved = sorted(session.approved_paths)
 
@@ -2964,7 +3001,8 @@ class SandboxManager:
 
         The stop path of spec section 4.2: kills every tracked process group
         of the session (each bwrap child and its bash tree die together) and
-        reaps them, then marks the workspace idle. Files persist for inspection; the
+        reaps them, each one's answer saying so (``CommandResult.stopped``),
+        then marks the workspace idle. Files persist for inspection; the
         workspace is NOT destroyed. Fail-secure no-op semantics: stopping a
         workspace with nothing running returns False and never errors or
         leaks state.
@@ -2987,6 +3025,12 @@ class SandboxManager:
             # Left registered until they end, as a destroy leaves them: a destroy
             # racing this stop still kills them before it removes
             procs = list(self._running_procs.get(session_id, ()))
+            # Each one's answer says the stop button ended it (a destroy that
+            # came first keeps its own word), unless its leader had already
+            # ended on its own (_leader_running)
+            for proc in procs:
+                if _leader_running(proc):
+                    self._stopped.setdefault(proc, "stop")
 
         if not procs:
             return False
@@ -4805,7 +4849,13 @@ class SandboxManager:
         always removed in the ``finally``. A session a destroy ended after its
         caller checked it gets nothing: the process just started is killed
         and ``ValueError`` raised, which the runners answer as an execution
-        error.
+        error. The answer's ``stopped`` says that a stop or a destroy ended
+        the command ("stop", "destroy"), "" when none did: they mark a process
+        whose leader still runs (``_leader_running``), and the mark is handed
+        on when the leader died of SIGKILL, their kill. A leader that had
+        ended -- on its own, or by its own signal, even with a job of its
+        group still holding its output, which the kill then ends -- is
+        answered as before.
         """
         proc = subprocess.Popen(
             argv,
@@ -4829,11 +4879,9 @@ class SandboxManager:
                 # nothing runs on a workspace being removed
                 _kill_group(proc)
                 raise ValueError(f"Session '{session_id}' was destroyed")
+        stopped = ""
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
-            return subprocess.CompletedProcess(
-                argv, proc.returncode, stdout, stderr
-            )
         except subprocess.TimeoutExpired:
             # A destroy may have killed and reaped the command meanwhile: its
             # pid is then never signalled again
@@ -4851,6 +4899,10 @@ class SandboxManager:
                         running.discard(proc)
                         if not running:
                             del self._running_procs[session_id]
+                    stopped = self._stopped.pop(proc, "")
+        done = subprocess.CompletedProcess(argv, proc.returncode, stdout, stderr)
+        done.stopped = stopped if proc.returncode == -signal.SIGKILL else ""
+        return done
 
     def _run_bwrap(
         self,
@@ -5110,12 +5162,22 @@ class SandboxManager:
             stderr += "\n... [STDERR TRUNCATED]"
             truncated_stderr = True
 
+        # A command a stop or a destroy killed says so, after any truncation:
+        # its caller (the panel, the chat, the agent's model) tells it from a
+        # command that died of a signal of its own
+        stopped = getattr(proc, "stopped", "")
+        if stopped:
+            if stderr and not stderr.endswith("\n"):
+                stderr += "\n"
+            stderr += _STOPPED_LINES[stopped]
+
         return CommandResult(
             stdout=stdout,
             stderr=stderr,
             return_code=proc.returncode,
             truncated_stdout=truncated_stdout,
             truncated_stderr=truncated_stderr,
+            stopped=stopped,
         )
 
 
