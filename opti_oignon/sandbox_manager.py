@@ -53,9 +53,11 @@ import logging
 import os
 import re
 import resource
+import secrets
 import shutil
 import signal
 import sqlite3
+import stat
 import subprocess
 import tempfile
 import threading
@@ -1589,6 +1591,69 @@ def validate_sandbox_path(
             )
 
     return True, resolved, ""
+
+
+# An export's free name: counted for its first tries, then drawn at random, so that no number of earlier exports of
+# one name -- the folder is shared and never emptied -- leaves it none. A file name holds at most this many bytes.
+_COUNTED_TRIES = 100
+_DRAWN_TRIES = 32
+_NAME_MAX = 255
+
+
+def _fit_name(head: str, stem: str, tail: str) -> str:
+    """``head + stem + tail``, cut a whole character at a time so the name holds in ``_NAME_MAX`` bytes: the stem from
+    its end, then, when a tail is longer than a name leaves room for, the tail from its end. Never a byte of a
+    character: a name is cut where its characters end."""
+    room = _NAME_MAX - len(os.fsencode(head))
+    while stem and len(os.fsencode(stem + tail)) > room:
+        stem = stem[:-1]
+    while tail and len(os.fsencode(stem + tail)) > room:
+        tail = tail[:-1]
+    return head + stem + tail
+
+
+def _create_free_export(dest_dir: str, name: str) -> tuple[str, int]:
+    """A new file for an export in ``dest_dir``, named ``name``, else ``<stem>-<n><suffix>``, then
+    ``<stem>-<random><suffix>`` (the stem cut to fit a file name): its path, and a descriptor open for writing. Never
+    a file already there, nor through a link at the name (``O_EXCL``): an export never overwrites another file,
+    whoever's it is."""
+    stem, suffix = os.path.splitext(name)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    marks = [f"-{n}" for n in range(1, _COUNTED_TRIES)] + [f"-{secrets.token_hex(6)}" for _ in range(_DRAWN_TRIES)]
+    for candidate in [name] + [_fit_name("", stem, mark + suffix) for mark in marks]:
+        path = os.path.join(dest_dir, candidate)
+        try:
+            return path, os.open(path, flags, 0o600)
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"no free name for {name} in {dest_dir}")
+
+
+def _open_beneath(root: str, relative: str) -> int:
+    """A descriptor of the file ``relative`` names under ``root``, opened one component at a time without following
+    a link (``dir_fd``, ``O_NOFOLLOW``): a link anywhere on the way -- one the sandbox put there after a check -- is
+    refused, never followed, and so is a file that is not regular with one name (``OSError``). The last open does not
+    wait (``O_NONBLOCK``): a FIFO put in a file's place is refused at once, never waited on."""
+    parts = [part for part in os.path.normpath(relative).split(os.sep) if part not in ("", ".")]
+    if not parts or ".." in parts:
+        raise OSError(errno.EINVAL, f"not a path beneath the workspace: {relative}")
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    # A folder is walked, not read: O_PATH asks no permission to list it, as a path walk does not
+    directory = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0)
+    fd = os.open(root, directory)
+    try:
+        for part in parts[:-1]:
+            inner = os.open(part, directory | nofollow, dir_fd=fd)
+            os.close(fd)
+            fd = inner
+        handle = os.open(parts[-1], os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0), dir_fd=fd)
+    finally:
+        os.close(fd)
+    st = os.fstat(handle)
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+        os.close(handle)
+        raise OSError(errno.EPERM, f"not a regular file with one name: {relative}")
+    return handle
 
 
 # ---------------------------------------------------------------------------
@@ -3645,9 +3710,29 @@ class SandboxManager:
         dest_dir_real = os.path.realpath(dest_dir)
         os.makedirs(dest_dir_real, mode=0o755, exist_ok=True)
 
-        dest_file = os.path.join(dest_dir_real, os.path.basename(path))
-        shutil.copy2(resolved_src, dest_file)
-        file_size = os.path.getsize(dest_file)
+        # The source checked above, read through no link whatever the sandbox did since (_open_beneath); the export
+        # never over a file already there, nor through a link at its name: one of the same name keeps its own, and
+        # this one takes a free name. Content, then the source's times and mode, set on the export's own descriptor --
+        # the mode without setuid, setgid or sticky, nor write for others than its owner; an export that fails is
+        # removed.
+        root = os.path.realpath(workspace)
+        src_fd = _open_beneath(root, os.path.relpath(resolved_src, root))
+        with os.fdopen(src_fd, "rb") as src:
+            st = os.fstat(src.fileno())
+            dest_file, out = _create_free_export(dest_dir_real, os.path.basename(os.path.normpath(path)))
+            try:
+                with os.fdopen(out, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                    dst.flush()
+                    os.fchmod(dst.fileno(), stat.S_IMODE(st.st_mode) & 0o755)
+                    os.utime(dst.fileno(), ns=(st.st_atime_ns, st.st_mtime_ns))
+                    file_size = os.fstat(dst.fileno()).st_size
+            except BaseException:
+                try:
+                    os.unlink(dest_file)
+                except OSError:
+                    pass
+                raise
 
         self._audit.log_approval(
             session_id,

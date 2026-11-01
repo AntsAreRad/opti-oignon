@@ -56,6 +56,21 @@ the applied set is bound by hash to the exact diff you reviewed: what is
 written to the host is exactly what you saw, or nothing. Auto-apply does
 not exist.
 
+The file manager's "Approve & download" copies the files you approved
+into the export folder beside the package (`data/sandbox_exports` in a
+checkout), whatever directory the server was started from. An export
+never overwrites a file already there, nor writes through a link at its
+name: when the name is taken it takes the next free one
+(`report-1.txt`, `report-2.txt`, a random mark past a hundred), and the
+file manager names each file written. It reads the approved file
+through no link the sandbox put in its way after the export's check (a
+link inside the workspace is read where it pointed at that check, inside
+the workspace); anything but a regular file with one name is refused and
+counted among the files not copied. An export keeps its source's times
+and its mode without setuid, setgid, sticky or write for anyone but its
+owner. The images a code run writes, copied into the code output
+directory, never overwrite one another either.
+
 ## The settings strip
 
 Each workspace has a settings strip showing its command timeout

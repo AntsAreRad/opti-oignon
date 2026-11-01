@@ -178,7 +178,14 @@
 			// Step 2: Copy out
 			const result = await copyOutSandboxFiles(sessionId, { paths });
 
-			successMsg = `${result.copied_count} file(s) copied to ${result.dest_dir}`;
+			// Each file under the name it was written: a name already taken takes the next free one
+			const written = result.copied.map((c) => c.dest_path.split('/').pop());
+			if (written.length > 0) {
+				successMsg = `${written.length} file(s) copied to ${result.dest_dir}: ${written.join(', ')}`;
+			}
+			if (written.length < paths.length) {
+				error = `${paths.length - written.length} file(s) not copied`;
+			}
 
 			// Refresh file list to update approval badges
 			await fetchFiles();

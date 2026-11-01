@@ -159,15 +159,16 @@ _DEGRADED_REQUEST_REFUSED = (
 
 router = APIRouter(prefix="/api/sandbox", tags=["sandbox"], dependencies=_auth_dep)
 
-# Default export directory for copy-out
-_DEFAULT_EXPORT_DIR = os.path.join("data", "sandbox_exports")
-
 # Audit fix: restrict copy-out destination to the data directory.
 # Without this, an API caller could write to arbitrary host paths
 # (e.g. /etc/cron.d/, ~/.ssh/) which breaks the sandbox security model.
 _ALLOWED_EXPORT_ROOT = os.path.realpath(
     os.path.join(os.path.dirname(__file__), "..", "..", "data")
 )
+
+# Default export directory for copy-out: under the export root whatever the server's current directory (a path
+# relative to it was refused by the check below wherever the server was not started from the checkout's root)
+_DEFAULT_EXPORT_DIR = os.path.join(_ALLOWED_EXPORT_ROOT, "sandbox_exports")
 
 
 def _validate_dest_dir(dest: str) -> str:

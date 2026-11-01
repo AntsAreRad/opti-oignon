@@ -3487,6 +3487,37 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] An export or a code run's copy out of a sandbox never
+  overwrites a file, nor goes through a link. A code run's images were
+  copied into the code output directory under the second and the file's
+  name, opened for writing as they were: two runs in the same second
+  writing one name shared one copy, and the first run's result named the
+  second run's image. The file manager's "Approve & download" wrote each
+  approved file under its own name into the export folder with
+  `shutil.copy2`: an export of the same name -- another session's, another
+  user's -- was overwritten, a link planted at the name was followed, the
+  source was read through a link the sandbox could put in place of the
+  approved file after the checks, and the export kept the sandbox's setuid
+  and world-write bits. Now each copy is created with `O_EXCL` and
+  `O_NOFOLLOW` under a name no file holds -- `<second>-<n>_<name>` for a
+  run's, readable by its owner only, `<stem>-<n><suffix>` for an export, a
+  random mark past a hundred, the name cut, whole characters at a time, to
+  fit a file name; a copy that fails is removed, a run's overwritten first
+  and removed as it is when that fails too, the run keeping its result. An
+  export reads the file its check resolved one component at a time,
+  through no link the sandbox put in its way after the check (a link
+  inside the workspace that the check resolved is read where it points,
+  inside the workspace), refuses anything but a regular file with one
+  name, never waits on a FIFO, and takes the source's times and its mode
+  without setuid, setgid, sticky or write for anyone but its owner. The
+  file manager names each file written and says how many were not; a file
+  refused so is one of them. The copy-out's default destination was
+  relative to the server's current directory, and refused by its own check
+  wherever the server was not started from the checkout's root: it is the
+  export folder beside the package (`data/sandbox_exports` in a checkout).
+  The workspaces' diff apply, which writes over host files by design, is
+  not changed. uq1-uq9 in the new
+  `tests/test_sandbox_copies_never_overwrite_contracts.py`.
 - [SECURITY] A check of an answer's code keeps none of its outputs. When
   automatic checking is on, the code blocks of an answer run in a sandbox
   made for each run, and each run's new images and PDFs were copied to the

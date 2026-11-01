@@ -29,6 +29,7 @@ import hashlib
 import logging
 import os
 import re
+import secrets
 import shutil
 import stat
 import tempfile
@@ -120,6 +121,59 @@ def _outputs_of(conv_id: str | None, root: str | None = None) -> str:
     if not conv_id:
         return root
     return os.path.join(root, "c-" + hashlib.sha256(conv_id.encode("utf-8")).hexdigest()[:32])
+
+
+# A copy's free name: counted for its first tries, then drawn at random, so that no number of earlier copies of one
+# name leaves it none. A file name holds at most this many bytes.
+_COUNTED_TRIES = 100
+_DRAWN_TRIES = 32
+_NAME_MAX = 255
+
+
+def _fit_name(head: str, stem: str, tail: str) -> str:
+    """``head + stem + tail``, cut a whole character at a time so the name holds in ``_NAME_MAX`` bytes: the stem from
+    its end, then, when a tail is longer than a name leaves room for, the tail from its end. Never a byte of a
+    character: a name is cut where its characters end."""
+    room = _NAME_MAX - len(os.fsencode(head))
+    while stem and len(os.fsencode(stem + tail)) > room:
+        stem = stem[:-1]
+    while tail and len(os.fsencode(stem + tail)) > room:
+        tail = tail[:-1]
+    return head + stem + tail
+
+
+def _create_free(output_dir: str, stamp: str, fname: str) -> tuple[str, int]:
+    """A new file for a copy in ``output_dir``, named ``<stamp>_<fname>``, else ``<stamp>-<n>_<fname>``, then
+    ``<stamp>-<random>_<fname>`` (what follows the first ``_`` stays the file's name, cut to fit a file name): its
+    path, and a descriptor open for writing, mode 0o600. Never a file already there, nor through a link at the name
+    (``O_EXCL``): another copy is never overwritten."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    stem, suffix = os.path.splitext(fname)
+    marks = [""] + [f"-{n}" for n in range(1, _COUNTED_TRIES)]
+    marks += [f"-{secrets.token_hex(6)}" for _ in range(_DRAWN_TRIES)]
+    for mark in marks:
+        path = os.path.join(output_dir, _fit_name(f"{stamp}{mark}_", stem, suffix))
+        try:
+            return path, os.open(path, flags, 0o600)
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"no free name for {fname} in {output_dir}")
+
+
+def _drop_partial(path: str) -> None:
+    """A copy that failed half-way: overwritten, then removed; removed as it is when the overwrite fails too (a full
+    disk), and said when even that fails. Never raised: the run keeps its result and its other copies."""
+    try:
+        _overwrite_and_remove(Path(path))
+        return
+    except OSError as exc:
+        logger.warning(f"A failed copy of a code output could not be overwritten ({exc}); removed as it is")
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        logger.warning(f"A failed copy of a code output stayed: {path} ({exc})")
 
 
 def _overwrite_and_remove(path: Path, said: list | None = None) -> bool:
@@ -590,12 +644,11 @@ class CodeExecutor:
 
     @staticmethod
     def _copy_into(paths: list[str], output_dir: str) -> list[str]:
-        """Each regular file of ``paths`` copied into ``output_dir``; the copies' paths."""
+        """Each regular file of ``paths`` copied into ``output_dir`` under a name of its own (``_create_free``): never
+        over another copy, nor through a link; the copies' paths. A copy that fails is dropped (``_drop_partial``)."""
         stable_paths = []
         for fpath in paths:
             fname = os.path.basename(fpath)
-            # Add timestamp prefix to avoid collisions
-            stable_path = os.path.join(output_dir, f"{int(time.time())}_{fname}")
             try:
                 fd = os.open(fpath, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
             except OSError as e:
@@ -606,11 +659,19 @@ class CodeExecutor:
                     st = os.fstat(src.fileno())
                     if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
                         continue
-                    with open(stable_path, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
-                    stable_paths.append(stable_path)
+                    # Named by the second: two runs in one second keep a copy each
+                    stable_path, out = _create_free(output_dir, str(int(time.time())), fname)
                 except OSError as e:
                     logger.debug(f"Could not copy output file: {e}")
+                    continue
+                try:
+                    with os.fdopen(out, "wb") as dst:
+                        shutil.copyfileobj(src, dst)
+                except OSError as e:
+                    logger.debug(f"Could not copy output file: {e}")
+                    _drop_partial(stable_path)
+                    continue
+                stable_paths.append(stable_path)
         return stable_paths
 
     @staticmethod
