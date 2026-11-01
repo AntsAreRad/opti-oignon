@@ -378,6 +378,128 @@ def _read_beneath(folder: int, name: str, limit: int) -> bytes:
         os.close(fd)
 
 
+def _glob_segments(pattern: str) -> tuple[int, list[str]]:
+    """The leading ``..`` segments of a glob pattern, counted, and its other
+    segments (empty and ``.`` ones dropped, consecutive ``**`` read as one,
+    as pathlib reads them). An absolute pattern is refused as ``Path.glob``
+    refused it (``NotImplementedError``), and so is a pattern that names
+    nothing but its base, and a ``..`` past the pattern's start
+    (``ValueError``). A pattern ending with a slash names folders only:
+    no segment is left, so it finds no file."""
+    if pattern.startswith("/"):
+        raise NotImplementedError("Non-relative patterns are unsupported")
+    if "\x00" in pattern:
+        raise ValueError("lstat: embedded null character in path")  # pathlib's own words
+    parts = [part for part in pattern.split("/") if part not in ("", ".")]
+    up = 0
+    while parts and parts[0] == "..":
+        up += 1
+        parts.pop(0)
+    if not parts and not up:
+        raise ValueError("Unacceptable pattern: PosixPath('.')")  # pathlib's own words
+    if ".." in parts:
+        raise ValueError("'..' is only read at the pattern's start")
+    if pattern.endswith("/"):
+        return up, []
+    collapsed: list[str] = []
+    for part in parts:
+        if not (part == "**" and collapsed and collapsed[-1] == "**"):
+            collapsed.append(part)
+    return up, collapsed
+
+
+def _glob_closure(parts: list[str], positions: set[int]) -> set[int]:
+    """``positions`` with every position a ``**`` may skip (it matches zero
+    folders too)."""
+    closed = set(positions)
+    pending = list(positions)
+    while pending:
+        i = pending.pop()
+        if i < len(parts) and parts[i] == "**" and i + 1 not in closed:
+            closed.add(i + 1)
+            pending.append(i + 1)
+    return closed
+
+
+_GLOB_MAGIC = re.compile(r"[*?[]")
+
+
+def _glob_walk(base: int, here: str, parts: list[str], found: list[tuple[float, str]], cut: dict[str, int]):
+    """The regular files under the folder held on ``base`` (an ``O_PATH``
+    descriptor) whose path from it matches ``parts``, added to ``found`` as
+    (mtime, path from ``here``).
+
+    Walked through descriptors, each folder opened from its parent's without
+    following a link (``O_PATH``: passing through a folder asks only to
+    search it, as a path walk does), each entry read itself (lstat beneath
+    its folder): a link is neither walked nor returned. A folder is entered
+    only when a position of the pattern can still match below it, so a
+    pattern with no ``**`` reads no deeper than its segments; ``**`` matches
+    zero or more folders, and last it matches every file below, as pathlib
+    3.13 reads it. A folder that may be searched but not listed is looked
+    into by its literal segments alone, as pathlib looked. At most
+    ``GREP_MAX_DEPTH`` folders deep."""
+    last = len(parts) - 1
+
+    def walk(folder: int, rel: str, positions: set[int], depth: int) -> None:
+        try:
+            lister = os.open(os.curdir, os.O_RDONLY | _DIRECTORY | _CLOEXEC, dir_fd=folder)
+            try:
+                with os.scandir(lister) as it:
+                    names = sorted(entry.name for entry in it)
+            finally:
+                os.close(lister)
+        except OSError:
+            # Not listed: the pattern's literal names are looked for one by one
+            names = sorted({
+                parts[i] for i in positions
+                if i <= last and parts[i] != "**" and not _GLOB_MAGIC.search(parts[i])
+            })
+        for name in names:
+            try:
+                st = os.stat(name, dir_fd=folder, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISLNK(st.st_mode):
+                continue  # symlinks are skipped in every walk
+            path = os.path.join(rel, name) if rel else name
+            if stat.S_ISREG(st.st_mode):
+                if any(
+                    (parts[i] == "**" and i == last)
+                    or (i == last and parts[i] != "**" and fnmatch.fnmatchcase(name, parts[i]))
+                    for i in positions
+                ):
+                    found.append((st.st_mtime, path))
+                continue
+            if not stat.S_ISDIR(st.st_mode):
+                continue
+            below = set()
+            for i in positions:
+                if i > last:
+                    continue
+                if parts[i] == "**":
+                    below.add(i)
+                elif i < last and fnmatch.fnmatchcase(name, parts[i]):
+                    below.add(i + 1)
+            below = {i for i in _glob_closure(parts, below) if i <= last}
+            if not below:
+                continue
+            if depth >= GREP_MAX_DEPTH:
+                cut["folders"] += 1
+                continue
+            try:
+                inner = os.open(name, _PATH | _DIRECTORY | _NOFOLLOW | _CLOEXEC, dir_fd=folder)
+            except OSError:
+                continue
+            try:
+                walk(inner, path, below, depth + 1)
+            finally:
+                os.close(inner)
+
+    if parts:
+        walk(base, here, {i for i in _glob_closure(parts, {0}) if i <= last}, 0)
+
+
 def _is_binary(data: bytes) -> bool:
     """Null-byte sniff: True when the first chunk contains a NUL byte."""
     return b"\x00" in data[:_BINARY_SNIFF_BYTES]
@@ -886,8 +1008,7 @@ class SandboxToolSession:
     # Read-only workspace tools: grep, glob, ls.
     # Trusted host-side reads on the view precedent: path-confined via
     # validate_sandbox_path, then reached beneath the workspace through no
-    # link (_open_resolved; glob's pattern walk still follows a link inside
-    # the workspace, its results are reached so), active session required,
+    # link (_open_resolved, glob's pattern walked so too), active session required,
     # deterministic sorted output, truncated flags, null-byte binary sniff,
     # 1 MiB skip.
     # -----------------------------------------------------------------
@@ -1001,34 +1122,35 @@ class SandboxToolSession:
             return f"Error: Path not found: {path}"
         max_results = _clamp(max_results, 1, GLOB_MAX_RESULTS_CAP)
         try:
-            candidates = list(Path(resolved).glob(pattern))
+            up, parts = _glob_segments(pattern)
         except (ValueError, NotImplementedError) as exc:
             return f"Error: invalid glob pattern: {exc}"
+        # The pattern is walked beneath the workspace through no link
+        # (_glob_walk), from the base folder -- moved up by the pattern's
+        # leading ``..`` segments, never above the workspace
+        root = os.path.realpath(workspace)
+        relative = os.path.relpath(resolved, root)
+        base_parts = [] if relative == os.curdir else relative.split(os.sep)
         entries: list[tuple[float, str]] = []
-        for cand in candidates:
+        cut = {"folders": 0}
+        if up <= len(base_parts):
+            base_parts = base_parts[: len(base_parts) - up]
             try:
-                if cand.is_symlink():
-                    continue
-                # A result is a regular file its real path reaches beneath
-                # the workspace through no link: one outside is refused, and
-                # so is one a link was put on after this look
-                fd = _open_resolved(workspace, os.path.realpath(str(cand)), _PATH)
-                try:
-                    st = os.fstat(fd)
-                finally:
-                    os.close(fd)
-                if not stat.S_ISREG(st.st_mode):
-                    continue
-                rel = os.path.relpath(str(cand), workspace)
-                entries.append((st.st_mtime, rel))
+                base = _open_resolved(workspace, os.path.join(root, *base_parts), _PATH | _DIRECTORY)
             except OSError:
-                continue
+                return f"Error: Path not found: {path}"
+            try:
+                _glob_walk(base, os.path.join(*base_parts) if base_parts else "", parts, entries, cut)
+            finally:
+                os.close(base)
         entries.sort(key=lambda e: (-e[0], e[1]))
         truncated = len(entries) > max_results
         shown = entries[:max_results]
         header = f"{len(shown)} file(s)"
         if truncated:
             header += " [truncated]"
+        if cut["folders"]:
+            header += f" [{cut['folders']} folder(s) deeper than {GREP_MAX_DEPTH} levels not searched]"
         if not shown:
             return header
         return header + "\n" + "\n".join(rel for _mtime, rel in shown)

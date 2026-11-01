@@ -59,24 +59,24 @@ The file tools the agents, the sandbox's execute route and the code
 runner use -- view, create_file, str_replace, and the agent's grep, glob
 and ls -- check a path as before: a link inside the workspace, such as a
 virtual environment's, still leads where it points. They then reach the
-checked path one component at a time without following a link, so a
-link the sandbox puts on it in between, while one of its commands runs,
-is refused, never followed. A file is opened once and read, sized and
+checked path one component at a time without following a link, so a link
+the sandbox puts on it in between, while one of its commands runs, is
+refused, never followed. A file is opened once and read, sized and
 written through that descriptor: an edit writes the file it read. A
 listing reads each entry itself: view shows a link as `[LINK]`, whatever
 it points at, ls and grep skip it, and a FIFO is answered at once, never
-waited on. grep walks each folder from its parent's descriptor, 128
-folders deep at most. glob's pattern walk still follows a link inside
-the workspace; the results it keeps are regular files reached beneath
-the workspace through no link. The panel's own reads of a workspace
-reach it the same way: a provision resolves the links inside the
-workspace and reads the resolved requirements file beneath it through no
-link; the file list and the diff review walk the workspace through
-descriptors and neither follow nor list a link, and an entry the review
-cannot read refuses the review rather than reading as deleted; the
-preview, the download and the apply open the checked path once, as an
-export reads its source -- a regular file with one name, through no
-link -- and read, send or copy the file that descriptor holds.
+waited on. grep and glob walk each folder from its parent's descriptor,
+128 folders deep at most, and glob enters a folder only while its
+pattern can still match below it; neither walks nor returns a link. The
+panel's own reads of a workspace reach it the same way: a provision
+resolves the links inside the workspace and reads the resolved
+requirements file beneath it through no link; the file list and the diff
+review walk the workspace through descriptors and neither follow nor
+list a link, and an entry the review cannot read refuses the review
+rather than reading as deleted; the preview, the download and the apply
+open the checked path once, as an export reads its source -- a regular
+file with one name, through no link -- and read, send or copy the file
+that descriptor holds.
 
 ## Diff review and apply
 

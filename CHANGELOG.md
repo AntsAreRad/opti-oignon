@@ -3487,6 +3487,28 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] The agent's glob walks no link. It checked its base folder
+  beneath the workspace and then walked the pattern with `Path.glob`, by
+  path: a link the model made to a host folder -- `/` itself -- under a
+  literal segment or a `*` made the server walk that host tree,
+  synchronously, in the agent's turn (nothing of it was returned; each
+  result was checked beneath the workspace), and a leading `..` walked the
+  folder that holds every workspace. Now the pattern is walked through
+  descriptors from its base folder: each folder opened from its parent's
+  without following a link, each entry read itself, a folder entered only
+  while the pattern can still match below it, 128 folders deep at most,
+  the reply saying how many it left. A link -- to a host folder or to a
+  folder of the workspace -- is neither walked nor returned (grep and ls
+  already skipped links), and each file is returned once. The answers are
+  pathlib's on Python 3.13, on every Python: `**` inside a segment counts
+  as `*`, a `**` last matches the files below, repeated `**` read as one,
+  a pattern ending with a slash names folders only and finds no file, one
+  naming nothing but its base, or holding a NUL, is refused; a folder that
+  may be searched but not listed is looked into by literal names alone;
+  leading `..` segments move the base up, never above the workspace (a
+  pattern that would leave it finds nothing), and a `..` past the
+  pattern's start is refused. gw1-gw5 in the new
+  `tests/test_sandbox_glob_walks_no_link_contracts.py`.
 - [SECURITY] The panel's reads of a workspace never follow a link the
   sandbox put there. Six host-side reads serve the panel, and each read by
   path. A provision (`POST /api/sandbox/{id}/provision`) opened the
