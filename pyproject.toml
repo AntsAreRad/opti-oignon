@@ -1296,6 +1296,13 @@ fail_under = 0
 # tests/test_code_check_outputs_contracts.py, which keep their cases and assertions unchanged, give the stand-in the
 # word, and hold every check's run to keeping none. They stay in the tree word for word.
 #
+# A sandbox's destroy removes a workspace its code froze, and a start checks one whose own folder was shut (block
+# 208). wl3 and wl4 of tests/test_sandbox_workspace_ownership_contracts.py stood for a tree a destroy or a start cannot
+# remove whole by a folder of mode 0o500, and for a directory a start cannot check by one of mode 0o000, both of which
+# now go: they give way to lo7 and lo8 of tests/test_sandbox_destroy_leftovers_contracts.py, which keep their cases and
+# assertions unchanged and stand for those by a file whose removal is refused and a folder whose rights cannot be
+# given back. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1749,4 +1756,6 @@ addopts = """
     --deselect=tests/test_skill_forgetting_contracts.py::test_sk11_the_overwrite_is_one_text_in_its_five_copies
     --deselect=tests/test_code_execution_in_the_sandbox_contracts.py::test_ce8_the_blocks_of_an_answer_run_only_when_automatic_checking_is_on
     --deselect=tests/test_code_execution_in_the_sandbox_contracts.py::test_ce9_code_that_never_ran_is_never_handed_to_the_model_to_fix
+    --deselect=tests/test_sandbox_workspace_ownership_contracts.py::test_wl3_the_hold_lasts_as_long_as_the_session
+    --deselect=tests/test_sandbox_workspace_ownership_contracts.py::test_wl4_through_the_real_start
 """

@@ -47,6 +47,7 @@ Security audit hardening:
 Author: Leon
 """
 
+import contextlib
 import enum
 import errno
 import logging
@@ -518,9 +519,11 @@ def _base_locks(base: str) -> bool:
         os.close(fd)
 
 
-def _release_holds(holds: dict[str, int]) -> None:
+def _release_holds(holds: dict[str, int | None]) -> None:
     """Close every descriptor of ``holds``: the workspaces they held are orphans the next start removes."""
     for fd in list(holds.values()):
+        if fd is None:
+            continue
         try:
             os.close(fd)
         except OSError:
@@ -1706,6 +1709,152 @@ def _folder_beneath(root: str, parts: list[str], make: bool = False) -> int:
     return fd
 
 
+# A removal holds one descriptor per folder level down to this depth and never enters a folder deeper: that one is
+# moved up to the top of the tree under a fresh name and removed from there, or left standing when it cannot move
+_REMOVE_DEPTH = 32
+
+
+def _remove_tree(path: str) -> bool:
+    """Remove the workspace tree at ``path``; whether it is gone.
+
+    The tree is walked by descriptors, one folder at a time, and never through a link: a link is removed as the entry
+    it is, whatever it names. A folder that denies its own listing or emptying -- one the sandbox's code froze
+    (``chmod a-w``, ``0o000``) -- is given back its owner's rights (``u+rwx``) through the descriptor that holds it
+    (``_entered``). A folder below ``_REMOVE_DEPTH`` levels is never entered there: it is moved up to the top first,
+    or left standing when it cannot move (``_past_depth``): the walk never holds more descriptors than that, whatever
+    depth the sandbox's code built or however it stops the moves. An entry that cannot be removed is passed over and
+    the walk goes on: what still stands -- a file the owner cannot undo, a folder a running command keeps filling --
+    is left, and the answer says so.
+    """
+    try:
+        top = os.open(os.path.dirname(path), getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0))
+    except OSError:
+        return not os.path.lexists(path)
+    # The folders being emptied, the deepest last: (its parent, its name there, its descriptor, its names left)
+    frames: list[tuple[int, str, int, list[str]]] = []
+    try:
+        entered = _entered(top, os.path.basename(path))
+        if entered is not None:
+            frames.append((top, os.path.basename(path), *entered))
+        while frames:
+            parent, name, folder, left = frames[-1]
+            if left:
+                inner = left.pop()
+                if len(frames) >= _REMOVE_DEPTH:
+                    _past_depth(folder, inner, frames[0])
+                    continue
+                entered = _entered(folder, inner)
+                if entered is not None:
+                    frames.append((folder, inner, *entered))
+                continue
+            frames.pop()
+            os.close(folder)
+            with contextlib.suppress(OSError):
+                os.rmdir(name, dir_fd=parent)
+    finally:
+        for _parent, _name, folder, _left in frames:
+            os.close(folder)
+        os.close(top)
+    return not os.path.lexists(path)
+
+
+def _entered(parent: int, name: str) -> tuple[int, list[str]] | None:
+    """The entry ``name`` of the folder ``parent`` (a descriptor): removed if it is no folder (left if it cannot be),
+    and ``None``; if it is a folder, its descriptor (``O_PATH``) and its names, its owner's rights given back first
+    where it lacked them. Never through a link: a link is no folder, and a folder swapped for anything else between
+    its listing and its opening is passed over (``None``), its mode untouched."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0)
+    try:
+        before = os.stat(name, dir_fd=parent, follow_symlinks=False)
+        if not stat.S_ISDIR(before.st_mode):
+            os.unlink(name, dir_fd=parent)
+            return None
+        folder = os.open(name, directory | nofollow, dir_fd=parent)
+    except OSError:
+        return None
+    try:
+        now = os.fstat(folder)
+        if not stat.S_ISDIR(now.st_mode) or (now.st_dev, now.st_ino) != (before.st_dev, before.st_ino):
+            raise OSError(errno.ENOTDIR, "no longer the folder listed", name)
+        mode = stat.S_IMODE(now.st_mode)
+        if mode & stat.S_IRWXU != stat.S_IRWXU:
+            _give_owner_rights(folder, mode)
+        listing = os.open(os.curdir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0), dir_fd=folder)
+        try:
+            names = os.listdir(listing)
+        finally:
+            os.close(listing)
+    except OSError:
+        os.close(folder)
+        return None
+    return folder, names
+
+
+def _past_depth(folder: int, name: str, top: tuple[int, str, int, list[str]]) -> None:
+    """The entry ``name`` of ``folder`` (a descriptor) past ``_REMOVE_DEPTH`` levels, never entered there: anything
+    but a folder is unlinked where it is; a folder is moved to the top of the tree being removed (``top``: its frame
+    in ``_remove_tree``) under a fresh name the walk reaches there, or passed over when it cannot move -- left
+    standing, the tree with it. A rename moves the entry itself, never what a link names. A folder moved to another
+    parent rewrites its own ``..``: one its sandbox froze is given back its owner's rights first, through a
+    descriptor."""
+    try:
+        before = os.stat(name, dir_fd=folder, follow_symlinks=False)
+        if not stat.S_ISDIR(before.st_mode):
+            os.unlink(name, dir_fd=folder)
+            return
+        if stat.S_IMODE(before.st_mode) & stat.S_IRWXU != stat.S_IRWXU:
+            nofollow = getattr(os, "O_NOFOLLOW", 0)
+            directory = getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0)
+            moving = os.open(name, directory | nofollow, dir_fd=folder)
+            try:
+                now = os.fstat(moving)
+                if not stat.S_ISDIR(now.st_mode) or (now.st_dev, now.st_ino) != (before.st_dev, before.st_ino):
+                    return
+                _give_owner_rights(moving, stat.S_IMODE(now.st_mode))
+            finally:
+                os.close(moving)
+        fresh = f".removed-{secrets.token_hex(8)}"
+        os.rename(name, fresh, src_dir_fd=folder, dst_dir_fd=top[2])
+    except OSError:
+        return
+    top[3].append(fresh)
+
+
+def _give_owner_rights(folder: int, mode: int) -> None:
+    """Give the folder ``folder`` (a descriptor, ``O_PATH`` where there is one) its owner's rights (``u+rwx``) beside
+    ``mode``, never through a name: through its own entry in ``/proc`` (an ``O_PATH`` descriptor takes no
+    ``fchmod``) or, where ``/proc`` cannot serve, through the folder itself opened from that descriptor (``.``) --
+    which only a folder its owner may still read and search allows (``chmod a-w``, not ``0o000``). Raises OSError
+    when neither can."""
+    try:
+        os.chmod(f"/proc/self/fd/{folder}", mode | stat.S_IRWXU)
+        return
+    except OSError:
+        pass
+    itself = os.open(os.curdir, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0), dir_fd=folder)
+    try:
+        os.fchmod(itself, mode | stat.S_IRWXU)
+    finally:
+        os.close(itself)
+
+
+def _hold_shut_workspace(path: str) -> int | None:
+    """``_hold_workspace``, a workspace folder its sandbox shut (no read or search) given back its owner's rights first
+    (``_give_owner_rights``, the folder reached without following a link): live or orphaned, it can be checked."""
+    try:
+        return _hold_workspace(path)
+    except PermissionError:
+        pass
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    folder = os.open(path, getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0) | nofollow)
+    try:
+        _give_owner_rights(folder, stat.S_IMODE(os.fstat(folder).st_mode))
+    finally:
+        os.close(folder)
+    return _hold_workspace(path)
+
+
 def _plain_name(name: str) -> str:
     """``name`` when it names an entry of one folder, else ``OSError``."""
     if not name or name in (".", "..") or os.sep in name or "\x00" in name:
@@ -2186,6 +2335,11 @@ class SandboxManager:
         # manager is dropped with sessions still live.
         self._holds: dict[str, int] = {}
         self._release = weakref.finalize(self, _release_holds, self._holds)
+        # The workspaces a destroy could not remove whole, by path, with their
+        # holds: counted against the limit until gone, removed again by the
+        # idle sweep and cleanup_all, released with the manager.
+        self._leftovers: dict[str, int | None] = {}
+        self._release_leftovers = weakref.finalize(self, _release_holds, self._leftovers)
 
         # Detect isolation backend
         self._bwrap_available, self._bwrap_info = _detect_bwrap()
@@ -2414,9 +2568,10 @@ class SandboxManager:
 
     @property
     def active_session_count(self) -> int:
-        """Count of currently active sandbox sessions."""
+        """Count of currently active sandbox sessions, with the destroyed
+        workspaces not yet removed: the places the limit counts."""
         with self._lock:
-            return sum(1 for s in self._sessions.values() if s.active)
+            return sum(1 for s in self._sessions.values() if s.active) + len(self._leftovers)
 
     def confirm_degraded_mode(self) -> str:
         """Explicitly confirm willingness to run in degraded mode.
@@ -2493,11 +2648,8 @@ class SandboxManager:
                     f"Session '{session_id}' already exists"
                 )
             active = sum(1 for s in self._sessions.values() if s.active)
-            if active >= self._config.max_concurrent_sessions:
-                raise ValueError(
-                    f"Maximum concurrent sessions reached "
-                    f"({self._config.max_concurrent_sessions})"
-                )
+            if active + len(self._leftovers) >= self._config.max_concurrent_sessions:
+                raise self._limit_reached()
 
         # Create isolated temp directory with strict permissions, held from
         # its making on
@@ -2522,8 +2674,10 @@ class SandboxManager:
             # never register past the limit together
             full = not taken and (
                 sum(1 for s in self._sessions.values() if s.active)
+                + len(self._leftovers)
                 >= self._config.max_concurrent_sessions
             )
+            refusal = self._limit_reached() if full else None
             if not taken and not full:
                 self._sessions[session_id] = session
                 if hold is not None:
@@ -2537,10 +2691,7 @@ class SandboxManager:
                 os.close(hold)
             if taken:
                 raise ValueError(f"Session '{session_id}' already exists")
-            raise ValueError(
-                f"Maximum concurrent sessions reached "
-                f"({self._config.max_concurrent_sessions})"
-            )
+            raise refusal
 
         logger.info(
             "Sandbox created: session=%s, path=%s, isolation=%s",
@@ -2549,6 +2700,20 @@ class SandboxManager:
             self._isolation_backend.value,
         )
         return session
+
+    def _limit_reached(self) -> ValueError:
+        """The refusal of a creation past the limit, naming the destroyed
+        workspaces it still counts (taken under the lock)."""
+        message = (
+            f"Maximum concurrent sessions reached "
+            f"({self._config.max_concurrent_sessions})"
+        )
+        if self._leftovers:
+            message += (
+                f": {len(self._leftovers)} destroyed workspace(s) not yet "
+                f"removed count against it"
+            )
+        return ValueError(message)
 
     def _make_workspace(self, session_id: str) -> tuple[str, int | None]:
         """A new workspace directory under workspace_base and its hold, taken before anything is put in it.
@@ -2586,6 +2751,11 @@ class SandboxManager:
     def destroy_sandbox(self, session_id: str) -> bool:
         """Destroy a sandbox and remove all its files.
 
+        A folder the sandbox froze is given back its owner's rights on the
+        way (``_remove_tree``). A workspace that still stands is kept, with
+        its hold: it counts against the limit until the idle sweep or
+        ``cleanup_all`` removes it. The session is destroyed either way.
+
         Args:
             session_id: Session to destroy.
 
@@ -2602,19 +2772,26 @@ class SandboxManager:
 
         # Remove workspace directory tree
         workspace = session.workspace_path
+        gone = True
         if os.path.isdir(workspace):
-            shutil.rmtree(workspace, ignore_errors=True)
-            if os.path.lexists(workspace):
+            gone = _remove_tree(workspace)
+            if not gone:
                 logger.warning(
                     "Sandbox destroyed: session=%s, but its workspace %s "
-                    "could not be removed whole",
+                    "could not be removed whole: it counts against the limit "
+                    "until the idle sweep removes it",
                     session_id,
                     workspace,
                 )
 
         with self._lock:
-            self._sessions.pop(session_id, None)
+            ended = self._sessions.pop(session_id, None) is not None
             hold = self._holds.pop(session_id, None)
+            if not gone and ended:
+                # Its place is still taken: kept, hold and all (by the one
+                # destroy that ended the session, when two raced)
+                self._leftovers[workspace] = hold
+                hold = None
         if hold is not None:
             os.close(hold)
 
@@ -2776,9 +2953,11 @@ class SandboxManager:
             return 0
 
         with self._lock:
+            # A workspace a destroy left standing is this manager's, removed
+            # by its idle sweep: never taken for another manager's
             tracked = {
                 s.workspace_path for s in self._sessions.values()
-            }
+            } | set(self._leftovers)
 
         orphans: list[str] = []
         try:
@@ -2823,7 +3002,7 @@ class SandboxManager:
         stuck: list[str] = []
         for path in orphans:
             try:
-                hold = _hold_workspace(path)
+                hold = _hold_shut_workspace(path)
             except FileNotFoundError:
                 continue  # gone meanwhile: its owner destroyed it
             except OSError as exc:
@@ -2833,10 +3012,10 @@ class SandboxManager:
                 live.append(os.path.basename(path))
                 continue
             try:
-                shutil.rmtree(path, ignore_errors=True)
+                gone = _remove_tree(path)
             finally:
                 os.close(hold)
-            if os.path.lexists(path):
+            if not gone:
                 stuck.append(os.path.basename(path))
             else:
                 removed += 1
@@ -2879,9 +3058,13 @@ class SandboxManager:
         bound to a conversation (an explicit binding is user intent and
         exempts it), and last_activity is older than the TTL.
 
+        The workspaces a destroy could not remove whole are removed again
+        first, whatever the TTL (``_remove_leftovers``).
+
         Returns:
             Count of workspaces destroyed.
         """
+        self._remove_leftovers()
         ttl = self._config.idle_ttl_seconds
         if ttl <= 0:
             return 0
@@ -4378,7 +4561,8 @@ class SandboxManager:
         ]
 
     def cleanup_all(self) -> int:
-        """Destroy all active sandbox sessions. Returns count destroyed."""
+        """Destroy all active sandbox sessions, and remove again the
+        workspaces a destroy could not remove whole. Returns count destroyed."""
         with self._lock:
             session_ids = list(self._sessions.keys())
 
@@ -4386,7 +4570,27 @@ class SandboxManager:
         for sid in session_ids:
             if self.destroy_sandbox(sid):
                 count += 1
+        self._remove_leftovers()
         return count
+
+    def _remove_leftovers(self) -> int:
+        """Remove again the workspaces a destroy could not remove whole; each
+        one gone leaves the count and its hold is closed. Returns how many."""
+        with self._lock:
+            pending = list(self._leftovers)
+        removed = 0
+        for workspace in pending:
+            if os.path.lexists(workspace) and not _remove_tree(workspace):
+                continue
+            with self._lock:
+                if workspace not in self._leftovers:
+                    continue  # another sweep removed it first
+                hold = self._leftovers.pop(workspace)
+            if hold is not None:
+                os.close(hold)
+            removed += 1
+            logger.info("Sandbox workspace %s removed after its destroy", workspace)
+        return removed
 
     # -- Private helpers --
 

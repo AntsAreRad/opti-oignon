@@ -3487,6 +3487,23 @@ package costs.
 
 ### Fixed
 
+- A sandbox's destroy removes a workspace its code froze, and a workspace
+  it cannot remove stays counted. The destroy removed the workspace
+  ignoring every error, then dropped the session and released its hold
+  whether or not the folder was gone: a folder whose write bit the
+  sandbox's code removed survived with its files, counted by nothing and
+  removed by nothing, not even by the next start. Now the removal walks
+  the workspace by descriptors, never through a link, at most 32 levels
+  held (a folder deeper is moved up and removed from there), and gives a
+  folder that denies its own emptying its owner's rights back on the way;
+  a start removes a frozen orphan the same way, and checks one whose own
+  folder was shut after giving its rights back. A workspace that still
+  stands -- a folder a running command keeps filling -- keeps its hold and
+  counts against `max_concurrent_sessions` (a creation it refuses says so,
+  and the status counts it) until the idle sweep or `cleanup_all` removes
+  it. lo1-lo8 in the new
+  `tests/test_sandbox_destroy_leftovers_contracts.py`; wl3 and wl4 give
+  way to lo7 and lo8.
 - The sandbox's limit on concurrent sessions holds when creations race,
   and counts every sandbox. A creation counted the active sessions against
   `max_concurrent_sessions`, made its workspace outside the lock, and
