@@ -3487,6 +3487,26 @@ package costs.
 
 ### Fixed
 
+- The tempdir backend runs each command in a PID namespace of its own
+  where the system allows it, so that nothing a command starts outlives
+  it. A command ran as `unshare --user --net -- bash -c ...`: a background
+  job once the command returned, or a process moved out of its group with
+  `setsid`, ran on, out of reach of the stop button and of a destroy, on a
+  workspace being removed. Now the command runs under `unshare --user
+  --net --pid --fork --kill-child`, as the foreground child of a shell
+  that is the namespace's first process: when that shell ends -- the
+  command returned, or a stop or a destroy killed it -- the kernel kills
+  every process left in the namespace, and the command can neither make
+  that shell leave its group nor clear its death signal (where ptrace
+  reaches only a process's descendants, Yama's default). The command's
+  signals, traps and stdin are as before. As under bubblewrap, its shell
+  is PID 2, a command that dies of a signal is answered 128 plus its
+  number (`kill $$`: 143; it was -15), and a background job's output after
+  its command returned is lost; `/proc` stays the host's, so `/proc/$$` no
+  longer names the command (`/proc/self` does). Where the system refuses
+  an unprivileged PID namespace, the user and network namespace alone,
+  then plain bash, as before, and the log says which. pj1-pj3 in the new
+  `tests/test_sandbox_tempdir_pid_namespace_contracts.py`.
 - A sandbox's destroy stops the commands running in it, and every command
   of a session is tracked. The destroy -- through its route, `cleanup_all`
   and the emergency stop's "destroy sandboxes" step -- removed the
@@ -3496,17 +3516,15 @@ package costs.
   which then ran out of reach of the stop button, its session shown idle
   and open to the idle sweep. Now the registry keeps every running command
   of a session, `stop_command` kills them all, and a destroy kills them
-  before it removes the workspace (on the tempdir backend a process that
-  outlives its command -- a background job once the command returned, or
-  one moved out of its group with `setsid` -- stays out of reach, as it
-  was of the stop button; bubblewrap's PID namespace takes it down). A
-  command whose session a destroy ended after its caller checked it is
-  killed as it starts and answered as an execution error; the idle sweep
-  checks again, under the lock that ends a session, that it is still idle
-  (a command starting to run counts as activity, a refused one does not);
-  and a command already reaped is never signalled by its freed pid.
-  kr1-kr6 in the new
-  `tests/test_sandbox_destroy_stops_commands_contracts.py`.
+  before it removes the workspace (a process that outlives its command
+  dies with it in a PID namespace: bubblewrap's, or the tempdir backend's
+  where the system allows one, as the entry above says). A command whose
+  session a destroy ended after its caller checked it is killed as it
+  starts and answered as an execution error; the idle sweep checks again,
+  under the lock that ends a session, that it is still idle (a command
+  starting to run counts as activity, a refused one does not); and a
+  command already reaped is never signalled by its freed pid. kr1-kr6 in
+  the new `tests/test_sandbox_destroy_stops_commands_contracts.py`.
 - A sandbox's destroy removes a workspace its code froze, and a workspace
   it cannot remove stays counted. The destroy removed the workspace
   ignoring every error, then dropped the session and released its hold

@@ -519,6 +519,23 @@ def _base_locks(base: str) -> bool:
         os.close(fd)
 
 
+# The tempdir backend's wrappers, the strongest first: a user and network namespace with a PID namespace of its own
+# (_PID_INIT is its first process), then the user and network namespace alone
+_UNSHARE_FORMS = (
+    ("unshare", "--user", "--net", "--pid", "--fork", "--kill-child", "--"),
+    ("unshare", "--user", "--net", "--"),
+)
+
+# The first process of a tempdir command's PID namespace: a shell that runs the command as its foreground child (PID
+# 2, as under bubblewrap: the same signals, traps and stdin as before) and answers its status, its own stderr sent to
+# /dev/null so that a command dying of a signal adds no line of the shell's. The command cannot make this shell leave
+# the process group a stop or a destroy kills, nor clear its death signal (where ptrace reaches only a process's
+# descendants, as Yama has it by default); whatever the command does to it, this shell's end -- the command
+# returned, the group killed, or the shell signalled -- makes the kernel kill every process left in the namespace: a
+# background job, one moved out of its group with ``setsid``, one that cleared its own death signal
+_PID_INIT = 'exec 4>&2 2>/dev/null; bash -c "$1" 2>&4 4>&-; exit "$?"'
+
+
 def _kill_group(proc: subprocess.Popen) -> None:
     """SIGKILL the process group ``proc`` leads and reap it; never raises.
 
@@ -526,9 +543,10 @@ def _kill_group(proc: subprocess.Popen) -> None:
     bwrap and its tree. A leader not yet reaped holds its pid, and so its group's id, whatever it ran: it is signalled;
     one already reaped (``returncode`` set) is not, its pid free to be another process's (the race left is the
     check's own instant, as ``Popen.send_signal``'s). Already gone or unreachable: the direct kill and the reap
-    follow; stopping must never raise past this point. On the tempdir backend a process that outlives its command --
-    a background job (``&``) once the command returned, or one moved out of its group (``setsid``) -- is out of
-    reach, as it is of the stop button; bubblewrap's PID namespace takes it down with the command.
+    follow; stopping must never raise past this point. A process that outlives its command -- a background job
+    (``&``) once the command returned, or one moved out of its group (``setsid``) -- dies with it in a PID namespace:
+    bubblewrap's, or the tempdir backend's where ``unshare --pid`` works (``_UNSHARE_FORMS``); where it does not, it is
+    out of reach, as it is of the stop button.
     """
     if proc.returncode is None:
         try:
@@ -2351,6 +2369,9 @@ class SandboxManager:
         self._validator = CommandValidator(self._config)
         self._degraded_confirmed = False
         self._unshare_available: bool | None = None  # Lazy-detected
+        # The unshare wrapper the tempdir backend runs a command in, the
+        # strongest that works here (_UNSHARE_FORMS; empty: plain bash)
+        self._unshare_prefix: list[str] | None = None
         # Per-session running-process registry. The stop path
         # needs a handle on the running children, so spawns register their
         # Popen here (under the lock) for the duration of the command and
@@ -2780,8 +2801,8 @@ class SandboxManager:
 
         The session's running commands are killed first (``_kill_group``):
         none runs on in a destroyed workspace, nor refills it while it is
-        removed (on the tempdir backend, a process that outlived its command
-        is out of reach: see ``_kill_group``). A folder the sandbox froze is given back its owner's rights
+        removed (a process that outlived its command dies with it in a PID
+        namespace; without one, it is out of reach: see ``_kill_group``). A folder the sandbox froze is given back its owner's rights
         on the way (``_remove_tree``). A workspace that still stands is kept, with
         its hold: it counts against the limit until the idle sweep or
         ``cleanup_all`` removes it. The session is destroyed either way.
@@ -4860,17 +4881,19 @@ class SandboxManager:
     ) -> CommandResult:
         """Run a command in tempdir mode (degraded, limited isolation).
 
-        When available, wraps the command in `unshare --user --net`
-        to block network access even without bwrap. This prevents
-        the LLM from creating a script with network code and running
-        it (the main attack vector in tempdir mode).
+        When available, wraps the command in `unshare --user --net` --
+        with a PID namespace of its own where the system allows one
+        (``_build_tempdir_command``) -- to block network access even
+        without bwrap. This prevents the LLM from creating a script with
+        network code and running it (the main attack vector in tempdir
+        mode).
 
         Spawns through ``_spawn_tracked`` so the stop path works on
         this backend too (same registry, same group kill).
         """
         env = _tempdir_env(workspace)
 
-        # Try to use unshare for network isolation (works without root)
+        # Try to use unshare for network and PID isolation (works without root)
         cmd_parts = self._build_tempdir_command(command)
 
         try:
@@ -4898,50 +4921,75 @@ class SandboxManager:
     def _build_tempdir_command(self, command: str) -> list[str]:
         """Build command list for tempdir execution.
 
-        Wraps in `unshare --user --net` when available to provide
-        network isolation even without bubblewrap. Falls back to
-        plain bash if unshare is not available.
+        Wraps in the strongest form of `unshare` that works here
+        (_UNSHARE_FORMS): a user and network namespace with a PID
+        namespace of its own, whose first process (_PID_INIT) runs the
+        command and takes down with it every process the command leaves
+        -- a background job, one moved out of its group, one that cleared
+        its death signal; else the user and network namespace alone
+        (network isolation, but a process that outlives its command runs
+        on); else plain bash.
 
         Returns:
             Command list for subprocess.run().
         """
-        if self._unshare_available is None:
-            self._unshare_available = self._detect_unshare()
+        if self._unshare_prefix is None:
+            self._unshare_prefix = self._detect_unshare()
+            self._unshare_available = bool(self._unshare_prefix)
 
-        if self._unshare_available:
-            return ["unshare", "--user", "--net", "--",
-                    "bash", "-c", command]
-
-        return ["bash", "-c", command]
+        if "--pid" in self._unshare_prefix:
+            return [*self._unshare_prefix, "bash", "-c", _PID_INIT, "sandbox-init", command]
+        return [*self._unshare_prefix, "bash", "-c", command]
 
     @staticmethod
-    def _detect_unshare() -> bool:
-        """Detect if unshare --user --net works on this system."""
+    def _detect_unshare() -> list[str]:
+        """The strongest unshare form that works on this system
+        (_UNSHARE_FORMS), as the prefix of a command; empty if none."""
         from opti_oignon.process_secrets import child_env
 
-        try:
-            result = subprocess.run(
-                ["unshare", "--user", "--net", "--",
-                 "echo", "unshare-ok"],
-                capture_output=True,
-                text=True,
-                timeout=5,
-                env=child_env(),
+        def answers(probe) -> bool:
+            try:
+                result = probe()
+            except Exception:
+                return False
+            return result.returncode == 0 and "unshare-ok" in result.stdout
+
+        # Each probe's argv is written out, so that the egress census reads
+        # the program it runs (echo)
+        if answers(lambda: subprocess.run(
+            ["unshare", "--user", "--net", "--pid", "--fork", "--kill-child",
+             "--", "echo", "unshare-ok"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=child_env(),
+        )):
+            logger.info(
+                "Tempdir mode: unshare --user --net --pid available "
+                "(network isolation enabled; every process of a "
+                "command dies with it)"
             )
-            if result.returncode == 0 and "unshare-ok" in result.stdout:
-                logger.info(
-                    "Tempdir mode: unshare --user --net available "
-                    "(network isolation enabled)"
-                )
-                return True
-        except Exception:
-            pass
+            return list(_UNSHARE_FORMS[0])
+        if answers(lambda: subprocess.run(
+            ["unshare", "--user", "--net", "--", "echo", "unshare-ok"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=child_env(),
+        )):
+            logger.warning(
+                "Tempdir mode: unshare --user --net available "
+                "(network isolation enabled) but no PID namespace: "
+                "a process that outlives its command runs on, out "
+                "of reach of a stop or a destroy"
+            )
+            return list(_UNSHARE_FORMS[1])
 
         logger.warning(
             "Tempdir mode: unshare not available, "
             "NO network isolation in degraded mode"
         )
-        return False
+        return []
 
     def _process_output(
         self,

@@ -12,9 +12,9 @@ active kills what it started and refuses.
   * KR1 -- A DESTROY STOPS WHAT RUNS: a command running in the session (a real ``sleep``, through the spawn both
     runners use): the destroy kills its process group before it removes the workspace -- dead when the removal
     starts -- and the command's caller gets its answer at once; a second destroy racing the first kills it too before
-    its own removal (round 1), and so does a destroy racing a stop (round 2). (On the tempdir backend a process that
-    outlives its command -- a background job once the command returned, or one moved out of its group with
-    ``setsid`` -- is out of reach, as of the stop button; bubblewrap's PID namespace takes it down.)
+    its own removal (round 1), and so does a destroy racing a stop (round 2). (A process that outlives its command
+    dies with it in a PID namespace: bubblewrap's, or the tempdir backend's where the system allows one -- the
+    contracts of tests/test_sandbox_tempdir_pid_namespace_contracts.py.)
   * KR2 -- EVERY COMMAND IS TRACKED: two commands of one session at once: both tracked, the session running until
     both end; ``stop_command`` kills both; a short command ending beside a long one leaves the long one tracked and
     the session running.
