@@ -48,6 +48,7 @@ Author: Leon
 """
 
 import enum
+import errno
 import logging
 import os
 import re
@@ -60,8 +61,14 @@ import tempfile
 import threading
 import time
 import uuid
+import weakref
 from dataclasses import dataclass, field, replace
 from typing import Any, Callable
+
+try:
+    import fcntl
+except ImportError:  # not POSIX: no workspace can be told live from orphaned (reconcile_workspaces)
+    fcntl = None
 
 from opti_oignon.db_utils import safe_connect
 
@@ -443,6 +450,80 @@ class ApprovalState(enum.Enum):
     PENDING = "pending"      # Files exist but not yet reviewed
     APPROVED = "approved"    # User explicitly approved specific paths
     REJECTED = "rejected"    # User rejected copy-out
+
+
+# ---------------------------------------------------------------------------
+# Workspace ownership
+# ---------------------------------------------------------------------------
+# A live workspace's directory is held by its manager under an exclusive
+# flock, on a descriptor opened on the directory itself and not inherited by
+# the commands run in it, for the session's life. A flock belongs to its open
+# file description and goes with its process, so another manager -- in another
+# process, or another one in this process -- tells a live workspace from an
+# orphan: it removes only a directory whose lock it can take.
+def _hold_workspace(path: str) -> int | None:
+    """A descriptor holding the directory ``path`` names under an exclusive lock; ``None`` when another holds it.
+
+    Raises OSError when the directory cannot be opened, and FileNotFoundError when ``path`` no longer names the
+    directory locked (removed or replaced meanwhile).
+    """
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        return None
+    except BaseException:
+        os.close(fd)
+        raise
+    try:
+        held, named = os.fstat(fd), os.lstat(path)
+    except BaseException:
+        os.close(fd)
+        raise
+    if (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino):
+        os.close(fd)
+        raise FileNotFoundError(f"{path} no longer names the directory locked")
+    return fd
+
+
+# What flock answers on a file system that cannot lock a directory: NFS
+# emulates it with a write lock, refused (EBADF) on a descriptor opened
+# read-only; others answer EINVAL, ENOLCK or EOPNOTSUPP.
+_LOCK_REFUSED = frozenset({errno.EBADF, errno.EINVAL, errno.ENOLCK, errno.EOPNOTSUPP})
+
+
+def _base_locks(base: str) -> bool:
+    """Whether ``base``'s file system holds an exclusive flock on a directory: asked once, on ``base`` itself.
+
+    False without fcntl, or where flock is refused; any other failure is raised, never read as a refusal.
+    """
+    if fcntl is None:
+        return False
+    fd = os.open(base, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True  # held by another: the file system locks
+    except OSError as exc:
+        if exc.errno in _LOCK_REFUSED:
+            return False
+        raise
+    else:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return True
+    finally:
+        os.close(fd)
+
+
+def _release_holds(holds: dict[str, int]) -> None:
+    """Close every descriptor of ``holds``: the workspaces they held are orphans the next start removes."""
+    for fd in list(holds.values()):
+        try:
+            os.close(fd)
+        except OSError:
+            pass
+    holds.clear()
 
 
 def _detect_bwrap() -> tuple[bool, str]:
@@ -1762,6 +1843,10 @@ class SandboxManager:
         # here (under the lock) for the duration of the command and deregister
         # in a finally. A session with an entry is "running"; without, "idle".
         self._running_procs: dict[str, subprocess.Popen] = {}
+        # Each live session's hold on its workspace (_hold_workspace), released by destroy_sandbox, or when this
+        # manager is dropped with sessions still live.
+        self._holds: dict[str, int] = {}
+        self._release = weakref.finalize(self, _release_holds, self._holds)
 
         # Detect isolation backend
         self._bwrap_available, self._bwrap_info = _detect_bwrap()
@@ -1769,12 +1854,26 @@ class SandboxManager:
 
         # Ensure workspace base exists
         os.makedirs(self._config.workspace_base, mode=0o700, exist_ok=True)
+        # Whether its workspaces can be held. Where they cannot, they are
+        # made unheld and no start removes any: an orphan stays until it is
+        # removed by hand.
+        self._base_locks = _base_locks(self._config.workspace_base)
+        if not self._base_locks:
+            logger.warning(
+                "Sandbox workspace base %s cannot be locked (%s): workspaces "
+                "are made unheld, no start can tell one live from an orphan "
+                "and none removes one; orphans stay until removed by hand",
+                self._config.workspace_base,
+                "no flock here" if fcntl is None else "its file system refuses flock",
+            )
 
-        # Startup reconcile. Sessions are in-memory and die
-        # with the process, so any sandbox-* directory found under
-        # workspace_base at startup is an orphan; reap it (reset_*-style)
-        # unless the user opted into a persistent base, where surviving
-        # directories are deliberate (logged, inert; write-back stays gated).
+        # Startup reconcile. Sessions are in-memory and die with their
+        # manager, so a sandbox-* directory under workspace_base that no
+        # manager holds is an orphan; reap it (reset_*-style) unless the user
+        # opted into a persistent base, where surviving directories are
+        # deliberate (logged, inert; write-back stays gated). A directory
+        # another manager holds -- the server's, seen from a command line, or
+        # another manager of this process -- is live and left.
         if self._config.reconcile_on_start:
             try:
                 self.reconcile_workspaces()
@@ -1785,7 +1884,16 @@ class SandboxManager:
         audit_path = os.path.join(
             self._config.workspace_base, self._config.audit_db_path
         )
-        self._audit = AuditLog(audit_path, conversation_of=self._conversation_of)
+        # The audit asks the manager through a weak reference: a bound method
+        # would hold the manager in a cycle, and a manager dropped with live
+        # sessions would keep their holds until a cycle collection.
+        manager = weakref.ref(self)
+
+        def conversation_of(session_id: str) -> str | None:
+            held = manager()
+            return held._conversation_of(session_id) if held is not None else None
+
+        self._audit = AuditLog(audit_path, conversation_of=conversation_of)
 
         # Log isolation status
         if self._isolation_backend == IsolationBackend.BWRAP:
@@ -2052,12 +2160,9 @@ class SandboxManager:
                     f"({self._config.max_concurrent_sessions})"
                 )
 
-        # Create isolated temp directory with strict permissions
-        workspace = tempfile.mkdtemp(
-            prefix=f"sandbox-{session_id}-",
-            dir=self._config.workspace_base,
-        )
-        os.chmod(workspace, 0o700)
+        # Create isolated temp directory with strict permissions, held from
+        # its making on
+        workspace, hold = self._make_workspace(session_id)
 
         now = time.time()
         session = SandboxSession(
@@ -2072,7 +2177,18 @@ class SandboxManager:
         )
 
         with self._lock:
-            self._sessions[session_id] = session
+            taken = session_id in self._sessions
+            if not taken:
+                self._sessions[session_id] = session
+                if hold is not None:
+                    self._holds[session_id] = hold
+        if taken:
+            # Another create of the same id finished while this one made its
+            # workspace: this one's workspace goes, and its hold with it.
+            shutil.rmtree(workspace, ignore_errors=True)
+            if hold is not None:
+                os.close(hold)
+            raise ValueError(f"Session '{session_id}' already exists")
 
         logger.info(
             "Sandbox created: session=%s, path=%s, isolation=%s",
@@ -2081,6 +2197,39 @@ class SandboxManager:
             self._isolation_backend.value,
         )
         return session
+
+    def _make_workspace(self, session_id: str) -> tuple[str, int | None]:
+        """A new workspace directory under workspace_base and its hold, taken before anything is put in it.
+
+        Another manager's reconciliation may remove the empty directory between its making and its hold: it is
+        dropped and another made. Where the base cannot be locked there is no hold (``None``); where it can, a hold
+        that fails otherwise (descriptors exhausted) removes the directory and is raised: a workspace is never left
+        unheld where another start would remove it.
+        """
+        for _attempt in range(3):
+            workspace = tempfile.mkdtemp(
+                prefix=f"sandbox-{session_id}-",
+                dir=self._config.workspace_base,
+            )
+            if not self._base_locks:
+                os.chmod(workspace, 0o700)
+                return workspace, None
+            try:
+                hold = _hold_workspace(workspace)
+            except FileNotFoundError:
+                continue
+            except BaseException:
+                shutil.rmtree(workspace, ignore_errors=True)
+                raise
+            if hold is None:
+                continue
+            try:
+                os.chmod(workspace, 0o700)
+            except BaseException:
+                os.close(hold)
+                raise
+            return workspace, hold
+        raise RuntimeError("No workspace could be held: another manager removed each one as it was made")
 
     def destroy_sandbox(self, session_id: str) -> bool:
         """Destroy a sandbox and remove all its files.
@@ -2103,9 +2252,19 @@ class SandboxManager:
         workspace = session.workspace_path
         if os.path.isdir(workspace):
             shutil.rmtree(workspace, ignore_errors=True)
+            if os.path.lexists(workspace):
+                logger.warning(
+                    "Sandbox destroyed: session=%s, but its workspace %s "
+                    "could not be removed whole",
+                    session_id,
+                    workspace,
+                )
 
         with self._lock:
             self._sessions.pop(session_id, None)
+            hold = self._holds.pop(session_id, None)
+        if hold is not None:
+            os.close(hold)
 
         # Clear file tracking for this session
         self._validator.clear_recent_files()
@@ -2242,11 +2401,18 @@ class SandboxManager:
     def reconcile_workspaces(self) -> int:
         """Reap orphaned workspace directories under workspace_base.
 
-        Sessions are in-memory, so at startup every sandbox-* directory is
-        an orphan of a previous process. Only direct child DIRECTORIES whose
-        name starts with "sandbox-" and which no tracked session owns are
-        removed; files (notably the audit database living in
-        workspace_base) are never touched. In persistent mode the reap is
+        Sessions are in-memory and die with their manager, so a sandbox-*
+        directory no manager holds (_hold_workspace) is an orphan. Only
+        direct child DIRECTORIES whose name starts with "sandbox-", which no
+        tracked session owns and whose lock this manager takes, are removed,
+        under that lock; one another manager holds is live and left, one
+        that cannot be opened is left as not checked, one that cannot be
+        removed whole is left, each said, and only those removed whole are
+        counted. Files
+        (notably the audit database living in workspace_base) are never
+        touched. Without flock nothing tells a live workspace from an
+        orphan, and nothing is removed; so where the base's file system
+        refuses flock. In persistent mode the reap is
         skipped entirely and survivors are logged as detached (inert until
         a future cycle re-attaches them; write-back stays gated).
 
@@ -2287,10 +2453,62 @@ class SandboxManager:
                 )
             return 0
 
+        if not self._base_locks:
+            if orphans:
+                logger.warning(
+                    "Workspace reconcile: %s cannot be locked, so no live "
+                    "workspace can be told from an orphan: %d director(ies) "
+                    "left, not checked: %s",
+                    base,
+                    len(orphans),
+                    ", ".join(os.path.basename(p) for p in orphans),
+                )
+            return 0
+
         removed = 0
+        live: list[str] = []
+        unchecked: list[str] = []
+        stuck: list[str] = []
         for path in orphans:
-            shutil.rmtree(path, ignore_errors=True)
-            removed += 1
+            try:
+                hold = _hold_workspace(path)
+            except FileNotFoundError:
+                continue  # gone meanwhile: its owner destroyed it
+            except OSError as exc:
+                unchecked.append(f"{os.path.basename(path)} ({exc.strerror or exc})")
+                continue
+            if hold is None:
+                live.append(os.path.basename(path))
+                continue
+            try:
+                shutil.rmtree(path, ignore_errors=True)
+            finally:
+                os.close(hold)
+            if os.path.lexists(path):
+                stuck.append(os.path.basename(path))
+            else:
+                removed += 1
+        if live:
+            logger.info(
+                "Workspace reconcile: %d workspace(s) another manager holds "
+                "left in place: %s",
+                len(live),
+                ", ".join(live),
+            )
+        if unchecked:
+            logger.warning(
+                "Workspace reconcile: %d director(ies) could not be opened "
+                "or locked and were left, not checked: %s",
+                len(unchecked),
+                ", ".join(unchecked),
+            )
+        if stuck:
+            logger.warning(
+                "Workspace reconcile: %d orphaned director(ies) could not be "
+                "removed whole and were left: %s",
+                len(stuck),
+                ", ".join(stuck),
+            )
         if removed:
             logger.info(
                 "Workspace reconcile: reaped %d orphaned director(ies) "

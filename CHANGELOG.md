@@ -3487,6 +3487,38 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] A sandbox workspace in use is never removed by another
+  sandbox manager. A manager starting (`reconcile_on_start`, on as
+  shipped) removed every `sandbox-*` directory of its workspace base that
+  its own sessions did not hold, and a new manager holds none: loading the
+  sandbox module from a command line beside the server, or the note
+  transcription and captioning routes, which build a manager per request
+  inside the server, removed the live workspaces of every other manager --
+  a coding session's or an agent run's files, under a command still
+  running. Now each live workspace's directory is held by its manager
+  under an exclusive lock (`flock`, on a descriptor the commands run in it
+  do not inherit) from its making to its destruction, and a start removes
+  only a directory whose lock it takes, under that lock: one another
+  manager holds, in this process or another, is left and said; one it
+  cannot open is left and said as not checked; one it cannot remove whole
+  is left and said, and no longer counted as removed. A lock goes with its
+  process, so a workspace whose manager is gone is removed by the next
+  start, as before; a manager dropped with live sessions releases them as
+  it is dropped. A workspace removed by another start between its making
+  and its lock is made again, and a create of an id another create took
+  meanwhile is refused, its workspace and its lock gone. Whether the
+  workspace base's file system locks is asked once, as a manager starts:
+  where it refuses `flock` (on a directory over NFS) or there is no
+  `flock` (not POSIX), workspaces are made unheld and said, a start
+  removes none, and orphans stay until removed by hand; where it locks, a
+  lock that fails otherwise (descriptors exhausted) refuses the create and
+  leaves nothing, never a workspace another start would remove.
+  Destroying a workspace says a tree it could not remove whole. Until
+  every process on the workspace base runs this version, an older start
+  still removes what it does not hold, and an older server's workspaces
+  are not held. wl1-wl5 in the new
+  `tests/test_sandbox_workspace_ownership_contracts.py`.
+
 - The cipher driver's errors are sqlite3's and stay the driver's own.
   Every connection to SQLCipher is made in `db_encryption`, which gives
   each of the driver's eight error classes its sqlite3 namesake as a base

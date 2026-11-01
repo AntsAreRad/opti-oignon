@@ -75,8 +75,14 @@ seccomp_required: true
 # ---- Workspace lifecycle ----
 # Workspaces default ephemeral under workspace_base (volatile under /tmp:
 # they do NOT survive a reboot). reconcile_on_start reaps orphaned
-# sandbox-* directories left by a previous process at startup (directories
-# only; the audit database file in workspace_base is never touched).
+# sandbox-* directories at startup: those no live manager holds (each live
+# workspace is locked by its manager, so a start of this version -- a command
+# line beside the server, a second manager in one process -- never takes
+# another's), and directories only (the audit database file in
+# workspace_base is never touched). A start of an older version still reaps
+# what it does not hold. Where the file system refuses the lock (flock over
+# NFS) no workspace can be told live, a start reaps none, and orphans stay
+# until removed by hand.
 # workspace_persistent=true skips that reap so files under a configured
 # persistent workspace_base survive restarts -- the trade-off is a WIDENED
 # DISPOSABLE WINDOW (data persists on disk between runs); write-back to the
