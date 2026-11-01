@@ -1290,6 +1290,12 @@ fail_under = 0
 # way to xo6, which runs it unchanged on those five and holds the sixth, the code executor's, to the same text. They
 # stay in the tree word for word.
 #
+# A check of an answer's code keeps none of its outputs (block 201). ce8 and ce9 of
+# tests/test_code_execution_in_the_sandbox_contracts.py hand the verification engine a stand-in executor that takes no
+# word on its outputs, which a check now passes: they give way to vo3 and vo4 of
+# tests/test_code_check_outputs_contracts.py, which keep their cases and assertions unchanged, give the stand-in the
+# word, and hold every check's run to keeping none. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1741,4 +1747,6 @@ addopts = """
     --deselect=tests/test_cache_forgetting_contracts.py::test_cf5_an_answer_asked_before_an_emptying_is_never_put
     --deselect=tests/test_deletion_leaves_nothing_contracts.py::test_dl6_the_code_sandbox_and_the_workspace_binding_let_go
     --deselect=tests/test_skill_forgetting_contracts.py::test_sk11_the_overwrite_is_one_text_in_its_five_copies
+    --deselect=tests/test_code_execution_in_the_sandbox_contracts.py::test_ce8_the_blocks_of_an_answer_run_only_when_automatic_checking_is_on
+    --deselect=tests/test_code_execution_in_the_sandbox_contracts.py::test_ce9_code_that_never_ran_is_never_handed_to_the_model_to_fix
 """

@@ -250,12 +250,14 @@ class VerificationEngine:
             iter_start = time.time()
             logger.info(f"Verification iteration {iteration}/{self._max_iterations} ({language})")
 
-            # Executer le code
+            # Executer le code. A check's result names no image: it keeps
+            # none, and they go with its sandbox.
             try:
                 result = self.code_exec.execute(
                     code=current_code,
                     language=language,
                     timeout=timeout,
+                    keep_outputs=False,
                 )
             except Exception as e:
                 error_msg = f"Erreur execution: {e}"

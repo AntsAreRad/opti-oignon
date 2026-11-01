@@ -183,9 +183,11 @@ ran for no conversation (an agent run's tools) keeps its commands whole.
 The images and PDFs a run of code writes (the code execution outputs)
 are kept by the conversation the code panel is open on when it runs,
 and go with that conversation, overwritten, then removed, together with
-those of runs that kept no conversation -- the checks of an answer's
-code, a panel open on no conversation or on one this server no longer
-holds, and runs of an older version -- whose conversation is not known.
+those of runs that kept no conversation -- a panel open on no
+conversation or on one this server no longer holds, and runs of an
+older version, its checks of an answer's code among them -- whose
+conversation is not known. A check of an answer's code keeps none:
+its result names no file, and its images go with the check's sandbox.
 A run another process makes for a conversation while it is deleted may
 still keep its files: the deletion is told to this process only. When
 the outputs cannot be removed, the deletion is refused and says so. The

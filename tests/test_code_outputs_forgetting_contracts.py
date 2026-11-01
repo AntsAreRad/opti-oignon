@@ -1,7 +1,7 @@
 """Contracts for the images a code run copies out of its sandbox: kept by conversation, gone with it.
 
-A run whose sandbox goes with it copies its new images to the code output directory (``data/exec_outputs``) so the
-answer can show them. They were kept flat, by no conversation: a deleted conversation's charts stayed there for good,
+A run whose sandbox goes with it copies its new images to the code output directory (``data/exec_outputs``) and names
+them in its result. They were kept flat, by no conversation: a deleted conversation's charts stayed there for good,
 and the account wipe did not reach them. Now a run of a conversation copies them into the conversation's own folder,
 named by a digest of its id; a run of none, into the directory itself. A conversation's deletion asks for them before
 it is committed, as it asks every store that keeps something drawn from the conversation beyond this process: its

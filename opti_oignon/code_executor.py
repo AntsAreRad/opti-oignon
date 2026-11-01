@@ -86,7 +86,8 @@ _SCRIPT_FILES = {"script.py", "script.R", "script.sh"}
 # conversation copies them into the conversation's own folder (_outputs_of),
 # a run of none into the directory itself; a conversation's deletion removes
 # its folder, and the files at the top, whose conversation is not known
-# (forget_outputs). From then on this process copies out nothing of it.
+# (forget_outputs). From then on this process copies out nothing of it. A
+# check of an answer's code keeps none (execute(keep_outputs=False)).
 _OUTPUT_DIR = None
 _OUTPUTS_LOCK = threading.Lock()
 _FORGOTTEN_OUTPUTS: set[str] = set()
@@ -469,6 +470,7 @@ class CodeExecutor:
         language: str = "python",
         timeout: int | None = None,
         conv_id: str | None = None,
+        keep_outputs: bool = True,
     ) -> ExecutionResult:
         """Execute code inside a sandbox session and return the result.
 
@@ -477,6 +479,11 @@ class CodeExecutor:
             language: one of python/r/bash (or alias)
             timeout: max seconds (None = DEFAULT_TIMEOUT, capped at MAX_TIMEOUT)
             conv_id: if provided and persistent_mode is on, reuse its sandbox
+            keep_outputs: False for a run whose images nobody is told of
+                (the checks of an answer's code, whose results name no
+                file): none is copied out or named in the result; they go
+                with its sandbox, or, in persistent mode, stay in the
+                conversation's sandbox like every file it writes
 
         Returns:
             ExecutionResult with stdout, stderr, timing, etc.; ``ran`` is
@@ -519,6 +526,7 @@ class CodeExecutor:
         try:
             result = self._run_in_sandbox(
                 manager, session_id, code, language, timeout, copy_out=not use_persistent, conv_id=conv_id,
+                keep_outputs=keep_outputs,
             )
         except Exception as e:
             logger.exception(f"Code execution failed: {e}")
@@ -691,6 +699,7 @@ class CodeExecutor:
         timeout: int,
         copy_out: bool,
         conv_id: str | None = None,
+        keep_outputs: bool = True,
     ) -> ExecutionResult:
         """Write the script into the session's workspace and run it there."""
         workspace = manager.get_workspace_path(session_id) or ""
@@ -728,8 +737,8 @@ class CodeExecutor:
             )
         result.working_dir = workspace
 
-        # Detect new output files (images)
-        new_files = self._detect_output_files(workspace, files_before)
+        # Detect new output files (images); a run that keeps none looks for none
+        new_files = self._detect_output_files(workspace, files_before) if keep_outputs else []
         if new_files and copy_out:
             # The sandbox goes with this run: copy images to the stable output dir
             result.output_files = self._copy_out(new_files, conv_id)
