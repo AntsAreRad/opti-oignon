@@ -10,7 +10,7 @@ Design notes:
   ``routes_notes_attachments`` / ``routes_notes_transcription`` precedent) and
   this is a pure chain addition. The transcription surface triggers AUDIO compute;
   this surface triggers IMAGE compute, a sibling concern.
-- ONE ``POST /{attachment_id}``. It resolves the live disposable SandboxManager
+- ONE ``POST /{attachment_id}``. It resolves the shared live SandboxManager
   and the live vision/OCR captioner (both host-assured; the vision tooling and
   bwrap are absent in-container), hands them plus the per-user stores to
   ``caption_attachment``, and returns the structured result. The orchestration
@@ -97,16 +97,20 @@ def _blob_store_dep():
 
 
 def _sandbox_dep():
-    """Resolve the live disposable SandboxManager (a seam for tests).
+    """Resolve the live SandboxManager every sandbox route shares (a seam for
+    tests): its session limit counts the disposable sandbox of a caption with
+    every other workspace, where a manager made for each request counted
+    none. None when the sandbox is unavailable, which the orchestration
+    refuses, fail-secure.
 
     Imported lazily so the route module never forces the sandbox import chain at
     load. In-container the manager reports no bwrap, so the orchestration's fail
     -secure gate refuses -- the live disposable run is host-assured.
     """
     _check()
-    from opti_oignon.sandbox_manager import SandboxManager
+    from .deps import sandbox_manager
 
-    return SandboxManager()
+    return sandbox_manager
 
 
 def _captioner_dep():

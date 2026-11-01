@@ -3487,6 +3487,20 @@ package costs.
 
 ### Fixed
 
+- The sandbox's limit on concurrent sessions holds when creations race,
+  and counts every sandbox. A creation counted the active sessions against
+  `max_concurrent_sessions`, made its workspace outside the lock, and
+  registered it checking only that its id was free: creations racing for
+  the last free places all registered, past the limit. And the notes'
+  caption and transcription routes made a sandbox manager of their own for
+  each request, whose disposable sessions no limit counted. Now the
+  registration counts the active sessions again, under the lock that
+  registers -- a creation that finds the limit reached there is refused
+  with the limit's message and its workspace removed, as one that lost its
+  id is -- and the notes routes use the manager every sandbox route
+  shares: a caption or a transcription finding no free place is refused,
+  as any other sandbox is. nl1-nl3 in the new
+  `tests/test_sandbox_session_limit_holds_contracts.py`.
 - [SECURITY] The agent's glob walks no link. It checked its base folder
   beneath the workspace and then walked the pattern with `Path.glob`, by
   path: a link the model made to a host folder -- `/` itself -- under a

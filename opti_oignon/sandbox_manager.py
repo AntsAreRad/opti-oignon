@@ -2517,17 +2517,30 @@ class SandboxManager:
 
         with self._lock:
             taken = session_id in self._sessions
-            if not taken:
+            # Counted again under the lock that registers: creations that all
+            # passed the first count while others made their workspaces
+            # never register past the limit together
+            full = not taken and (
+                sum(1 for s in self._sessions.values() if s.active)
+                >= self._config.max_concurrent_sessions
+            )
+            if not taken and not full:
                 self._sessions[session_id] = session
                 if hold is not None:
                     self._holds[session_id] = hold
-        if taken:
-            # Another create of the same id finished while this one made its
-            # workspace: this one's workspace goes, and its hold with it.
+        if taken or full:
+            # Another create of the same id, or enough others to reach the
+            # limit, finished while this one made its workspace: this one's
+            # workspace goes, and its hold with it.
             shutil.rmtree(workspace, ignore_errors=True)
             if hold is not None:
                 os.close(hold)
-            raise ValueError(f"Session '{session_id}' already exists")
+            if taken:
+                raise ValueError(f"Session '{session_id}' already exists")
+            raise ValueError(
+                f"Maximum concurrent sessions reached "
+                f"({self._config.max_concurrent_sessions})"
+            )
 
         logger.info(
             "Sandbox created: session=%s, path=%s, isolation=%s",
