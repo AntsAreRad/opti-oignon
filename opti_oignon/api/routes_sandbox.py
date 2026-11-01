@@ -15,8 +15,11 @@ Copy-out + human approval workflow endpoints:
 - approval info and audit trail
 """
 
+import errno
+import io
 import logging
 import os
+import stat
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -201,6 +204,111 @@ def _require_sandbox():
     """Raise 503 if sandbox is not available."""
     if not SANDBOX_AVAILABLE or sandbox_manager is None:
         raise HTTPException(status_code=503, detail="Sandbox not available")
+
+
+def _why_not_read(exc: OSError) -> str:
+    """What a refusal of ``_open_in_workspace`` says of a path, to whoever
+    asked for it (the manager's wording for the export's reader)."""
+    if isinstance(exc, (FileNotFoundError, NotADirectoryError)):
+        return "File not found"
+    if exc.errno == errno.ELOOP:
+        return "A link stands there, not followed"
+    if exc.errno == errno.EPERM and exc.strerror:
+        return exc.strerror[:1].upper() + exc.strerror[1:]
+    return exc.strerror or str(exc)
+
+
+def _open_in_workspace(workspace: str, relative: str) -> int:
+    """A read-only descriptor of the regular file ``relative`` names in the
+    workspace, reached one component at a time beneath the workspace's real
+    path without following a link and opened without waiting: a link on the
+    way or at the name -- one the sandbox made, or put there after a check --
+    is refused, never followed, and so is anything but a regular file with
+    one name (``OSError``), as an export reads its source."""
+    parts = [part for part in relative.split("/") if part not in ("", ".")]
+    if not parts or ".." in parts:
+        raise OSError(errno.EINVAL, "not a path in the workspace", relative)
+    nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
+    folder = os.open(
+        os.path.realpath(workspace),
+        getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0),
+    )
+    try:
+        for part in parts[:-1]:
+            inner = os.open(
+                part,
+                getattr(os, "O_PATH", os.O_RDONLY) | getattr(os, "O_DIRECTORY", 0) | nofollow,
+                dir_fd=folder,
+            )
+            os.close(folder)
+            folder = inner
+        fd = os.open(
+            parts[-1], os.O_RDONLY | nofollow | getattr(os, "O_NONBLOCK", 0), dir_fd=folder
+        )
+    finally:
+        os.close(folder)
+    st = os.fstat(fd)
+    if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+        os.close(fd)
+        why = "not a regular file" if not stat.S_ISREG(st.st_mode) else "a second name of a file (a hard link)"
+        raise OSError(errno.EPERM, why, relative)
+    return fd
+
+
+class _HeldFileResponse(FileResponse):
+    """A download of the file a descriptor holds. The response names the
+    checked path, and sends -- stats and opens -- the descriptor's own file
+    through ``/proc/self/fd``, whatever the name now points at; where no
+    ``/proc/self/fd`` exists, it sends the file from the descriptor itself.
+    It is sent while the descriptor is held: a server's offer to send the
+    path itself later (``http.response.pathsend``) is declined. The
+    descriptor is closed once it is sent, or when the response goes."""
+
+    def __init__(self, fd: int, **kwargs):
+        super().__init__(**kwargs)
+        self._held = fd
+
+    def _release(self) -> None:
+        held, self._held = self._held, None
+        if held is not None:
+            os.close(held)
+
+    async def __call__(self, scope, receive, send):
+        try:
+            if os.path.isdir("/proc/self/fd"):
+                self.path = f"/proc/self/fd/{self._held}"
+                extensions = {
+                    name: value
+                    for name, value in scope.get("extensions", {}).items()
+                    if name != "http.response.pathsend"
+                }
+                await super().__call__(
+                    {**scope, "extensions": extensions}, receive, send
+                )
+            else:
+                await self._send_held(scope, send)
+        finally:
+            self._release()
+
+    async def _send_held(self, scope, send) -> None:
+        """The held file sent whole from its descriptor."""
+        self.set_stat_headers(os.fstat(self._held))
+        await send({
+            "type": "http.response.start",
+            "status": self.status_code,
+            "headers": self.raw_headers,
+        })
+        offset = 0
+        while scope.get("method") != "HEAD":
+            chunk = os.pread(self._held, self.chunk_size, offset)
+            if not chunk:
+                break
+            offset += len(chunk)
+            await send({"type": "http.response.body", "body": chunk, "more_body": True})
+        await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+    def __del__(self):
+        self._release()
 
 
 # ---------------------------------------------------------------------------
@@ -568,10 +676,17 @@ def download_sandbox_file(session_id: str, path: str) -> FileResponse:
     valid, resolved, err = validate_sandbox_path(workspace, path)
     if not valid:
         raise HTTPException(status_code=400, detail=f"Invalid path: {err}")
-    if not os.path.isfile(resolved):
-        raise HTTPException(status_code=404, detail=f"File not found: {path}")
+    # The checked path is opened beneath the workspace through no link; the
+    # file sent is the file opened, never what a link put after the check
+    # names
+    root = os.path.realpath(workspace)
+    try:
+        fd = _open_in_workspace(root, os.path.relpath(resolved, root))
+    except OSError as exc:
+        raise HTTPException(status_code=404, detail=f"{_why_not_read(exc)}: {path}")
 
-    return FileResponse(
+    return _HeldFileResponse(
+        fd,
         path=resolved,
         filename=os.path.basename(path),
         media_type="application/octet-stream",
@@ -1193,6 +1308,10 @@ def _compute_session_diff(session_id: str):
         return _ws.generate_workspace_diff(session_id, manager=sandbox_manager)
     except _ws.WorkspaceDiffBoundExceeded as exc:
         raise HTTPException(status_code=413, detail=str(exc))
+    except _ws.WorkspaceReviewDrift as exc:
+        # The workspace changed while it was reviewed, or could not be
+        # read whole: nothing is shown
+        raise HTTPException(status_code=409, detail=str(exc))
     except ValueError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
 
@@ -1481,8 +1600,18 @@ def provision_workspace(
             )
 
     workspace = sandbox_manager.get_active_workspace_path(session_id)
-    req_host_path = os.path.join(workspace, request.requirements_path)
-    if not os.path.isfile(req_host_path):
+    # A link inside the workspace is resolved, as the sandbox's own pip will
+    # resolve it; the resolved path is then read beneath the workspace
+    # through no link: a requirements file that is a link out of the
+    # workspace, or lies past one, or is put there after this check, is not
+    # a file in the workspace
+    root = os.path.realpath(workspace)
+    resolved = os.path.realpath(os.path.join(root, request.requirements_path))
+    try:
+        if not resolved.startswith(root + os.sep):
+            raise OSError(errno.EINVAL, "not a path in the workspace", request.requirements_path)
+        req_fd = _open_in_workspace(root, os.path.relpath(resolved, root))
+    except OSError:
         _audit_refused("requirements file not found in workspace")
         raise HTTPException(
             status_code=400,
@@ -1491,16 +1620,31 @@ def provision_workspace(
                 f"{request.requirements_path}"
             ),
         )
+    # Read no further than one byte past the validator's own size bound: a
+    # larger file is refused whole, by its bytes, before any line is read --
+    # the text the validator would see is shorter (universal newlines) than
+    # the file the sandbox's pip reads
+    req_bound = getattr(_eg, "_REQUIREMENTS_MAX_BYTES", 262144)
     try:
-        with open(req_host_path, encoding="utf-8", errors="replace") as fh:
-            req_text = fh.read()
+        with open(req_fd, "rb") as fh:
+            req_bytes = fh.read(req_bound + 1)
+        req_text = io.TextIOWrapper(
+            io.BytesIO(req_bytes), encoding="utf-8", errors="replace"
+        ).read()
     except OSError as exc:
         _audit_refused(f"requirements file unreadable: {exc}")
         raise HTTPException(
             status_code=400, detail="requirements file could not be read"
         )
 
-    accepted, refused_lines = _eg.validate_requirements_text(req_text)
+    if len(req_bytes) > req_bound:
+        accepted, refused_lines = [], [{
+            "line": 0,
+            "text": "",
+            "reason": "requirements file exceeds the size bound",
+        }]
+    else:
+        accepted, refused_lines = _eg.validate_requirements_text(req_text)
     if refused_lines or not accepted:
         _audit_refused(
             f"requirements validation refused {len(refused_lines)} line(s); "

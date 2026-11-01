@@ -68,10 +68,15 @@ it points at, ls and grep skip it, and a FIFO is answered at once, never
 waited on. grep walks each folder from its parent's descriptor, 128
 folders deep at most. glob's pattern walk still follows a link inside
 the workspace; the results it keeps are regular files reached beneath
-the workspace through no link. The panel's own reads of a workspace --
-its file list, a file's preview, a download, the requirements file a
-provision reads -- still check a path and then read it by path,
-following a link the sandbox put there.
+the workspace through no link. The panel's own reads of a workspace
+reach it the same way: a provision resolves the links inside the
+workspace and reads the resolved requirements file beneath it through no
+link; the file list and the diff review walk the workspace through
+descriptors and neither follow nor list a link, and an entry the review
+cannot read refuses the review rather than reading as deleted; the
+preview, the download and the apply open the checked path once, as an
+export reads its source -- a regular file with one name, through no
+link -- and read, send or copy the file that descriptor holds.
 
 ## Diff review and apply
 
@@ -79,11 +84,12 @@ Copy-out is approval-gated, refined into a diff model. The review compares
 the workspace against the copy-in baseline and shows added, modified, and
 deleted files by hash. You approve changes individually; deletions are
 confirmed separately from writes, so a deletion can never ride in on a
-bulk approval. The apply writer is symlink-safe (temp-plus-rename,
-no-follow opens, refusal on any path that escapes the chosen root), and
-the applied set is bound by hash to the exact diff you reviewed: what is
-written to the host is exactly what you saw, or nothing. Auto-apply does
-not exist.
+bulk approval. The apply writer is symlink-safe (each source opened
+beneath the workspace through no link, temp-plus-rename, no-follow
+opens, refusal on any path that escapes the chosen root), and the
+applied set is bound by hash to the exact diff you reviewed, each file's
+bytes hashed as they are copied: what is written to the host is exactly
+what you saw, or nothing. Auto-apply does not exist.
 
 The file manager's "Approve & download" copies the files you approved
 into the export folder beside the package (`data/sandbox_exports` in a

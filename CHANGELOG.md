@@ -3487,6 +3487,43 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] The panel's reads of a workspace never follow a link the
+  sandbox put there. Six host-side reads serve the panel, and each read by
+  path. A provision (`POST /api/sandbox/{id}/provision`) opened the
+  requirements file it names without resolving it: a requirements file the
+  sandbox made a link to a host file was read, with no race, and its lines
+  came back in the refusal's detail. The file list (`GET
+  /api/sandbox/files/{id}`, and the coding agents' and the quick sandbox's
+  lists) showed a link to a host file with that file's size and time, and
+  walked into a folder the sandbox swapped for a link while it walked. The
+  preview showed, and the download sent, a host file through a link put at
+  the name after their check. The diff review hashed, and the apply copied
+  into its target, a file through a link put at its name after their
+  checks: the apply could write a host file's bytes where the human had
+  reviewed the workspace's. Now a provision resolves the links inside the
+  workspace, as the sandbox's pip does, and reads the resolved file
+  beneath the workspace through no link: a requirements file that leads
+  out of the workspace, meets a link put after the check, or has a second
+  name, is not a file in the workspace (the 400 as before); one larger
+  than the validator's size bound is refused by its bytes, unread. The
+  file list walks the workspace through descriptors, each folder opened
+  from its parent's, each entry read itself: a link is neither followed
+  nor listed (a copy out refuses it), a FIFO is still listed, folders come
+  by name, and the list goes 128 folders deep. The diff review walks the
+  same way and hashes each file through a descriptor; an entry it cannot
+  read -- a folder it may not search, a file it may not read, a folder
+  swapped for a link while it walks -- refuses the review (409), where an
+  unread file read as deleted. The preview, the download and the apply
+  open the checked path once beneath the workspace through no link and
+  without waiting, as an export reads its source, and read, send or copy
+  that descriptor's file; a link, anything but a regular file, or a second
+  name of a file is refused, saying which (a second name was served and
+  applied). The download names the path as before and sends the file
+  through `/proc/self/fd`, or from the descriptor where there is none, and
+  declines a server's offer to send the path itself later. The apply
+  hashes the bytes it copies and moves them over its target only when they
+  are the bytes the human reviewed. wr1-wr6 in the new
+  `tests/test_sandbox_panel_reads_follow_no_link_contracts.py`.
 - [SECURITY] The agent's file tools never follow a link the sandbox puts
   on a path they checked. view, create_file and str_replace -- the tools
   the agents, `POST /api/sandbox/execute` and the code runner use inside a

@@ -40,6 +40,7 @@ the manager's session validation, both fully described here.
 
 from __future__ import annotations
 
+import errno
 import logging
 import os
 import secrets
@@ -69,6 +70,12 @@ try:
     )
 except Exception:  # pragma: no cover - defensive guard
     _validate_sandbox_path = None
+
+try:
+    from opti_oignon.sandbox_manager import _open_beneath, _why_not_read
+except Exception:  # pragma: no cover - defensive guard
+    _open_beneath = None
+    _why_not_read = None
 
 try:
     from opti_oignon.sandbox_tools import SandboxToolSession as _ToolSession
@@ -313,6 +320,21 @@ def forget_conversation(conversation_id: str) -> int:
 # ---------------------------------------------------------------------------
 # Baseline manifest (the section 6.1 seam the apply writer consumes)
 # ---------------------------------------------------------------------------
+
+def _hash_fd(fd: int, chunk_size: int = 65536) -> str:
+    """``manifest_hash_file`` of the file open on ``fd``, read from its start."""
+    import hashlib
+
+    digest = hashlib.sha256()
+    offset = 0
+    while True:
+        chunk = os.pread(fd, chunk_size, offset)
+        if not chunk:
+            break
+        digest.update(chunk)
+        offset += len(chunk)
+    return digest.hexdigest()
+
 
 def manifest_hash_file(path: str, chunk_size: int = 65536) -> str:
     """The per-file content hash of the baseline manifest (section 6.1).
@@ -577,7 +599,12 @@ def _walk_workspace_hashes(
     Symlinks are NEVER followed (and never hashed): the sandboxed code can
     create them, and following one during the review would read host files
     into the diff -- an exfiltration channel into the very gate meant to
-    stop it. Symlinks and special files are skipped and COUNTED so the
+    stop it. The walk goes through descriptors, each entry read itself and
+    each file hashed through a descriptor opened without following a link,
+    so a link swapped in while it walks is never followed either. An entry
+    the walk cannot read -- a folder it may not search, a file it may not
+    read, a folder swapped for a link -- refuses the review
+    (``WorkspaceReviewDrift``): an unread file never reads as deleted. Symlinks and special files are skipped and COUNTED so the
     review can state them honestly (the clone discipline). Exceeding
     the file-count bound or the depth bound REFUSES
     (``WorkspaceDiffBoundExceeded``), never undercounts.
@@ -587,50 +614,101 @@ def _walk_workspace_hashes(
     """
     hashes: dict[str, str] = {}
     sizes: dict[str, int] = {}
-    skipped_symlinks = 0
-    skipped_special = 0
+    skipped = {"symlinks": 0, "special": 0}
     root_real = os.path.realpath(workspace_root)
-    stack: list[tuple[str, int]] = [(root_real, 0)]
-    while stack:
-        current, depth = stack.pop()
-        if depth > _WORKSPACE_WALK_MAX_DEPTH:
-            raise WorkspaceDiffBoundExceeded(
-                f"Workspace exceeds the maximum diff walk depth "
-                f"({_WORKSPACE_WALK_MAX_DEPTH}): {current}"
-            )
-        with os.scandir(current) as it:
-            for entry in it:
-                try:
-                    if entry.is_symlink():
-                        skipped_symlinks += 1
-                        continue
-                    if entry.is_dir(follow_symlinks=False):
-                        # Manifest rule (cross-cycle with the clone and
-                        # apply layers): the workspace-root .agent/ prefix is
-                        # agent-internal (spill files); the copy-out diff
-                        # excludes it, so it can never classify as a change.
-                        if depth == 0 and entry.name == ".agent":
-                            continue
-                        stack.append((entry.path, depth + 1))
-                        continue
-                    if not entry.is_file(follow_symlinks=False):
-                        skipped_special += 1
-                        continue
-                    size = entry.stat(follow_symlinks=False).st_size
-                except OSError:
+    # Walked through descriptors: each folder opened from its parent's, each
+    # entry read itself (lstat beneath its folder), each file hashed through
+    # a descriptor opened beneath its folder without following a link -- a
+    # link the sandbox puts in place of a file or a folder while the review
+    # walks is never followed, and the size shown is the size hashed
+    directory = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+
+    def unreadable(rel: str, exc: OSError) -> WorkspaceReviewDrift:
+        """The refusal of a review that could not read an entry: a file
+        or a folder it cannot read must never read as deleted."""
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            reason = f"{rel} changed while it was reviewed"
+        else:
+            reason = f"{rel} could not be read ({exc.strerror or exc})"
+        return WorkspaceReviewDrift(
+            f"The workspace could not be reviewed whole: {reason}; review again"
+        )
+
+    def walk(folder: int, here: str, depth: int) -> None:
+        with os.scandir(folder) as it:
+            names = sorted(entry.name for entry in it)
+        for name in names:
+            rel = os.path.join(here, name) if here else name
+            try:
+                st = os.stat(name, dir_fd=folder, follow_symlinks=False)
+            except FileNotFoundError:
+                continue  # gone since the listing: absent, as it is
+            except OSError as exc:
+                raise unreadable(rel, exc) from exc
+            if stat.S_ISLNK(st.st_mode):
+                skipped["symlinks"] += 1
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                # Manifest rule (cross-cycle with the clone and apply
+                # layers): the workspace-root .agent/ prefix is
+                # agent-internal (spill files); the copy-out diff excludes
+                # it, so it can never classify as a change.
+                if depth == 0 and name == ".agent":
                     continue
-                if len(hashes) >= max_entries:
+                if depth + 1 > _WORKSPACE_WALK_MAX_DEPTH:
                     raise WorkspaceDiffBoundExceeded(
-                        f"Workspace exceeds the diff entry bound "
-                        f"({max_entries} files); the review refuses rather "
-                        f"than truncate"
+                        f"Workspace exceeds the maximum diff walk depth "
+                        f"({_WORKSPACE_WALK_MAX_DEPTH}): "
+                        f"{os.path.join(root_real, rel)}"
                     )
-                rel = os.path.relpath(entry.path, root_real)
+                # A folder that cannot be opened refuses the review, as one
+                # that could not be listed did: its files must not read as
+                # deleted; one swapped for a link or a file while the
+                # review walks is a workspace that changed under review
                 try:
-                    hashes[rel] = manifest_hash_file(entry.path)
-                except OSError:
+                    inner = os.open(name, directory | nofollow, dir_fd=folder)
+                except OSError as exc:
+                    raise unreadable(rel, exc) from exc
+                try:
+                    walk(inner, rel, depth + 1)
+                finally:
+                    os.close(inner)
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                skipped["special"] += 1
+                continue
+            if len(hashes) >= max_entries:
+                raise WorkspaceDiffBoundExceeded(
+                    f"Workspace exceeds the diff entry bound "
+                    f"({max_entries} files); the review refuses rather "
+                    f"than truncate"
+                )
+            try:
+                fd = os.open(name, os.O_RDONLY | nofollow | getattr(os, "O_CLOEXEC", 0), dir_fd=folder)
+            except FileNotFoundError:
+                continue  # gone since its look: absent, as it is
+            except OSError as exc:
+                raise unreadable(rel, exc) from exc
+            try:
+                held = os.fstat(fd)
+                if not stat.S_ISREG(held.st_mode):
+                    skipped["special"] += 1
                     continue
-                sizes[rel] = size
+                hashes[rel] = _hash_fd(fd)
+                sizes[rel] = held.st_size
+            except OSError as exc:
+                raise unreadable(rel, exc) from exc
+            finally:
+                os.close(fd)
+
+    top = os.open(root_real, directory)
+    try:
+        walk(top, "", 0)
+    finally:
+        os.close(top)
+    skipped_symlinks = skipped["symlinks"]
+    skipped_special = skipped["special"]
     return hashes, sizes, skipped_symlinks, skipped_special
 
 
@@ -641,9 +719,9 @@ def generate_workspace_diff(
 ) -> WorkspaceDiff:
     """Classify the live workspace against the recorded baseline (6.1).
 
-    Recomputes per-file hashes over the live workspace
-    (``manifest_hash_file``, the recompute function the status note
-    names) and compares them against the ``WorkspaceManifests`` baseline:
+    Recomputes per-file hashes over the live workspace (the
+    ``manifest_hash_file`` digest, taken through descriptors by
+    ``_walk_workspace_hashes``) and compares them against the ``WorkspaceManifests`` baseline:
     a live file absent from the baseline is "added", a hash mismatch is
     "modified", a baseline entry absent from the live tree is "deleted";
     matching hashes count as unchanged (uploaded-then-untouched files diff
@@ -790,8 +868,16 @@ def _ensure_safe_parent(target_root: str, rel: str) -> tuple[str | None, str]:
     return None, dest
 
 
-def _write_file_into_target(src: str, dest: str, mode: int) -> int:
-    """Stream a workspace file onto ``dest`` via temp-file-plus-rename.
+def _write_file_into_target(
+    src_fd: int, dest: str, mode: int, expected_hash: str = ""
+) -> int:
+    """Stream the workspace file open on ``src_fd`` onto ``dest`` via
+    temp-file-plus-rename.
+
+    The bytes are hashed as they are written: when ``expected_hash`` -- the
+    file's hash in the diff the human reviewed -- is given and the bytes
+    differ, nothing is moved over ``dest`` (``OSError``): what is written is
+    exactly what was reviewed, or nothing.
 
     The temp file is created in the SAME directory as ``dest`` with
     ``O_CREAT|O_EXCL|O_NOFOLLOW`` (its creation can never be redirected
@@ -807,19 +893,28 @@ def _write_file_into_target(src: str, dest: str, mode: int) -> int:
     fd = os.open(
         tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY | os.O_NOFOLLOW, 0o600
     )
+    import hashlib
+
+    digest = hashlib.sha256()
     written = 0
     try:
         try:
-            with open(src, "rb") as fin:
-                while True:
-                    chunk = fin.read(_APPLY_CHUNK_BYTES)
-                    if not chunk:
-                        break
-                    os.write(fd, chunk)
-                    written += len(chunk)
+            while True:
+                chunk = os.pread(src_fd, _APPLY_CHUNK_BYTES, written)
+                if not chunk:
+                    break
+                view = memoryview(chunk)
+                while view:
+                    view = view[os.write(fd, view):]
+                digest.update(chunk)
+                written += len(chunk)
             os.fchmod(fd, mode)
         finally:
             os.close(fd)
+        if expected_hash and digest.hexdigest() != expected_hash:
+            raise OSError(
+                "the workspace file changed since the reviewed diff: not written"
+            )
         os.replace(tmp, dest)
     except BaseException:
         try:
@@ -1034,7 +1129,7 @@ def apply_workspace_changes(
             continue
 
         # added/modified: stream the workspace source over a same-dir temp.
-        if _validate_sandbox_path is None:
+        if _validate_sandbox_path is None or _open_beneath is None:
             refused.append({
                 "path": rel,
                 "error": "workspace path validation unavailable",
@@ -1046,7 +1141,17 @@ def apply_workspace_changes(
             )
             continue
         valid, src, err = _validate_sandbox_path(workspace, rel)
-        if not valid or not os.path.isfile(src):
+        src_fd = None
+        if valid:
+            # The source is opened once beneath the workspace through no
+            # link, as an export reads its own; what is written is what
+            # that descriptor holds
+            root_real = os.path.realpath(workspace)
+            try:
+                src_fd = _open_beneath(root_real, os.path.relpath(src, root_real))
+            except OSError as exc:
+                err = _why_not_read(exc).lower() if _why_not_read else str(exc)
+        if src_fd is None:
             detail = err or "not a regular file"
             refused.append(
                 {"path": rel, "error": f"workspace source invalid: {detail}"}
@@ -1056,10 +1161,14 @@ def apply_workspace_changes(
             )
             continue
         try:
-            src_mode = os.lstat(src).st_mode & 0o777
-            written = _write_file_into_target(
-                src, dest, src_mode or _APPLY_DEFAULT_MODE
-            )
+            try:
+                src_mode = os.fstat(src_fd).st_mode & 0o777
+                written = _write_file_into_target(
+                    src_fd, dest, src_mode or _APPLY_DEFAULT_MODE,
+                    expected_hash=change.current_hash,
+                )
+            finally:
+                os.close(src_fd)
         except OSError as exc:
             refused.append({"path": rel, "error": str(exc)})
             _audit_row("apply_refused", [rel], f"Refused: {exc}")

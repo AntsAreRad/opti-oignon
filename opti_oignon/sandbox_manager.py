@@ -1652,8 +1652,21 @@ def _open_beneath(root: str, relative: str) -> int:
     st = os.fstat(handle)
     if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
         os.close(handle)
-        raise OSError(errno.EPERM, f"not a regular file with one name: {relative}")
+        why = "not a regular file" if not stat.S_ISREG(st.st_mode) else "a second name of a file (a hard link)"
+        raise OSError(errno.EPERM, why, relative)
     return handle
+
+
+def _why_not_read(exc: OSError) -> str:
+    """What a refusal of ``_open_beneath`` says of a path, to whoever asked for it: not there, a link met, not a
+    regular file, a second name of a file, a file that may not be read."""
+    if isinstance(exc, (FileNotFoundError, NotADirectoryError)):
+        return "File not found"
+    if exc.errno == errno.ELOOP:
+        return "A link stands there, not followed"
+    if exc.errno == errno.EPERM and exc.strerror:
+        return exc.strerror[:1].upper() + exc.strerror[1:]
+    return exc.strerror or str(exc)
 
 
 def _workspace_parts(requested: str) -> list[str]:
@@ -1851,6 +1864,70 @@ def _copy_tree_beneath(src: str, root: str, parts: list[str]) -> tuple[int, list
         finally:
             os.close(folder)
     return written, errors
+
+
+# A listing of a workspace goes no deeper than this many folders: its walk holds one descriptor per level.
+_LIST_MAX_DEPTH = 128
+
+
+def _walk_beneath(root: str):
+    """Every entry under the folder ``root`` that is neither a folder nor a link, as (relative path, lstat), in
+    ``os.walk``'s top-down order -- a folder's files by name, then its folders' trees one after the other, the folders
+    taken by name where ``os.walk`` took them as the folder listed them -- walked through descriptors: each folder opened from its parent's descriptor without following a link,
+    each entry read itself (lstat beneath its folder), a link never followed nor listed, a folder that cannot be
+    listed skipped as ``os.walk`` skipped it. Folders deeper than ``_LIST_MAX_DEPTH`` are not walked; the walk logs
+    how many."""
+    directory = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+    nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    cut = 0
+
+    def entries(folder: int) -> tuple[list[tuple[str, os.stat_result]], list[str]]:
+        """A folder's files (anything but a folder or a link) with their lstat, and its folders, by name."""
+        try:
+            with os.scandir(folder) as it:
+                names = sorted(entry.name for entry in it)
+        except OSError:
+            return [], []
+        files, folders = [], []
+        for name in names:
+            try:
+                st = os.stat(name, dir_fd=folder, follow_symlinks=False)
+            except OSError:
+                continue
+            if stat.S_ISDIR(st.st_mode):
+                folders.append(name)
+            elif not stat.S_ISLNK(st.st_mode):
+                files.append((name, st))
+        return files, folders
+
+    def walk(folder: int, here: str, depth: int):
+        nonlocal cut
+        files, folders = entries(folder)
+        for name, st in files:
+            yield os.path.join(here, name) if here else name, st
+        for name in folders:
+            if depth >= _LIST_MAX_DEPTH:
+                cut += 1
+                continue
+            try:
+                inner = os.open(name, directory | nofollow, dir_fd=folder)
+            except OSError:
+                continue
+            try:
+                yield from walk(inner, os.path.join(here, name) if here else name, depth + 1)
+            finally:
+                os.close(inner)
+
+    try:
+        top = os.open(root, directory)
+    except OSError:
+        return
+    try:
+        yield from walk(top, "", 0)
+    finally:
+        os.close(top)
+        if cut:
+            logger.warning("workspace listing left %d folder(s) deeper than %d levels", cut, _LIST_MAX_DEPTH)
 
 
 # ---------------------------------------------------------------------------
@@ -3488,7 +3565,7 @@ class SandboxManager:
         """List all files available for extraction from the sandbox.
 
         Returns a list of dicts with 'path' (relative to workspace),
-        'size', and 'modified' keys.
+        'size', and 'modified' keys. Links are left out, never followed.
 
         Raises:
             ValueError: If session not found or inactive.
@@ -3496,19 +3573,14 @@ class SandboxManager:
         workspace = self._get_active_workspace(session_id)
         files: list[dict[str, Any]] = []
 
-        for root, _dirs, filenames in os.walk(workspace):
-            for fname in sorted(filenames):
-                full = os.path.join(root, fname)
-                rel = os.path.relpath(full, workspace)
-                try:
-                    stat = os.stat(full)
-                    files.append({
-                        "path": rel,
-                        "size": stat.st_size,
-                        "modified": stat.st_mtime,
-                    })
-                except OSError:
-                    continue
+        # Walked through descriptors, each entry read itself: a link is neither followed nor listed (a copy out
+        # refuses it), so no size or time of a file outside the workspace is shown
+        for rel, st in _walk_beneath(workspace):
+            files.append({
+                "path": rel,
+                "size": st.st_size,
+                "modified": st.st_mtime,
+            })
 
         return files
 
@@ -3523,7 +3595,10 @@ class SandboxManager:
         """Preview a file's content from the sandbox.
 
         Returns text content capped at max_bytes for display.
-        Binary files return a truncated hex preview.
+        Binary files return a truncated hex preview. The file is read
+        through one descriptor opened beneath the workspace without
+        following a link; anything but a regular file with one name is
+        refused, saying what it is.
 
         Args:
             session_id: Sandbox session.
@@ -3540,22 +3615,29 @@ class SandboxManager:
         valid, resolved, err = validate_sandbox_path(workspace, path)
         if not valid:
             raise ValueError(f"Invalid path: {err}")
-        if not os.path.isfile(resolved):
-            raise ValueError(f"File not found: {path}")
-
-        file_size = os.path.getsize(resolved)
-        truncated = file_size > max_bytes
-        is_binary = False
+        # The checked path is opened once beneath the workspace, through no link and without waiting, as an export
+        # reads its source; its size and its bytes come from that descriptor
+        root = os.path.realpath(workspace)
+        try:
+            fd = _open_beneath(root, os.path.relpath(resolved, root))
+        except OSError as exc:
+            raise ValueError(f"{_why_not_read(exc)}: {path}") from None
 
         try:
-            with open(resolved, encoding="utf-8") as fh:
-                content = fh.read(max_bytes)
-        except UnicodeDecodeError:
-            is_binary = True
-            with open(resolved, "rb") as fh:
-                raw = fh.read(min(max_bytes, 2048))
-            content = raw.hex()
-            truncated = file_size > 2048
+            file_size = os.fstat(fd).st_size
+            truncated = file_size > max_bytes
+            is_binary = False
+
+            try:
+                with open(fd, encoding="utf-8", closefd=False) as fh:
+                    content = fh.read(max_bytes)
+            except UnicodeDecodeError:
+                is_binary = True
+                raw = os.pread(fd, min(max_bytes, 2048), 0)
+                content = raw.hex()
+                truncated = file_size > 2048
+        finally:
+            os.close(fd)
 
         return {
             "path": path,
