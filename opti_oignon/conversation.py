@@ -911,6 +911,13 @@ def _forget_sandbox_audit(conv_id: str) -> int:
     return held.forget_conversation(conv_id) if held is not None else 0
 
 
+def _forget_code_outputs(conv_id: str) -> int:
+    # Files on disk, kept beyond this process: the module is loaded to ask, whether this process ran code or not.
+    from opti_oignon.code_executor import forget_outputs
+
+    return forget_outputs(conv_id)
+
+
 def _forget_code_sandbox(conv_id: str) -> int:
     held = _in_memory("opti_oignon.code_executor")
     return held.forget_conversation(conv_id) if held is not None else 0
@@ -940,6 +947,7 @@ _FORGETTERS = (
     ("response cache", "opti_oignon.response_cache", _forget_response_cache, True),
     ("facts", "opti_oignon.memory.dedup", _forget_facts, True),
     ("sandbox audit", "opti_oignon.sandbox_manager", _forget_sandbox_audit, True),
+    ("code outputs", "opti_oignon.code_executor", _forget_code_outputs, True),
     ("sync change feed", "opti_oignon.veilid.change_feed", _forget_sync_feed, True),
     ("project links", "opti_oignon.projects", _forget_project_links, False),
     ("artifact cache", "opti_oignon.artifacts", _forget_artifacts, False),

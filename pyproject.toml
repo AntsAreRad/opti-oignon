@@ -1283,6 +1283,13 @@ fail_under = 0
 # tj4 of tests/test_turn_cache_mark_contracts.py, which keeps its other assertions unchanged and holds the first act
 # marking with the call's run, so a later call of a turn takes the turn's marks. It stays in the tree word for word.
 #
+# A deleted conversation's code outputs go with it (block 200). dl6 of tests/test_deletion_leaves_nothing_contracts.py
+# gave its stand-in executor no outputs to forget, which the deletion now asks: it gives way to xo5 of
+# tests/test_code_outputs_forgetting_contracts.py, which keeps its assertions unchanged and gives the stand-in its
+# outputs' forgetting. sk11 of tests/test_skill_forgetting_contracts.py counted five copies of the overwrite: it gives
+# way to xo6, which runs it unchanged on those five and holds the sixth, the code executor's, to the same text. They
+# stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1732,4 +1739,6 @@ addopts = """
     --deselect=tests/test_knowledge_forgetting_contracts.py::test_kb11_the_requests_words_are_three_and_failures_carry_the_inventorys_labels
     --deselect=tests/test_project_forgetting_contracts.py::test_pf13_no_deletion_overwrites_a_file_another_link_names
     --deselect=tests/test_cache_forgetting_contracts.py::test_cf5_an_answer_asked_before_an_emptying_is_never_put
+    --deselect=tests/test_deletion_leaves_nothing_contracts.py::test_dl6_the_code_sandbox_and_the_workspace_binding_let_go
+    --deselect=tests/test_skill_forgetting_contracts.py::test_sk11_the_overwrite_is_one_text_in_its_five_copies
 """

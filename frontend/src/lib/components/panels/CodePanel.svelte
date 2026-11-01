@@ -5,7 +5,7 @@
 -->
 <script lang="ts">
 	import { closePanel } from '$lib/stores/panels';
-	import { messages } from '$lib/stores/conversations';
+	import { activeConversationId, messages } from '$lib/stores/conversations';
 	import { toastError, toastSuccess } from '$lib/stores/notifications';
 	import { executeCode, extractCodeBlocks, resetWorkdir } from '$lib/api/code';
 	import type { CodeBlockInfo, CodeExecuteResponse } from '$lib/types';
@@ -24,7 +24,8 @@
 		executing = true;
 		result = null;
 		try {
-			result = await executeCode({ code, language });
+			// The run's images are kept by the conversation the panel is open on, and go with it.
+			result = await executeCode({ code, language, conv_id: $activeConversationId ?? undefined });
 		} catch (err) {
 			toastError('Code execution failed');
 		} finally {

@@ -25,6 +25,7 @@ Architecture:
 Author: Leon
 """
 
+import hashlib
 import logging
 import os
 import re
@@ -34,6 +35,7 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -80,20 +82,136 @@ _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp", ".pdf"}
 # Script files to exclude from output detection
 _SCRIPT_FILES = {"script.py", "script.R", "script.sh"}
 
-# Stable output directory for images from ephemeral executions
+# Stable output directory for images from ephemeral executions. A run of a
+# conversation copies them into the conversation's own folder (_outputs_of),
+# a run of none into the directory itself; a conversation's deletion removes
+# its folder, and the files at the top, whose conversation is not known
+# (forget_outputs). From then on this process copies out nothing of it.
 _OUTPUT_DIR = None
+_OUTPUTS_LOCK = threading.Lock()
+_FORGOTTEN_OUTPUTS: set[str] = set()
+
+def _output_path() -> str:
+    """Where the stable output directory is, made or not."""
+    if _OUTPUT_DIR is not None and os.path.isdir(_OUTPUT_DIR):
+        return _OUTPUT_DIR
+    try:
+        from .config import DATA_DIR
+        return os.path.join(DATA_DIR, "exec_outputs")
+    except ImportError:
+        return os.path.join(tempfile.gettempdir(), "opti_exec_outputs")
+
 
 def _get_output_dir() -> str:
     """Get or create a stable directory for execution output files."""
     global _OUTPUT_DIR
     if _OUTPUT_DIR is None or not os.path.isdir(_OUTPUT_DIR):
-        try:
-            from .config import DATA_DIR
-            _OUTPUT_DIR = os.path.join(DATA_DIR, "exec_outputs")
-        except ImportError:
-            _OUTPUT_DIR = os.path.join(tempfile.gettempdir(), "opti_exec_outputs")
+        _OUTPUT_DIR = _output_path()
         os.makedirs(_OUTPUT_DIR, exist_ok=True)
     return _OUTPUT_DIR
+
+
+def _outputs_of(conv_id: str | None, root: str | None = None) -> str:
+    """The folder a run's images are copied into, under ``root`` (the output directory, made when not given): its
+    conversation's, named by a digest of the conversation's id (never the id itself as a path), or the output
+    directory itself for a run of no conversation."""
+    root = root if root is not None else _get_output_dir()
+    if not conv_id:
+        return root
+    return os.path.join(root, "c-" + hashlib.sha256(conv_id.encode("utf-8")).hexdigest()[:32])
+
+
+def _overwrite_and_remove(path: Path, said: list | None = None) -> bool:
+    """Overwrite a file's bytes in place, then remove it; whether it was there. A filesystem that writes in place no
+    longer holds them; a copy-on-write filesystem, a snapshot or a backup may. A link is refused, never followed.
+
+    A file another link also names -- a backup made of links, say -- is removed without its overwrite: those bytes
+    are the other copy's too. One this process may not write is made writable first, being the process's own; one
+    that stays unwritable is removed without its overwrite. Each removal without its overwrite is said: in ``said``
+    when it is given, in the log otherwise."""
+    # Never blocks: a FIFO with no reader refuses the open rather than wait for one.
+    nofollow = getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    reason = None
+    try:
+        fd = os.open(path, os.O_WRONLY | nofollow)
+    except FileNotFoundError:
+        return False
+    except PermissionError:
+        try:
+            fd, reason = _made_writable(path, nofollow)
+        except FileNotFoundError:
+            return False
+    if fd is not None:
+        try:
+            held = os.fstat(fd)
+            if not stat.S_ISREG(held.st_mode):
+                reason = "not a regular file"
+            elif held.st_nlink > 1:
+                reason = "other links hold its bytes"
+            else:
+                left = held.st_size
+                block = b"\0" * 65536
+                while left > 0:
+                    left -= os.write(fd, block[:min(len(block), left)])
+                os.fsync(fd)
+        finally:
+            os.close(fd)
+    os.unlink(path)
+    if reason is not None:
+        if said is None:
+            logger.warning("a file removed without its overwrite (%s)", reason)
+        else:
+            said.append(reason)
+    return True
+
+
+def _made_writable(path: Path, nofollow: int) -> tuple:
+    """(a descriptor that writes ``path``, None) once the file is made readable and writable by its owner -- it is
+    this process's own --, or (None, why) when it cannot be; only a regular file no other link names is changed."""
+    try:
+        held = os.lstat(path)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        return None, type(exc).__name__
+    if not stat.S_ISREG(held.st_mode):
+        return None, "not a regular file"
+    if held.st_nlink > 1:
+        return None, "other links hold its bytes"
+    try:
+        os.chmod(path, stat.S_IMODE(held.st_mode) | stat.S_IRUSR | stat.S_IWUSR)
+        return os.open(path, os.O_WRONLY | nofollow), None
+    except OSError as exc:
+        return None, type(exc).__name__
+
+
+def _erase_files(paths: list[str]) -> tuple[int, list[str]]:
+    """Each of ``paths`` overwritten and removed (``_overwrite_and_remove``); the count removed, and each that stays,
+    named. A link is removed, never followed; a folder is emptied the same way, then removed."""
+    removed, stayed = 0, []
+    for path in paths:
+        try:
+            held = os.lstat(path)
+        except FileNotFoundError:
+            continue
+        except OSError as exc:
+            stayed.append(f"{path} ({type(exc).__name__})")
+            continue
+        try:
+            if stat.S_ISDIR(held.st_mode):
+                inner, left = _erase_files([os.path.join(path, name) for name in sorted(os.listdir(path))])
+                removed += inner
+                stayed.extend(left)
+                if not left:
+                    os.rmdir(path)
+            elif stat.S_ISLNK(held.st_mode):
+                os.unlink(path)
+                removed += 1
+            elif _overwrite_and_remove(Path(path)):
+                removed += 1
+        except OSError as exc:
+            stayed.append(f"{path} ({type(exc).__name__})")
+    return removed, stayed
 
 # The user setting that turns code execution on, and its value when it is
 # unset or cannot be read. The settings screen writes it.
@@ -278,8 +396,10 @@ class CodeExecutor:
         """
         with self._sessions_lock:
             session_id = self._persistent_sessions.pop(conv_id, None)
+        if session_id is None:
+            return False  # nothing to destroy: the sandbox manager is not loaded to learn it
         manager = self._manager()
-        if session_id is None or manager is None:
+        if manager is None:
             return False
         self._destroy(manager, session_id)
         logger.info(f"Reset persistent sandbox for {conv_id[:8]}")
@@ -398,7 +518,7 @@ class CodeExecutor:
 
         try:
             result = self._run_in_sandbox(
-                manager, session_id, code, language, timeout, copy_out=not use_persistent,
+                manager, session_id, code, language, timeout, copy_out=not use_persistent, conv_id=conv_id,
             )
         except Exception as e:
             logger.exception(f"Code execution failed: {e}")
@@ -444,13 +564,25 @@ class CodeExecutor:
         return output_paths
 
     @staticmethod
-    def _copy_out(paths: list[str]) -> list[str]:
-        """Copy images out of a sandbox that is about to go.
+    def _copy_out(paths: list[str], conv_id: str | None = None) -> list[str]:
+        """Copy images out of a sandbox that is about to go, into the folder
+        of the run's conversation (``_outputs_of``); nothing of a conversation
+        this process forgot.
 
         Each file is opened without following a link, and copied only while
         it is a regular file with a single name; anything else stays behind.
         """
-        output_dir = _get_output_dir()
+        with _OUTPUTS_LOCK:
+            if conv_id and conv_id in _FORGOTTEN_OUTPUTS:
+                logger.info("Code outputs not copied out: their conversation was deleted")
+                return []
+            output_dir = _outputs_of(conv_id)
+            os.makedirs(output_dir, mode=0o700, exist_ok=True)
+            return CodeExecutor._copy_into(paths, output_dir)
+
+    @staticmethod
+    def _copy_into(paths: list[str], output_dir: str) -> list[str]:
+        """Each regular file of ``paths`` copied into ``output_dir``; the copies' paths."""
         stable_paths = []
         for fpath in paths:
             fname = os.path.basename(fpath)
@@ -558,6 +690,7 @@ class CodeExecutor:
         language: str,
         timeout: int,
         copy_out: bool,
+        conv_id: str | None = None,
     ) -> ExecutionResult:
         """Write the script into the session's workspace and run it there."""
         workspace = manager.get_workspace_path(session_id) or ""
@@ -599,7 +732,7 @@ class CodeExecutor:
         new_files = self._detect_output_files(workspace, files_before)
         if new_files and copy_out:
             # The sandbox goes with this run: copy images to the stable output dir
-            result.output_files = self._copy_out(new_files)
+            result.output_files = self._copy_out(new_files, conv_id)
         elif new_files:
             # Persistent mode: files stay in the conversation's sandbox
             result.output_files = new_files
@@ -776,6 +909,46 @@ def forget_conversation(conversation_id: str) -> int:
     """Destroy a deleted conversation's code sandbox, its scripts and files with it; 1 when it had one. A sandbox that
     could not be destroyed is said (``_destroy``)."""
     return 1 if code_executor.reset_persistent_dir(conversation_id) else 0
+
+
+def forget_outputs(conversation_id: str) -> int:
+    """A deleted conversation's code outputs gone: its folder, and every file at the top of the output directory,
+    whose conversation is not known -- a run of no conversation's, or one an older version copied out with none kept
+    --, each overwritten, then removed; the count removed. From then on this process copies out nothing of the
+    conversation (``unforget_conversation`` lets it again). Raises when one stays: the deletion is then refused."""
+    with _OUTPUTS_LOCK:
+        _FORGOTTEN_OUTPUTS.add(conversation_id)
+        try:
+            root = _output_path()
+            if not os.path.isdir(root):
+                return 0
+            top = [entry.path for entry in os.scandir(root) if not entry.is_dir(follow_symlinks=False)]
+            removed, stayed = _erase_files([_outputs_of(conversation_id, root), *top])
+            if stayed:
+                raise OSError(f"code outputs that stayed: {', '.join(stayed)}")
+        except BaseException:
+            # The deletion is refused, and the conversation stays: its runs copy out again.
+            _FORGOTTEN_OUTPUTS.discard(conversation_id)
+            raise
+    return removed
+
+
+def unforget_conversation(conversation_id: str) -> None:
+    """Copy out the conversation's code outputs again: its deletion was refused, and it stays."""
+    with _OUTPUTS_LOCK:
+        _FORGOTTEN_OUTPUTS.discard(conversation_id)
+
+
+def empty_outputs() -> None:
+    """The account wipe: every code output, of every conversation and of none, overwritten and removed. Raises when
+    one stays; the output directory not there holds none, and is not made."""
+    with _OUTPUTS_LOCK:
+        root = _output_path()
+        if not os.path.isdir(root):
+            return
+        _removed, stayed = _erase_files([entry.path for entry in os.scandir(root)])
+    if stayed:
+        raise OSError(f"code outputs that stayed: {', '.join(stayed)}")
 
 
 # Convenience exports

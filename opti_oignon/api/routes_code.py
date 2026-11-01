@@ -10,7 +10,12 @@ import logging
 
 from fastapi import APIRouter, HTTPException
 
-from .deps import CODE_EXECUTOR_AVAILABLE, code_executor
+from .deps import (
+    CODE_EXECUTOR_AVAILABLE,
+    CONVERSATION_AVAILABLE,
+    code_executor,
+    conversation_manager,
+)
 from .schemas import (
     CodeBlockInfo,
     CodeBlocksRequest,
@@ -28,6 +33,21 @@ except Exception:
     _emergency_stop = None
 
 router = APIRouter(prefix="/api/code", tags=["code"])
+
+
+def _held(conv_id: str | None) -> str | None:
+    """``conv_id`` when the conversation store holds that conversation, else None.
+
+    A run is kept by a conversation whose deletion will find it: an id the store does not hold -- the panel left open
+    on a conversation deleted elsewhere, an address typed by hand -- keeps none, and its outputs go at the next
+    deletion. A store that cannot answer holds nothing a run can be kept by.
+    """
+    if not conv_id or not CONVERSATION_AVAILABLE or conversation_manager is None:
+        return None
+    try:
+        return conv_id if conversation_manager.get_conversation(conv_id) is not None else None
+    except Exception:  # noqa: BLE001 - a store that cannot answer holds nothing a run can be kept by
+        return None
 
 
 def _check_available():
@@ -54,7 +74,7 @@ def execute_code(request: CodeExecuteRequest) -> dict:
             code=request.code,
             language=request.language,
             timeout=request.timeout,
-            conv_id=request.conv_id,
+            conv_id=_held(request.conv_id),
         )
         return CodeExecuteResponse(
             success=result.success,

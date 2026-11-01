@@ -3487,6 +3487,41 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] A deleted conversation's code outputs go with it. A code run
+  whose sandbox goes with it copies its new images and PDFs to the code
+  output directory (`data/exec_outputs`), so the answer can show them;
+  they were kept flat, by no conversation: a deleted conversation's charts
+  stayed there for good, and the account wipe did not reach them. Now a
+  run of a conversation copies them into the conversation's own folder,
+  named by a digest of its id (never the id as a path); a run of no
+  conversation, into the directory itself. The code panel says the
+  conversation it is open on, which it never did, and the route keeps a
+  run by that conversation only while the conversation store holds it --
+  an id it does not hold (a panel left open on a conversation deleted
+  elsewhere, an address typed by hand) keeps none; the checks of an
+  answer's code still run for no conversation. A conversation's deletion
+  asks for the outputs before it is committed, as it asks every store that
+  keeps something drawn from the conversation beyond the process, whether
+  this process ran code or not: its folder and every file at the top -- a
+  run of no conversation's, or one an older version left with none kept,
+  which may be the conversation's -- are overwritten, then removed; when
+  they cannot be, the directory unreadable included, the deletion is
+  refused by name, as by every store that cannot forget, and the
+  conversation stays, its runs copying out again -- what was removed
+  before the failure, as with every store asked before a refusal, stays
+  removed. From then on the process copies out nothing of the deleted
+  conversation; a run another process is making for it may still copy out
+  after the deletion. The cost: the outputs of a run of no conversation,
+  the checks' included, last only until the next deletion of any
+  conversation. The account wipe of a single-user install empties the
+  whole directory, and names what stays; on an install of several users it
+  names the outputs, kept by conversation, not by user. A deletion no
+  longer loads the sandbox manager to learn that a conversation had no
+  code sandbox. The files copied out of a sandbox on purpose (`sandbox
+  exports`) are not touched. xo1-xo8 in the new
+  `tests/test_code_outputs_forgetting_contracts.py`; dl6 and sk11 give way
+  to xo5 and xo6.
+
 - [SECURITY] A sandbox workspace in use is never removed by another
   sandbox manager. A manager starting (`reconcile_on_start`, on as
   shipped) removed every `sandbox-*` directory of its workspace base that
