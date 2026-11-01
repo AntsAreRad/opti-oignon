@@ -516,7 +516,9 @@ def list_sessions() -> list:
             for row in rows:
                 sid = row.get("session_id", "")
                 row["has_cloned_baseline"] = bool(
-                    sid and manifests.get_cloned_root(sid)
+                    sid and manifests.get_cloned_root(
+                        sid, row.get("workspace_path", "")
+                    )
                 )
         except Exception:  # pragma: no cover - enrichment must not break
             logger.exception("has_cloned_baseline enrichment failed")
@@ -1103,10 +1105,16 @@ def _record_manifest(
     entries: dict,
     cloned_root: str | None = None,
     cloned_mount: str | None = None,
+    *,
+    session: object,
 ) -> int:
-    """Record baseline-manifest entries; honest no-op when the store is
-    absent (a partial build): copy-in still works, the diff review then simply has
-    no baseline -- the conservative failure mode."""
+    """Record baseline-manifest entries for the workspace of ``session``,
+    the session the route checked before the copy; honest no-op when the
+    store is absent (a partial build): copy-in still works, the diff review
+    then simply has no baseline -- the conservative failure mode. A session
+    destroyed and made again under the id meanwhile has another workspace:
+    its review never reads these entries (the files they name read as
+    "added", or as its own baseline has them)."""
     if not entries:
         return 0
     if not WORKSPACE_BINDING_AVAILABLE or _ws is None:
@@ -1122,6 +1130,7 @@ def _record_manifest(
             entries,
             cloned_root=cloned_root,
             cloned_mount=cloned_mount,
+            workspace=session.workspace_path,
         )
         return len(entries)
     except Exception:  # pragma: no cover - recording must not break copy-in
@@ -1146,7 +1155,7 @@ def upload_workspace_files(
     collisions are refused per file in the 200 response, never overwritten.
     """
     _require_sandbox()
-    _require_owned_session(session_id, current_user)
+    session = _require_owned_session(session_id, current_user)
 
     items = []
     for upload in files:
@@ -1177,7 +1186,9 @@ def upload_workspace_files(
     manifest_entries = {
         w["relative_path"]: w["sha256"] for w in result["written"]
     }
-    manifest_files = _record_manifest(session_id, manifest_entries)
+    manifest_files = _record_manifest(
+        session_id, manifest_entries, session=session
+    )
 
     return SandboxUploadResponse(
         session_id=session_id,
@@ -1234,7 +1245,7 @@ def clone_host_directory(
     target. Refusals are audited as host_clone_refused.
     """
     _require_sandbox()
-    _require_owned_session(session_id, current_user)
+    session = _require_owned_session(session_id, current_user)
 
     def _audit_refusal(detail: str) -> None:
         try:
@@ -1274,6 +1285,7 @@ def clone_host_directory(
         result["manifest"],
         cloned_root=result["cloned_root"],
         cloned_mount=result["dest"],
+        session=session,
     )
 
     return SandboxCloneResponse(

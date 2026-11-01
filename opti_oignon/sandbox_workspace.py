@@ -382,15 +382,24 @@ class WorkspaceManifests:
     - Entries are recorded by the ROUTES after a successful manager
       operation on an active session (the manager computes the hashes on
       the fly during the copy; it never imports this module -- no cycle).
-      The destroy route drops the entry so a reused session id never
-      inherits a stale baseline.
+    - A baseline belongs to the WORKSPACE it was recorded for, not to the
+      session id alone: each session made gets a fresh workspace folder
+      (``mkdtemp``), and a session made again under the id of one destroyed
+      -- by the idle sweep, ``cleanup_all`` or an agent, none of which drops
+      the entry -- reads none of the old one's baseline nor its cloned root
+      (it would list the old files as deleted and default the apply onto
+      the old clone's host folder). Every read and write names the
+      workspace (``workspace``); the entries of the id's other workspaces
+      are dropped once their folder is gone. The destroy route still drops
+      the id's entries.
     """
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._entries: dict[str, dict[str, str]] = {}
-        self._cloned_roots: dict[str, str] = {}
-        self._cloned_mounts: dict[str, str] = {}
+        # Keyed by (session id, workspace path): one baseline per workspace
+        self._entries: dict[tuple[str, str], dict[str, str]] = {}
+        self._cloned_roots: dict[tuple[str, str], str] = {}
+        self._cloned_mounts: dict[tuple[str, str], str] = {}
 
     def record(
         self,
@@ -398,9 +407,14 @@ class WorkspaceManifests:
         entries: dict[str, str],
         cloned_root: str | None = None,
         cloned_mount: str | None = None,
+        *,
+        workspace: str,
     ) -> int:
         """Merge manifest entries for a workspace; returns its new size.
 
+        ``workspace`` is the workspace of the session the copy was asked of
+        (the routes: the session they checked before it): the baseline is
+        that workspace's, never read for another made under the same id.
         ``cloned_root`` is recorded only if none is set yet (write-once).
         ``cloned_mount`` is the clone's WORKSPACE-relative
         destination (e.g. ``src`` for a clone of ``/share/src``), recorded
@@ -410,42 +424,67 @@ class WorkspaceManifests:
         outside the cloned subtree -- a workspace-top-level addition has no
         original under the cloned root.
         """
+        key = (session_id, workspace)
         with self._lock:
-            manifest = self._entries.setdefault(session_id, {})
+            self._drop_gone_locked(session_id, workspace)
+            manifest = self._entries.setdefault(key, {})
             manifest.update(entries)
-            if cloned_root and session_id not in self._cloned_roots:
-                self._cloned_roots[session_id] = cloned_root
+            if cloned_root and key not in self._cloned_roots:
+                self._cloned_roots[key] = cloned_root
                 if cloned_mount:
-                    self._cloned_mounts[session_id] = cloned_mount
+                    self._cloned_mounts[key] = cloned_mount
             return len(manifest)
 
-    def get_manifest(self, session_id: str) -> dict[str, str] | None:
-        """The recorded baseline (a copy), or None when nothing recorded."""
+    def _drop_gone_locked(self, session_id: str, workspace: str) -> None:
+        """Drop the entries of the id's other workspaces whose folder is gone
+        (their sessions ended): never one that still stands, which may be
+        the id's current session while ``workspace`` is an ended one's, nor
+        one that cannot be looked at (kept: not seen gone)."""
+        for key in [k for k in self._entries if k[0] == session_id and k[1] != workspace]:
+            try:
+                os.lstat(key[1])
+                continue
+            except (FileNotFoundError, NotADirectoryError):
+                pass
+            except OSError:
+                continue
+            self._entries.pop(key, None)
+            self._cloned_roots.pop(key, None)
+            self._cloned_mounts.pop(key, None)
+
+    def get_manifest(self, session_id: str, workspace: str) -> dict[str, str] | None:
+        """The baseline recorded for ``workspace`` (a copy), or None when nothing recorded."""
         with self._lock:
-            manifest = self._entries.get(session_id)
+            manifest = self._entries.get((session_id, workspace))
             return dict(manifest) if manifest is not None else None
 
-    def get_cloned_root(self, session_id: str) -> str | None:
-        """The originally-cloned host root (the diff review's implicit target)."""
+    def get_cloned_root(self, session_id: str, workspace: str) -> str | None:
+        """The originally-cloned host root (the diff review's implicit target) of ``workspace``."""
         with self._lock:
-            return self._cloned_roots.get(session_id)
+            return self._cloned_roots.get((session_id, workspace))
 
-    def get_cloned_mount(self, session_id: str) -> str | None:
-        """The clone's workspace-relative destination, if any."""
+    def get_cloned_mount(self, session_id: str, workspace: str) -> str | None:
+        """The clone's workspace-relative destination in ``workspace``, if any."""
         with self._lock:
-            return self._cloned_mounts.get(session_id)
+            return self._cloned_mounts.get((session_id, workspace))
 
     def drop(self, session_id: str) -> None:
-        """Forget a workspace's baseline (called on destroy)."""
+        """Forget the baselines of every workspace of the id (called on destroy)."""
         with self._lock:
-            self._entries.pop(session_id, None)
-            self._cloned_roots.pop(session_id, None)
-            self._cloned_mounts.pop(session_id, None)
+            for key in [k for k in self._entries if k[0] == session_id]:
+                self._entries.pop(key, None)
+            for store in (self._cloned_roots, self._cloned_mounts):
+                for key in [k for k in store if k[0] == session_id]:
+                    store.pop(key, None)
 
     def snapshot(self) -> dict[str, int]:
-        """Per-workspace manifest sizes (UI / tests)."""
+        """Per-session manifest sizes, summed over every workspace of the id
+        still kept, an ended one's among them until it is dropped (tests)."""
         with self._lock:
-            return {sid: len(m) for sid, m in self._entries.items()}
+            sizes: dict[str, int] = {}
+            for (sid, _workspace), manifest in self._entries.items():
+                sizes[sid] = sizes.get(sid, 0) + len(manifest)
+            return sizes
 
 
 _MANIFESTS: WorkspaceManifests | None = None
@@ -759,10 +798,12 @@ def generate_workspace_diff(
     with mgr.in_use(session_id) as session:
         if held is not None and session is not held:
             raise _destroyed_while_reviewed(session_id)
+        # The baseline of the workspace held: never one recorded for
+        # another session made under the id
         store = get_workspace_manifests()
-        baseline = store.get_manifest(session_id)
-        cloned_root = store.get_cloned_root(session_id)
-        cloned_mount = store.get_cloned_mount(session_id)
+        baseline = store.get_manifest(session_id, session.workspace_path)
+        cloned_root = store.get_cloned_root(session_id, session.workspace_path)
+        cloned_mount = store.get_cloned_mount(session_id, session.workspace_path)
         try:
             live_hashes, live_sizes, skipped_symlinks, skipped_special = (
                 _walk_workspace_hashes(session.workspace_path, max_entries)

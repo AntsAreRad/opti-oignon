@@ -41,7 +41,10 @@ actions:
   of roots ($HOME plus configured roots, never /), symlink-safe and
   size-capped, cloning a chosen directory into the workspace.
 
-Every copy-in records a baseline manifest (per-file hashes). The model
+Every copy-in records a baseline manifest (per-file hashes). The baseline
+belongs to the workspace it was recorded for: a workspace made again under
+the name of one that ended (swept when idle, cleaned up, or destroyed)
+starts with none, and no cloned folder to write back to. The model
 cannot reach into the host on its own; copy-in is never model-triggerable.
 
 No copy into a workspace -- an upload, a clone, or the files and project

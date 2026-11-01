@@ -3487,6 +3487,20 @@ package costs.
 
 ### Fixed
 
+- A sandbox made again under the name of one that ended no longer
+  inherits its review baseline. The files recorded when they were copied
+  in, and the folder a clone came from (the apply's default target),
+  were kept by sandbox name, and only the destroy button forgot them: a
+  sandbox swept when idle, cleaned up or destroyed by an agent left
+  them. A sandbox made again under that name -- as the chat's coding
+  agent does after every sweep of its own, or a client that names its
+  sandbox -- had its review list the old sandbox's files as deleted and
+  its apply default onto the old clone's host folder: a deletion
+  confirmed from that review removed host files the new sandbox never
+  held. The baseline now belongs to the workspace folder it was recorded
+  for (each sandbox made gets its own), and the review reads only its
+  own. ob1-ob4 in the new
+  `tests/test_sandbox_review_baseline_owned_contracts.py`.
 - Reviewing a sandbox's changes keeps it from the idle sweep, and a
   review that a destroy overtakes says so. The review (the panel's
   "review changes", the deletion confirmation and the apply's own check)

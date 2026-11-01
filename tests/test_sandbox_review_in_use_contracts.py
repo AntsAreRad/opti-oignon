@@ -58,7 +58,8 @@ def _baseline(ws, sid, workspace):
     for rel, data in (("a.txt", b"rh-a"), ("sub/b.txt", b"rh-b"), ("z.txt", b"rh-z")):
         (workspace / rel).write_bytes(data)
     ws.get_workspace_manifests().record(
-        sid, {rel: ws.manifest_hash_file(str(workspace / rel)) for rel in ("a.txt", "sub/b.txt", "z.txt")})
+        sid, {rel: ws.manifest_hash_file(str(workspace / rel)) for rel in ("a.txt", "sub/b.txt", "z.txt")},
+        workspace=str(workspace))
 
 
 def _changes(answer):
@@ -217,7 +218,7 @@ def test_rh2_a_destroy_during_a_review_says_so(tmp_path):
         # The apply: its session destroyed after its review and another made under its id, which confirms the
         # deletion the review showed and approves the file it added
         sid, workspace, _real = _workspace(manager, "rh2-apply-gates")
-        ws.get_workspace_manifests().record(sid, {"gone.txt": "0" * 64})
+        ws.get_workspace_manifests().record(sid, {"gone.txt": "0" * 64}, workspace=str(workspace))
         (workspace / "d.txt").write_bytes(b"rh-added")
         gates = share / "gates"
         gates.mkdir()
