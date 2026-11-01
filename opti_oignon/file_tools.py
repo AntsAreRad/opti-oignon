@@ -10,9 +10,12 @@ Four sandboxed filesystem tools for LLM agentic execution:
 - sandbox_str_replace: Find-and-replace within a sandbox file
 
 All tools enforce strict path validation: no path traversal, no symlink
-escape, no access outside the sandbox workspace. Every operation goes
-through the SandboxManager, which provides either bwrap kernel isolation
-or (degraded) tempdir isolation with command blocklist.
+escape, no access outside the sandbox workspace. A checked path is then
+reached beneath the workspace one component at a time without following a
+link, so a link the sandbox puts on it after the check is refused, never
+followed. Every operation goes through the SandboxManager, which provides
+either bwrap kernel isolation or (degraded) tempdir isolation with command
+blocklist.
 
 Each tool produces a ToolDefinition compatible with the existing
 tool_registry and tool_executor interfaces.
@@ -21,8 +24,11 @@ Author: Leon
 """
 
 import difflib
+import errno
+import io
 import logging
 import os
+import stat
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +37,7 @@ try:
     from opti_oignon.sandbox_manager import (
         SANDBOX_AVAILABLE,
         SandboxManager,
+        _folder_beneath,
         validate_sandbox_path,
     )
     from opti_oignon.sandbox_manager import (
@@ -41,6 +48,7 @@ except ImportError:
     _default_sandbox_manager = None
     SandboxManager = None
     validate_sandbox_path = None
+    _folder_beneath = None
 
 # Conditional import of tool registry types
 try:
@@ -80,6 +88,165 @@ def _resolve_path(
         return False, "", f"Path rejected: {err}"
 
     return True, resolved, ""
+
+
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+
+# A file made where nothing stood is looked for again this many times when
+# something else is put at its name in between
+_CREATE_TRIES = 3
+
+
+def _checked_parts(
+    sandbox_mgr: SandboxManager,
+    session_id: str,
+    resolved: str,
+) -> tuple[str, list[str]]:
+    """The workspace's real path and the components of ``resolved`` -- a path
+    ``_resolve_path`` checked and resolved -- beneath it.
+
+    A tool reaches them one at a time without following a link: the links
+    inside the workspace were resolved at the check (a venv's ``bin/python``,
+    a link the model made), so a link met on the way now was put there after
+    the check, and is refused (``OSError``), never followed.
+    """
+    workspace = sandbox_mgr.get_workspace_path(session_id)
+    if workspace is None:
+        raise OSError(errno.ENOENT, "Session not found or inactive", session_id)
+    root = os.path.realpath(workspace)
+    relative = os.path.relpath(resolved, root)
+    parts = [] if relative == os.curdir else relative.split(os.sep)
+    if os.pardir in parts:
+        raise OSError(errno.EINVAL, "not a path beneath the workspace", resolved)
+    return root, parts
+
+
+def _named(exc: OSError, resolved: str) -> OSError:
+    """``exc`` named after the checked path, as an open by path named it; a
+    link met at the name -- one put there after the check, or a loop the
+    check could not resolve -- says so."""
+    if exc.errno == errno.ELOOP:
+        return OSError(errno.ELOOP, "a link stands there: not followed", resolved)
+    return type(exc)(exc.errno, exc.strerror, resolved)
+
+
+def _open_checked(root: str, parts: list[str], flags: int, resolved: str) -> int:
+    """A descriptor of the entry ``parts`` name under ``root`` (the workspace
+    itself when ``parts`` is empty), opened with ``flags``, reached without
+    following a link and without waiting: a FIFO is never waited on."""
+    try:
+        folder = _folder_beneath(root, parts[:-1])
+        try:
+            return os.open(
+                parts[-1] if parts else os.curdir,
+                flags | _NOFOLLOW | _NONBLOCK | _CLOEXEC,
+                dir_fd=folder,
+            )
+        finally:
+            os.close(folder)
+    except OSError as exc:
+        raise _named(exc, resolved) from exc
+
+
+def _is_folder(root: str, parts: list[str], resolved: str) -> bool:
+    """Whether the checked path names a folder, looked at without reading it
+    (``O_PATH``) and without following a link."""
+    try:
+        fd = _open_checked(root, parts, getattr(os, "O_PATH", os.O_RDONLY), resolved)
+    except OSError:
+        return False
+    try:
+        return stat.S_ISDIR(os.fstat(fd).st_mode)
+    finally:
+        os.close(fd)
+
+
+def _read_at_most(fd: int, limit: int) -> bytes:
+    """At most ``limit`` bytes read from ``fd``."""
+    chunks = []
+    while limit > 0:
+        chunk = os.read(fd, min(limit, 1 << 16))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        limit -= len(chunk)
+    return b"".join(chunks)
+
+
+def _write_all(fd: int, data: bytes) -> None:
+    """Write every byte of ``data`` to ``fd``."""
+    view = memoryview(data)
+    while view:
+        view = view[os.write(fd, view):]
+
+
+def _write_checked(root: str, parts: list[str], data: bytes, resolved: str) -> None:
+    """Write ``data`` as the file ``parts`` name under ``root``.
+
+    Its folders are reached without following a link, a missing one made
+    beneath its parent, as ``makedirs`` made it. A regular file at the name is
+    written in place, truncated first; where nothing stands, the file is made
+    (``O_EXCL``, mode 0o666 under the umask, as ``open(..., "w")`` made it).
+    Anything else at the name -- a link put there after the check, a FIFO, a
+    folder -- is refused (``OSError``), never written through nor waited on.
+    """
+    if not parts:
+        raise IsADirectoryError(errno.EISDIR, os.strerror(errno.EISDIR), resolved)
+    try:
+        folder = _folder_beneath(root, parts[:-1], make=True)
+        try:
+            for _ in range(_CREATE_TRIES):
+                try:
+                    fd = os.open(
+                        parts[-1],
+                        os.O_WRONLY | _NOFOLLOW | _NONBLOCK | _CLOEXEC,
+                        dir_fd=folder,
+                    )
+                    break
+                except FileNotFoundError:
+                    pass
+                try:
+                    fd = os.open(
+                        parts[-1],
+                        os.O_WRONLY | os.O_CREAT | os.O_EXCL | _NOFOLLOW | _CLOEXEC,
+                        0o666,
+                        dir_fd=folder,
+                    )
+                    break
+                except FileExistsError:
+                    continue
+            else:
+                raise FileExistsError(
+                    errno.EEXIST, "the name keeps changing while it is written"
+                )
+        finally:
+            os.close(folder)
+    except OSError as exc:
+        if exc.errno == errno.ENXIO:
+            # A FIFO or a socket at the name, refused without waiting
+            raise OSError(errno.ENXIO, "not a regular file", resolved) from exc
+        raise _named(exc, resolved) from exc
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            raise OSError(errno.EINVAL, "not a regular file", resolved)
+        os.ftruncate(fd, 0)
+        _write_all(fd, data)
+    finally:
+        os.close(fd)
+
+
+def _rewrite(fd: int, writable: bool, resolved: str, text: str) -> None:
+    """Write ``text`` over the file open on ``fd``: the file written is the file
+    read. Encoded before the file is cut, so a text that cannot be written
+    leaves it whole."""
+    data = text.encode("utf-8")
+    if not writable:
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), resolved)
+    os.lseek(fd, 0, os.SEEK_SET)
+    os.ftruncate(fd, 0)
+    _write_all(fd, data)
 
 
 # ---------------------------------------------------------------------------
@@ -182,31 +349,59 @@ def _handle_sandbox_view(
     if not ok:
         return f"Error: {err}"
 
-    # Directory listing
-    if os.path.isdir(resolved):
-        return _list_directory(resolved, mgr.get_workspace_path(session_id))
-
-    # File reading
-    if not os.path.isfile(resolved):
+    # The entry is opened once, without following a link; what it is, its
+    # size and its content all come from that descriptor
+    try:
+        root, parts = _checked_parts(mgr, session_id, resolved)
+        fd = _open_checked(root, parts, os.O_RDONLY, resolved)
+    except (FileNotFoundError, NotADirectoryError):
         return f"Error: Path not found: {path}"
-
-    # Size check
-    try:
-        size = os.path.getsize(resolved)
     except OSError as exc:
+        if exc.errno == errno.ENXIO:
+            return f"Error: Path not found: {path}"
+        if isinstance(exc, PermissionError) and _is_folder(root, parts, resolved):
+            return f"Error listing directory: {exc}"
         return f"Error reading file: {exc}"
 
-    if size > MAX_VIEW_SIZE:
-        return (
-            f"Error: File too large ({size:,} bytes, "
-            f"max {MAX_VIEW_SIZE:,} bytes)"
-        )
-
     try:
-        with open(resolved, encoding="utf-8", errors="replace") as fh:
-            lines = fh.readlines()
-    except OSError as exc:
-        return f"Error reading file: {exc}"
+        st = os.fstat(fd)
+
+        # Directory listing
+        if stat.S_ISDIR(st.st_mode):
+            return _list_directory(
+                fd, resolved, mgr.get_workspace_path(session_id) or root
+            )
+
+        # File reading
+        if not stat.S_ISREG(st.st_mode):
+            return f"Error: Path not found: {path}"
+
+        # Size check
+        size = st.st_size
+        if size > MAX_VIEW_SIZE:
+            return (
+                f"Error: File too large ({size:,} bytes, "
+                f"max {MAX_VIEW_SIZE:,} bytes)"
+            )
+
+        # Never more than the cap is read: a file that grew since its size
+        # was taken is refused as too large
+        try:
+            data = _read_at_most(fd, MAX_VIEW_SIZE + 1)
+            if len(data) > MAX_VIEW_SIZE:
+                size = max(os.fstat(fd).st_size, len(data))
+                return (
+                    f"Error: File too large ({size:,} bytes, "
+                    f"max {MAX_VIEW_SIZE:,} bytes)"
+                )
+        except OSError as exc:
+            return f"Error reading file: {exc}"
+    finally:
+        os.close(fd)
+
+    lines = io.TextIOWrapper(
+        io.BytesIO(data), encoding="utf-8", errors="replace"
+    ).readlines()
 
     total = len(lines)
 
@@ -237,10 +432,16 @@ def _handle_sandbox_view(
     return header + "\n" + "\n".join(numbered)
 
 
-def _list_directory(dir_path: str, workspace_root: str) -> str:
-    """List directory contents within sandbox."""
+def _list_directory(folder: int, dir_path: str, workspace_root: str) -> str:
+    """List directory contents within sandbox.
+
+    The folder is read through ``folder``, a descriptor of ``dir_path``, and
+    each entry's kind and size come from the entry itself, never through a
+    link: a link shows as ``[LINK]``, whatever it points at.
+    """
     try:
-        entries = sorted(os.listdir(dir_path))
+        with os.scandir(folder) as it:
+            entries = sorted(it, key=lambda entry: entry.name)
     except OSError as exc:
         return f"Error listing directory: {exc}"
 
@@ -250,17 +451,17 @@ def _list_directory(dir_path: str, workspace_root: str) -> str:
 
     lines = []
     for entry in entries[:200]:  # Cap at 200 entries
-        full = os.path.join(dir_path, entry)
-        if os.path.isdir(full):
-            lines.append(f"  [DIR]  {entry}/")
-        elif os.path.islink(full):
-            lines.append(f"  [LINK] {entry}")
+        try:
+            st = entry.stat(follow_symlinks=False)
+        except OSError:
+            lines.append(f"  [FILE] {entry.name}")
+            continue
+        if stat.S_ISLNK(st.st_mode):
+            lines.append(f"  [LINK] {entry.name}")
+        elif stat.S_ISDIR(st.st_mode):
+            lines.append(f"  [DIR]  {entry.name}/")
         else:
-            try:
-                size = os.path.getsize(full)
-                lines.append(f"  [FILE] {entry} ({size:,} bytes)")
-            except OSError:
-                lines.append(f"  [FILE] {entry}")
+            lines.append(f"  [FILE] {entry.name} ({st.st_size:,} bytes)")
 
     rel = os.path.relpath(dir_path, workspace_root)
     header = f"Directory: /workspace/{rel} ({len(entries)} entries)"
@@ -282,7 +483,9 @@ def _handle_sandbox_create_file(
     """Create or overwrite a file within the sandbox workspace.
 
     Parent directories are created automatically. The path must stay
-    within the sandbox workspace.
+    within the sandbox workspace. The file and its folders are reached
+    without following a link: a link put on the checked path after the
+    check is refused, never written through.
 
     Args:
         session_id: Active sandbox session ID.
@@ -301,14 +504,18 @@ def _handle_sandbox_create_file(
         return f"Error: {err}"
 
     # Size check
-    content_bytes = len(content.encode("utf-8"))
+    try:
+        data = content.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        return f"Error writing file: {exc}"
+    content_bytes = len(data)
     if content_bytes > MAX_CREATE_SIZE:
         return (
             f"Error: Content too large ({content_bytes:,} bytes, "
             f"max {MAX_CREATE_SIZE:,} bytes)"
         )
 
-    # Create parent directories
+    # Validate the parent; its directories are created as the file is written
     parent = os.path.dirname(resolved)
     if parent:
         workspace = mgr.get_workspace_path(session_id)
@@ -318,11 +525,10 @@ def _handle_sandbox_create_file(
         )
         if not parent_valid:
             return f"Error: Parent directory path rejected: {parent_err}"
-        os.makedirs(parent, exist_ok=True)
 
     try:
-        with open(resolved, "w", encoding="utf-8") as fh:
-            fh.write(content)
+        root, parts = _checked_parts(mgr, session_id, resolved)
+        _write_checked(root, parts, data, resolved)
     except OSError as exc:
         return f"Error writing file: {exc}"
 
@@ -458,14 +664,15 @@ def _find_recovery_window(content_lines, old_lines):
     return ("miss", 0, None, None)
 
 
-def _attempt_recovery(resolved: str, content: str, old_str: str, new_str: str):
+def _attempt_recovery(rewrite, content: str, old_str: str, new_str: str):
     """Run the recovery chain and, on a hit, perform the edit.
 
     Returns the final message (the strategy-naming success or the K-regions
     error) or ``None`` on a clean miss -- the caller then appends the
     structured hint to the unchanged not-found message. The recovered edit
-    flows through the same file write as any edit (and, at the session
-    layer, the same diagnostics-after-write and the same copy-out review).
+    flows through the same file write as any edit, ``rewrite`` (and, at the
+    session layer, the same diagnostics-after-write and the same copy-out
+    review).
     """
     content_lines = content.split("\n")
     old_lines = old_str.split("\n")
@@ -492,9 +699,8 @@ def _attempt_recovery(resolved: str, content: str, old_str: str, new_str: str):
         content_lines[:start] + repl_lines + content_lines[start + len(old_lines):]
     )
     try:
-        with open(resolved, "w", encoding="utf-8") as fh:
-            fh.write(new_content)
-    except OSError as exc:
+        rewrite(new_content)
+    except (OSError, UnicodeEncodeError) as exc:
         return f"Error writing file: {exc}"
     return f"Replaced (matched via {strategy} normalization)."
 
@@ -540,6 +746,8 @@ def _handle_sandbox_str_replace(
 
     The old_str must appear exactly once in the file (safety: prevents
     accidental mass replacements). Use new_str="" to delete the match.
+    The file is opened once, without following a link, and read and
+    rewritten through that descriptor: the file written is the file read.
 
     Args:
         session_id: Active sandbox session ID.
@@ -559,15 +767,50 @@ def _handle_sandbox_str_replace(
     if not ok:
         return f"Error: {err}"
 
-    if not os.path.isfile(resolved):
+    # Opened for writing too, or for reading only when its owner may not
+    # write it: the edit then fails at its write, as it did
+    writable = True
+    try:
+        root, parts = _checked_parts(mgr, session_id, resolved)
+        try:
+            fd = _open_checked(root, parts, os.O_RDWR, resolved)
+        except PermissionError:
+            writable = False
+            fd = _open_checked(root, parts, os.O_RDONLY, resolved)
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError):
         return f"Error: File not found: {path}"
+    except OSError as exc:
+        if exc.errno == errno.ENXIO:
+            return f"Error: File not found: {path}"
+        return f"Error reading file: {exc}"
 
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return f"Error: File not found: {path}"
+        return _replace_in(fd, writable, resolved, path, old_str, new_str)
+    finally:
+        os.close(fd)
+
+
+def _replace_in(
+    fd: int,
+    writable: bool,
+    resolved: str,
+    path: str,
+    old_str: str,
+    new_str: str,
+) -> str:
+    """str_replace on the file open on ``fd``: read, matched and rewritten
+    through that one descriptor."""
     if not old_str:
         return "Error: old_str cannot be empty"
 
+    def rewrite(text: str) -> None:
+        _rewrite(fd, writable, resolved, text)
+
     # Read file
     try:
-        with open(resolved, encoding="utf-8", errors="replace") as fh:
+        with open(fd, encoding="utf-8", errors="replace", closefd=False) as fh:
             content = fh.read()
     except OSError as exc:
         return f"Error reading file: {exc}"
@@ -578,7 +821,7 @@ def _handle_sandbox_str_replace(
         # Exact match failed -- run the conservative
         # recovery chain; on a clean miss, append the structured hint to the
         # unchanged not-found message so the next attempt is informed.
-        recovered = _attempt_recovery(resolved, content, old_str, new_str)
+        recovered = _attempt_recovery(rewrite, content, old_str, new_str)
         if recovered is not None:
             return recovered
         hint = _miss_hint(content.split("\n"), old_str)
@@ -601,9 +844,8 @@ def _handle_sandbox_str_replace(
 
     # Write back
     try:
-        with open(resolved, "w", encoding="utf-8") as fh:
-            fh.write(new_content)
-    except OSError as exc:
+        rewrite(new_content)
+    except (OSError, UnicodeEncodeError) as exc:
         return f"Error writing file: {exc}"
 
     if new_str:

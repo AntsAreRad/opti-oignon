@@ -26,11 +26,13 @@ Usage in the coding_agent:
 Author: Leon
 """
 
+import errno
 import fnmatch
 import logging
 import os
 import re
 import shlex
+import stat
 import uuid
 from pathlib import Path
 from typing import Any
@@ -103,6 +105,10 @@ LS_MAX_ENTRIES_CAP = 1000
 # Files larger than this are skipped by grep (the view 1 MiB posture).
 MAX_GREP_FILE_SIZE = 1024 * 1024
 
+# grep searches no deeper than this many folders below its target: its walk
+# holds one descriptor per level, and says how many folders it left.
+GREP_MAX_DEPTH = 128
+
 # Null-byte binary sniff window: a NUL anywhere in the first chunk marks the
 # file binary and grep skips it.
 _BINARY_SNIFF_BYTES = 8192
@@ -170,13 +176,211 @@ def _resolve_workspace_path(
     return True, workspace, resolved, ""
 
 
-def _is_binary_file(abs_path: str) -> bool:
-    """Null-byte sniff: True when the first chunk contains a NUL byte."""
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_NONBLOCK = getattr(os, "O_NONBLOCK", 0)
+_CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+_PATH = getattr(os, "O_PATH", os.O_RDONLY)
+
+
+def _open_resolved(workspace: str, resolved: str, flags: int) -> int:
+    """A descriptor of ``resolved`` -- a path ``_resolve_workspace_path``
+    checked and resolved -- opened with ``flags`` without waiting (a FIFO is
+    never waited on).
+
+    The path is reached beneath the workspace one component at a time
+    without following a link, as the file tools reach theirs: the links
+    inside the workspace were resolved at the check, so a link met on the way
+    now was put there after it, and is refused (``OSError``), never followed.
+    """
+    root = os.path.realpath(workspace)
+    relative = os.path.relpath(resolved, root)
+    parts = [] if relative == os.curdir else relative.split(os.sep)
+    if os.pardir in parts:
+        raise OSError(errno.EINVAL, "not a path beneath the workspace", resolved)
     try:
-        with open(abs_path, "rb") as fh:
-            return b"\x00" in fh.read(_BINARY_SNIFF_BYTES)
+        folder = os.open(root, _PATH | _DIRECTORY | _CLOEXEC)
+        try:
+            for part in parts[:-1]:
+                inner = os.open(part, _PATH | _DIRECTORY | _NOFOLLOW | _CLOEXEC, dir_fd=folder)
+                os.close(folder)
+                folder = inner
+            return os.open(
+                parts[-1] if parts else os.curdir,
+                flags | _NOFOLLOW | _NONBLOCK | _CLOEXEC,
+                dir_fd=folder,
+            )
+        finally:
+            os.close(folder)
+    except OSError as exc:
+        raise _named(exc, resolved) from exc
+
+
+def _named(exc: OSError, resolved: str) -> OSError:
+    """``exc`` named after the checked path, as an open by path named it; a
+    link met at the name says so."""
+    if exc.errno == errno.ELOOP:
+        return OSError(errno.ELOOP, "a link stands there: not followed", resolved)
+    return type(exc)(exc.errno, exc.strerror, resolved)
+
+
+def _read_fd(fd: int, limit: int | None) -> bytes:
+    """The bytes of the regular file open on ``fd``, at most ``limit`` of
+    them; anything but a regular file is refused (``OSError``)."""
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        raise OSError(errno.EINVAL, "not a regular file")
+    chunks = []
+    left = limit
+    while left is None or left > 0:
+        chunk = os.read(fd, 1 << 16 if left is None else min(left, 1 << 16))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        if left is not None:
+            left -= len(chunk)
+    return b"".join(chunks)
+
+
+def _read_resolved(workspace: str, resolved: str, limit: int | None = None) -> bytes:
+    """The bytes of the regular file at the checked path ``resolved``, at most
+    ``limit`` of them, read through one descriptor opened beneath the
+    workspace (``_open_resolved``); anything but a regular file is refused
+    (``OSError``)."""
+    fd = _open_resolved(workspace, resolved, os.O_RDONLY)
+    try:
+        return _read_fd(fd, limit)
+    finally:
+        os.close(fd)
+
+
+def _listing(folder: int) -> list[tuple[str, str, int]]:
+    """The entries of the folder open on ``folder`` as (sort key, name,
+    mode), sorted by key, each entry read itself without following a link
+    (lstat beneath the folder's descriptor); links are left out. A folder's
+    key ends with a slash, so a depth-first walk meets the files in the order
+    of their paths. An entry whose status cannot be read keeps mode 0, unless
+    the listing saw a folder there; a folder that cannot be listed has no
+    entries, as ``os.walk`` read it."""
+    try:
+        with os.scandir(folder) as it:
+            seen = [(entry.name, entry.is_dir(follow_symlinks=False)) for entry in it]
     except OSError:
-        return True  # unreadable counts as skipped, never as a crash
+        return []
+    out = []
+    for name, seen_folder in seen:
+        try:
+            mode = os.stat(name, dir_fd=folder, follow_symlinks=False).st_mode
+        except OSError:
+            if seen_folder:
+                continue
+            mode = 0
+        if stat.S_ISLNK(mode):
+            continue  # symlinks are skipped in every walk
+        out.append((name + "/" if stat.S_ISDIR(mode) else name, name, mode))
+    out.sort()
+    return out
+
+
+def _grep_files(workspace: str, resolved: str, glob_filter: str, cut: dict[str, int]):
+    """What grep scans at the checked path ``resolved``, as (relpath, bytes)
+    in the order of their paths -- the bytes at most one past the size cap,
+    or None for a file that could not be read -- or None when the path is not
+    there.
+
+    The target is looked at without being opened for reading (``O_PATH``),
+    so a FIFO named as the target is never opened. A file target yields
+    itself; a folder is walked depth-first, beneath the workspace through no
+    link: each folder opened from its parent's descriptor, each entry read
+    itself, each regular file read from its folder's descriptor, a FIFO or
+    any other special file never opened (counted as skipped), at most
+    ``GREP_MAX_DEPTH`` folders deep (``cut["folders"]`` counts the folders
+    left); an optional fnmatch filter applies to the workspace-relative path.
+    """
+    try:
+        fd = _open_resolved(workspace, resolved, _PATH)
+        try:
+            mode = os.fstat(fd).st_mode
+        finally:
+            os.close(fd)
+    except OSError:
+        return None
+    if stat.S_ISREG(mode):
+        return _grep_target_file(workspace, resolved)
+    if stat.S_ISDIR(mode):
+        return _grep_walk(workspace, resolved, glob_filter, cut)
+    return None
+
+
+def _grep_target_file(workspace: str, resolved: str):
+    """The file grep was pointed at, as ``_grep_files`` yields it."""
+    try:
+        data = _read_resolved(workspace, resolved, MAX_GREP_FILE_SIZE + 1)
+    except OSError:
+        data = None
+    yield os.path.relpath(resolved, workspace), data
+
+
+def _grep_walk(workspace: str, resolved: str, glob_filter: str, cut: dict[str, int]):
+    """The files under the folder grep was pointed at, as ``_grep_files``
+    yields them."""
+    try:
+        top = _open_resolved(workspace, resolved, os.O_RDONLY | _DIRECTORY)
+    except OSError:
+        return  # a folder that cannot be listed is skipped, as os.walk skipped it
+    # (descriptor, path, entries left, depth) of each folder on the current path
+    stack = [(top, resolved, iter(_listing(top)), 0)]
+    try:
+        while stack:
+            folder, here, rest, depth = stack[-1]
+            item = next(rest, None)
+            if item is None:
+                stack.pop()
+                os.close(folder)
+                continue
+            _key, name, mode = item
+            full = os.path.join(here, name)
+            if stat.S_ISDIR(mode):
+                if depth >= GREP_MAX_DEPTH:
+                    cut["folders"] += 1
+                    continue
+                try:
+                    inner = os.open(
+                        name,
+                        os.O_RDONLY | _DIRECTORY | _NOFOLLOW | _NONBLOCK | _CLOEXEC,
+                        dir_fd=folder,
+                    )
+                except OSError:
+                    continue
+                stack.append((inner, full, iter(_listing(inner)), depth + 1))
+                continue
+            rel = os.path.relpath(full, workspace)
+            if glob_filter and not fnmatch.fnmatch(rel, glob_filter):
+                continue
+            data = None
+            if stat.S_ISREG(mode):
+                try:
+                    data = _read_beneath(folder, name, MAX_GREP_FILE_SIZE + 1)
+                except OSError:
+                    pass
+            yield rel, data
+    finally:
+        for folder, _here, _rest, _depth in stack:
+            os.close(folder)
+
+
+def _read_beneath(folder: int, name: str, limit: int) -> bytes:
+    """At most ``limit`` bytes of the regular file ``name`` in the folder open
+    on ``folder``, opened without following a link and without waiting."""
+    fd = os.open(name, os.O_RDONLY | _NOFOLLOW | _NONBLOCK | _CLOEXEC, dir_fd=folder)
+    try:
+        return _read_fd(fd, limit)
+    finally:
+        os.close(fd)
+
+
+def _is_binary(data: bytes) -> bool:
+    """Null-byte sniff: True when the first chunk contains a NUL byte."""
+    return b"\x00" in data[:_BINARY_SNIFF_BYTES]
 
 
 def _clamp(value: int, lo: int, hi: int) -> int:
@@ -681,8 +885,11 @@ class SandboxToolSession:
     # -----------------------------------------------------------------
     # Read-only workspace tools: grep, glob, ls.
     # Trusted host-side reads on the view precedent: path-confined via
-    # validate_sandbox_path, active session required, deterministic sorted
-    # output, truncated flags, null-byte binary sniff, 1 MiB skip.
+    # validate_sandbox_path, then reached beneath the workspace through no
+    # link (_open_resolved; glob's pattern walk still follows a link inside
+    # the workspace, its results are reached so), active session required,
+    # deterministic sorted output, truncated flags, null-byte binary sniff,
+    # 1 MiB skip.
     # -----------------------------------------------------------------
 
     def grep(
@@ -729,7 +936,8 @@ class SandboxToolSession:
                 hay = line if case_sensitive else line.casefold()
                 return needle in hay
 
-        files = self._grep_candidates(workspace, resolved, glob)
+        cut = {"folders": 0}
+        files = _grep_files(workspace, resolved, glob, cut)
         if files is None:
             return f"Error: Path not found: {path}"
 
@@ -738,45 +946,41 @@ class SandboxToolSession:
         skipped = 0
         truncated = False
         count = 0
-        for rel, abs_path in files:
-            if truncated:
-                break
-            try:
-                size = os.path.getsize(abs_path)
-            except OSError:
-                skipped += 1
-                continue
-            if size > MAX_GREP_FILE_SIZE or _is_binary_file(abs_path):
-                skipped += 1
-                continue
-            try:
-                with open(abs_path, encoding="utf-8", errors="replace") as fh:
-                    lines = fh.read().splitlines()
-            except OSError:
-                skipped += 1
-                continue
-            for idx, line in enumerate(lines):
-                if not matches(line):
-                    continue
-                if count >= max_results:
-                    truncated = True
+        try:
+            for rel, data in files:
+                if truncated:
                     break
-                count += 1
-                matched_files.add(rel)
-                match_lines.append(f"{rel}:{idx + 1}: {line}")
-                if context_lines:
-                    lo = max(0, idx - context_lines)
-                    hi = min(len(lines), idx + 1 + context_lines)
-                    for c in range(lo, hi):
-                        if c == idx:
-                            continue
-                        match_lines.append(f"  {c + 1}| {lines[c]}")
-
+                # Read beneath the workspace through no link, never more than
+                # the size cap: unreadable counts as skipped, never as a crash
+                if data is None or len(data) > MAX_GREP_FILE_SIZE or _is_binary(data):
+                    skipped += 1
+                    continue
+                lines = data.decode("utf-8", errors="replace").splitlines()
+                for idx, line in enumerate(lines):
+                    if not matches(line):
+                        continue
+                    if count >= max_results:
+                        truncated = True
+                        break
+                    count += 1
+                    matched_files.add(rel)
+                    match_lines.append(f"{rel}:{idx + 1}: {line}")
+                    if context_lines:
+                        lo = max(0, idx - context_lines)
+                        hi = min(len(lines), idx + 1 + context_lines)
+                        for c in range(lo, hi):
+                            if c == idx:
+                                continue
+                            match_lines.append(f"  {c + 1}| {lines[c]}")
+        finally:
+            files.close()  # the walk's descriptors, even when grep stops early
         header = f"{count} match(es) in {len(matched_files)} file(s)"
         if truncated:
             header += " [truncated]"
         if skipped:
             header += f" [{skipped} file(s) skipped: binary or >1 MiB]"
+        if cut["folders"]:
+            header += f" [{cut['folders']} folder(s) deeper than {GREP_MAX_DEPTH} levels not searched]"
         if not match_lines:
             return header
         return header + "\n" + "\n".join(match_lines)
@@ -791,10 +995,11 @@ class SandboxToolSession:
             return f"Error: {err}"
         if not pattern:
             return "Error: glob requires a non-empty 'pattern'"
-        if not os.path.isdir(resolved):
+        try:
+            os.close(_open_resolved(workspace, resolved, _PATH | _DIRECTORY))
+        except OSError:
             return f"Error: Path not found: {path}"
         max_results = _clamp(max_results, 1, GLOB_MAX_RESULTS_CAP)
-        workspace_real = os.path.realpath(workspace)
         try:
             candidates = list(Path(resolved).glob(pattern))
         except (ValueError, NotImplementedError) as exc:
@@ -802,14 +1007,20 @@ class SandboxToolSession:
         entries: list[tuple[float, str]] = []
         for cand in candidates:
             try:
-                if cand.is_symlink() or not cand.is_file():
+                if cand.is_symlink():
                     continue
-                real = os.path.realpath(str(cand))
-                # Defense-in-depth: results must stay inside the workspace.
-                if not real.startswith(workspace_real + os.sep) and real != workspace_real:
+                # A result is a regular file its real path reaches beneath
+                # the workspace through no link: one outside is refused, and
+                # so is one a link was put on after this look
+                fd = _open_resolved(workspace, os.path.realpath(str(cand)), _PATH)
+                try:
+                    st = os.fstat(fd)
+                finally:
+                    os.close(fd)
+                if not stat.S_ISREG(st.st_mode):
                     continue
                 rel = os.path.relpath(str(cand), workspace)
-                entries.append((os.path.getmtime(str(cand)), rel))
+                entries.append((st.st_mtime, rel))
             except OSError:
                 continue
         entries.sort(key=lambda e: (-e[0], e[1]))
@@ -825,31 +1036,43 @@ class SandboxToolSession:
     def ls(self, path: str = ".", *, max_entries: int = 200) -> str:
         """List a workspace directory: 'type size name', dirs first, name-sorted."""
         self._check_active()
-        ok, _workspace, resolved, err = _resolve_workspace_path(
+        ok, workspace, resolved, err = _resolve_workspace_path(
             self._mgr, self._session_id, path
         )
         if not ok:
             return f"Error: {err}"
-        if not os.path.isdir(resolved):
+        # The folder is opened beneath the workspace through no link, listed
+        # through that descriptor, and each entry read itself (lstat)
+        try:
+            folder = _open_resolved(workspace, resolved, os.O_RDONLY | _DIRECTORY)
+        except (FileNotFoundError, NotADirectoryError):
             return f"Error: Path not found: {path}"
+        except OSError as exc:
+            if exc.errno == errno.ELOOP:
+                return f"Error: Path not found: {path}"
+            return f"Error listing directory: {exc}"
         max_entries = _clamp(max_entries, 1, LS_MAX_ENTRIES_CAP)
         try:
-            names = sorted(os.listdir(resolved))
-        except OSError as exc:
-            return f"Error listing directory: {exc}"
-        dirs: list[str] = []
-        files: list[tuple[str, int]] = []
-        for name in names:
-            full = os.path.join(resolved, name)
-            if os.path.islink(full):
-                continue  # symlinks are skipped in every walk
-            if os.path.isdir(full):
-                dirs.append(name)
-            elif os.path.isfile(full):
+            try:
+                with os.scandir(folder) as it:
+                    names = sorted(entry.name for entry in it)
+            except OSError as exc:
+                return f"Error listing directory: {_named(exc, resolved)}"
+            dirs: list[str] = []
+            files: list[tuple[str, int]] = []
+            for name in names:
                 try:
-                    files.append((name, os.path.getsize(full)))
+                    st = os.stat(name, dir_fd=folder, follow_symlinks=False)
                 except OSError:
                     continue
+                if stat.S_ISLNK(st.st_mode):
+                    continue  # symlinks are skipped in every walk
+                if stat.S_ISDIR(st.st_mode):
+                    dirs.append(name)
+                elif stat.S_ISREG(st.st_mode):
+                    files.append((name, st.st_size))
+        finally:
+            os.close(folder)
         lines = [f"dir 0 {name}" for name in dirs]
         lines.extend(f"file {size} {name}" for name, size in files)
         if not lines:
@@ -859,34 +1082,6 @@ class SandboxToolSession:
         if truncated:
             shown.append(f"[truncated at {max_entries} entries]")
         return "\n".join(shown)
-
-    def _grep_candidates(
-        self, workspace: str, resolved: str, glob_filter: str
-    ) -> list[tuple[str, str]] | None:
-        """The deterministic (relpath, abspath) walk grep scans, or None.
-
-        A file target yields itself; a directory is walked depth-first with
-        sorted entries, symlinks never followed and never read; an optional
-        fnmatch filter applies to the workspace-relative path.
-        """
-        if os.path.isfile(resolved):
-            rel = os.path.relpath(resolved, workspace)
-            return [(rel, resolved)]
-        if not os.path.isdir(resolved):
-            return None
-        out: list[tuple[str, str]] = []
-        for root, dirnames, filenames in os.walk(resolved, followlinks=False):
-            dirnames.sort()
-            for name in sorted(filenames):
-                full = os.path.join(root, name)
-                if os.path.islink(full):
-                    continue
-                rel = os.path.relpath(full, workspace)
-                if glob_filter and not fnmatch.fnmatch(rel, glob_filter):
-                    continue
-                out.append((rel, full))
-        out.sort(key=lambda e: e[0])
-        return out
 
     # -----------------------------------------------------------------
     # ToolDefinition generation (for tool_registry)
@@ -1109,10 +1304,12 @@ class SandboxToolSession:
             if not ok or not os.path.isfile(resolved):
                 return ""
             if ext == ".svelte":
-                # Trusted host-side read of the workspace copy; no execution.
+                # Trusted host-side read of the workspace copy, beneath the
+                # workspace through no link; no execution.
                 try:
-                    with open(resolved, encoding="utf-8", errors="replace") as fh:
-                        text = fh.read()
+                    text = _read_resolved(workspace, resolved).decode(
+                        "utf-8", errors="replace"
+                    )
                 except OSError:
                     return ""
                 findings = svelte_tag_findings(text)

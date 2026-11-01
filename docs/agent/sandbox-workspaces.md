@@ -53,10 +53,25 @@ folder written with `..`. An upload or a clone creates each file only
 where nothing stands. An injected file over a regular file of the
 workspace is written in place; a link or a second name at its name is
 replaced, never written through. An injected project still follows the
-links inside the host folder it copies; a clone skips them. The file
-tools the agents and the sandbox's execute route use still check a path
-and then write it by path: a link the sandbox puts there in between,
-while one of its commands runs, is followed.
+links inside the host folder it copies; a clone skips them.
+
+The file tools the agents, the sandbox's execute route and the code
+runner use -- view, create_file, str_replace, and the agent's grep, glob
+and ls -- check a path as before: a link inside the workspace, such as a
+virtual environment's, still leads where it points. They then reach the
+checked path one component at a time without following a link, so a
+link the sandbox puts on it in between, while one of its commands runs,
+is refused, never followed. A file is opened once and read, sized and
+written through that descriptor: an edit writes the file it read. A
+listing reads each entry itself: view shows a link as `[LINK]`, whatever
+it points at, ls and grep skip it, and a FIFO is answered at once, never
+waited on. grep walks each folder from its parent's descriptor, 128
+folders deep at most. glob's pattern walk still follows a link inside
+the workspace; the results it keeps are regular files reached beneath
+the workspace through no link. The panel's own reads of a workspace --
+its file list, a file's preview, a download, the requirements file a
+provision reads -- still check a path and then read it by path,
+following a link the sandbox put there.
 
 ## Diff review and apply
 

@@ -3487,6 +3487,43 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] The agent's file tools never follow a link the sandbox puts
+  on a path they checked. view, create_file and str_replace -- the tools
+  the agents, `POST /api/sandbox/execute` and the code runner use inside a
+  workspace -- and the agent's grep, glob and ls checked a path (a link
+  inside the workspace resolved, nothing outside) and then worked on it by
+  path: a link the sandbox put there in between, while one of its commands
+  ran, was followed, so the model's content was written into a host file,
+  a host file's bytes, size or kind were shown to the model, and an edit
+  could read one file and write another. The Svelte check after a write
+  read its file the same way. view's listing tested each entry through its
+  link, so a link to a host folder showed as a folder of the workspace,
+  and ls did so for a link put after its own check. A FIFO at a file's
+  name made create_file wait forever, and one in a searched folder made
+  grep wait. Now the checked path is reached beneath the workspace one
+  component at a time without following a link -- a link inside the
+  workspace, such as a virtual environment's, still resolves at the check
+  as before -- and a link met there now is refused, never followed. A file
+  is opened once, without waiting, and read, sized and written through
+  that descriptor: an edit writes the file it read, a file overwritten is
+  written in place, keeping its mode and its other names, a new one is
+  made only where nothing stands, with the mode `open` gave it, and view
+  never reads past its cap, even a file that grows. Listings and grep's
+  walk read each entry itself: view shows a link as `[LINK]`, whatever it
+  points at (a link to a folder of the workspace too), ls and grep skip it
+  as before. grep walks each folder from its parent's descriptor and reads
+  each file from its folder's, never opens a FIFO -- in a folder it
+  searches, counted as skipped, or named as its target --, and searches
+  128 folders deep, saying how many it left. glob keeps only regular files
+  its results' real paths reach beneath the workspace through no link; its
+  pattern walk still follows a link inside the workspace, as before. A
+  text that cannot be encoded leaves the file whole and the tool answers
+  (an edit emptied its file, and both tools raised). view, str_replace and
+  ls answer a path beneath a folder they may not search with that refusal,
+  where they said the path was not there. The panel's own reads of a
+  workspace -- its file list, a preview, a download, the requirements file
+  a provision reads -- are not changed here. fw1-fw6 in the new
+  `tests/test_sandbox_file_tools_follow_no_link_contracts.py`.
 - [SECURITY] A copy into a sandbox never writes through a link the sandbox
   put in its workspace. A coding task's project was copied into its
   workspace with `shutil.copytree`, merged into what was there: a link the
