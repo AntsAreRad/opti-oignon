@@ -3487,6 +3487,26 @@ package costs.
 
 ### Fixed
 
+- A sandbox's destroy stops the commands running in it, and every command
+  of a session is tracked. The destroy -- through its route, `cleanup_all`
+  and the emergency stop's "destroy sandboxes" step -- removed the
+  workspace while its running command went on until it ended or timed out.
+  The registry of running commands held one per session: a second command
+  overwrote the first's entry and the first's end removed the second's,
+  which then ran out of reach of the stop button, its session shown idle
+  and open to the idle sweep. Now the registry keeps every running command
+  of a session, `stop_command` kills them all, and a destroy kills them
+  before it removes the workspace (on the tempdir backend a process that
+  outlives its command -- a background job once the command returned, or
+  one moved out of its group with `setsid` -- stays out of reach, as it
+  was of the stop button; bubblewrap's PID namespace takes it down). A
+  command whose session a destroy ended after its caller checked it is
+  killed as it starts and answered as an execution error; the idle sweep
+  checks again, under the lock that ends a session, that it is still idle
+  (a command starting to run counts as activity, a refused one does not);
+  and a command already reaped is never signalled by its freed pid.
+  kr1-kr6 in the new
+  `tests/test_sandbox_destroy_stops_commands_contracts.py`.
 - A sandbox's destroy removes a workspace its code froze, and a workspace
   it cannot remove stays counted. The destroy removed the workspace
   ignoring every error, then dropped the session and released its hold

@@ -519,6 +519,31 @@ def _base_locks(base: str) -> bool:
         os.close(fd)
 
 
+def _kill_group(proc: subprocess.Popen) -> None:
+    """SIGKILL the process group ``proc`` leads and reap it; never raises.
+
+    The child was spawned with ``start_new_session=True``, so its pid is the process-group id: ``killpg`` reaches
+    bwrap and its tree. A leader not yet reaped holds its pid, and so its group's id, whatever it ran: it is signalled;
+    one already reaped (``returncode`` set) is not, its pid free to be another process's (the race left is the
+    check's own instant, as ``Popen.send_signal``'s). Already gone or unreachable: the direct kill and the reap
+    follow; stopping must never raise past this point. On the tempdir backend a process that outlives its command --
+    a background job (``&``) once the command returned, or one moved out of its group (``setsid``) -- is out of
+    reach, as it is of the stop button; bubblewrap's PID namespace takes it down with the command.
+    """
+    if proc.returncode is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except Exception:
+                pass
+    try:
+        proc.wait(timeout=5)
+    except Exception:  # pragma: no cover - defensive reap
+        pass
+
+
 def _release_holds(holds: dict[str, int | None]) -> None:
     """Close every descriptor of ``holds``: the workspaces they held are orphans the next start removes."""
     for fd in list(holds.values()):
@@ -2327,10 +2352,12 @@ class SandboxManager:
         self._degraded_confirmed = False
         self._unshare_available: bool | None = None  # Lazy-detected
         # Per-session running-process registry. The stop path
-        # needs a handle on the running child, so spawns register their Popen
-        # here (under the lock) for the duration of the command and deregister
-        # in a finally. A session with an entry is "running"; without, "idle".
-        self._running_procs: dict[str, subprocess.Popen] = {}
+        # needs a handle on the running children, so spawns register their
+        # Popen here (under the lock) for the duration of the command and
+        # deregister in a finally; a session may run several commands at
+        # once, each kept. A session with an entry is "running"; without
+        # (an empty set is dropped), "idle".
+        self._running_procs: dict[str, set[subprocess.Popen]] = {}
         # Each live session's hold on its workspace (_hold_workspace), released by destroy_sandbox, or when this
         # manager is dropped with sessions still live.
         self._holds: dict[str, int] = {}
@@ -2748,27 +2775,56 @@ class SandboxManager:
             return workspace, hold
         raise RuntimeError("No workspace could be held: another manager removed each one as it was made")
 
-    def destroy_sandbox(self, session_id: str) -> bool:
+    def destroy_sandbox(self, session_id: str, *, idle_for: float | None = None) -> bool:
         """Destroy a sandbox and remove all its files.
 
-        A folder the sandbox froze is given back its owner's rights on the
-        way (``_remove_tree``). A workspace that still stands is kept, with
+        The session's running commands are killed first (``_kill_group``):
+        none runs on in a destroyed workspace, nor refills it while it is
+        removed (on the tempdir backend, a process that outlived its command
+        is out of reach: see ``_kill_group``). A folder the sandbox froze is given back its owner's rights
+        on the way (``_remove_tree``). A workspace that still stands is kept, with
         its hold: it counts against the limit until the idle sweep or
         ``cleanup_all`` removes it. The session is destroyed either way.
 
         Args:
             session_id: Session to destroy.
+            idle_for: The idle sweep's TTL: the session is destroyed only if,
+                under the lock that ends it, it is still unbound, running
+                nothing and idle for longer than this (its decision was taken
+                on a snapshot; a command may have started since).
 
         Returns:
-            True if destroyed, False if session not found.
+            True if destroyed, False if session not found (or, with
+            ``idle_for``, no longer idle).
         """
         with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
                 return False
+            if idle_for is not None and (
+                not session.active
+                or session.bound_conversation_id is not None
+                or self._running_procs.get(session_id)
+                or time.time() - session.last_activity <= idle_for
+            ):
+                return False
             session.active = False
+            # Its running commands, killed before the workspace is removed:
+            # none refills a tree being removed, none runs on in it.
+            # They stay registered until they end, so that a second destroy
+            # racing this one kills them too before it removes
+            running = list(self._running_procs.get(session_id, ()))
             # Log pending approved paths that were never copied out
             pending_approved = sorted(session.approved_paths)
+
+        for proc in running:
+            _kill_group(proc)
+        if running:
+            logger.info(
+                "Sandbox destroyed: session=%s, %d running command(s) killed first",
+                session_id,
+                len(running),
+            )
 
         # Remove workspace directory tree
         workspace = session.workspace_path
@@ -2786,6 +2842,7 @@ class SandboxManager:
 
         with self._lock:
             ended = self._sessions.pop(session_id, None) is not None
+            self._running_procs.pop(session_id, None)
             hold = self._holds.pop(session_id, None)
             if not gone and ended:
                 # Its place is still taken: kept, hold and all (by the one
@@ -2831,14 +2888,14 @@ class SandboxManager:
     def is_running(self, session_id: str) -> bool:
         """Whether a command is currently executing in this workspace."""
         with self._lock:
-            return session_id in self._running_procs
+            return bool(self._running_procs.get(session_id))
 
     def stop_command(self, session_id: str) -> bool:
-        """SIGKILL the workspace's running command; keep the workspace.
+        """SIGKILL the workspace's running commands; keep the workspace.
 
-        The stop path of spec section 4.2: kills the tracked process group
-        (the bwrap child and its bash tree die together) and reaps it, then
-        marks the workspace idle. Files persist for inspection; the
+        The stop path of spec section 4.2: kills every tracked process group
+        of the session (each bwrap child and its bash tree die together) and
+        reaps them, then marks the workspace idle. Files persist for inspection; the
         workspace is NOT destroyed. Fail-secure no-op semantics: stopping a
         workspace with nothing running returns False and never errors or
         leaks state.
@@ -2847,7 +2904,7 @@ class SandboxManager:
             session_id: Target workspace.
 
         Returns:
-            True if a running command was killed, False if nothing was
+            True if running commands were killed, False if nothing was
             running (no-op).
 
         Raises:
@@ -2858,26 +2915,15 @@ class SandboxManager:
             session = self._sessions.get(session_id)
             if session is None:
                 raise ValueError(f"Session not found: {session_id}")
-            proc = self._running_procs.pop(session_id, None)
+            # Left registered until they end, as a destroy leaves them: a destroy
+            # racing this stop still kills them before it removes
+            procs = list(self._running_procs.get(session_id, ()))
 
-        if proc is None:
+        if not procs:
             return False
 
-        try:
-            # The child was spawned with start_new_session=True, so its pid
-            # is the process-group id: killpg reaches bwrap and its tree.
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
-            # Already gone or unreachable: fall through to the direct kill
-            # and the reap; stopping must never raise past this point.
-            try:
-                proc.kill()
-            except Exception:
-                pass
-        try:
-            proc.wait(timeout=5)
-        except Exception:  # pragma: no cover - defensive reap
-            pass
+        for proc in procs:
+            _kill_group(proc)
 
         with self._lock:
             session = self._sessions.get(session_id)
@@ -2888,9 +2934,9 @@ class SandboxManager:
             session_id,
             action="workspace_stopped",
             paths=[],
-            detail="Running command killed (SIGKILL, process group)",
+            detail=f"{len(procs)} running command(s) killed (SIGKILL, process group)",
         )
-        logger.info("Workspace command stopped: session=%s", session_id)
+        logger.info("Workspace command(s) stopped: session=%s, %d killed", session_id, len(procs))
         return True
 
     def set_conversation(self, session_id: str, conversation_id: str | None) -> None:
@@ -3080,7 +3126,7 @@ class SandboxManager:
             ]
         reaped = 0
         for sid in stale:
-            if self.destroy_sandbox(sid):
+            if self.destroy_sandbox(sid, idle_for=ttl):
                 reaped += 1
                 logger.info(
                     "Idle TTL: workspace %s destroyed after %ds idle",
@@ -4497,6 +4543,14 @@ class SandboxManager:
             )
             return result
 
+        with self._lock:
+            # A command starting to run is activity (a refused one is not):
+            # the idle sweep, which checks it again under the lock that ends a
+            # session, never takes a session whose command is about to run
+            _starting = self._sessions.get(session_id)
+            if _starting is not None:
+                _starting.last_activity = time.time()
+
         # Execute with the appropriate backend
         if backend == IsolationBackend.BWRAP:
             result = self._run_bwrap(
@@ -4630,7 +4684,10 @@ class SandboxManager:
         the WHOLE group is SIGKILLed and reaped (stronger than ``run()``,
         which killed only the direct child), then ``TimeoutExpired``
         propagates to the caller's existing handler. The registry entry is
-        always removed in the ``finally``.
+        always removed in the ``finally``. A session a destroy ended after its
+        caller checked it gets nothing: the process just started is killed
+        and ``ValueError`` raised, which the runners answer as an execution
+        error.
         """
         proc = subprocess.Popen(
             argv,
@@ -4645,20 +4702,24 @@ class SandboxManager:
         )
         if session_id:
             with self._lock:
-                self._running_procs[session_id] = proc
+                session = self._sessions.get(session_id)
+                live = session is not None and session.active
+                if live:
+                    self._running_procs.setdefault(session_id, set()).add(proc)
+            if not live:
+                # A destroy ended the session after its caller checked it:
+                # nothing runs on a workspace being removed
+                _kill_group(proc)
+                raise ValueError(f"Session '{session_id}' was destroyed")
         try:
             stdout, stderr = proc.communicate(timeout=timeout)
             return subprocess.CompletedProcess(
                 argv, proc.returncode, stdout, stderr
             )
         except subprocess.TimeoutExpired:
-            try:
-                os.killpg(proc.pid, signal.SIGKILL)
-            except (ProcessLookupError, PermissionError, OSError):
-                try:
-                    proc.kill()
-                except Exception:
-                    pass
+            # A destroy may have killed and reaped the command meanwhile: its
+            # pid is then never signalled again
+            _kill_group(proc)
             try:
                 proc.communicate(timeout=5)
             except Exception:  # pragma: no cover - defensive reap
@@ -4667,7 +4728,11 @@ class SandboxManager:
         finally:
             if session_id:
                 with self._lock:
-                    self._running_procs.pop(session_id, None)
+                    running = self._running_procs.get(session_id)
+                    if running is not None:
+                        running.discard(proc)
+                        if not running:
+                            del self._running_procs[session_id]
 
     def _run_bwrap(
         self,
