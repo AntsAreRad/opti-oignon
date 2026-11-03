@@ -11,6 +11,10 @@ Security guarantees:
   - Unique random 12-byte nonce per encryption (GCM standard)
   - 16-byte authentication tag per ciphertext
   - Key rotation: re-encrypt all data with a new key
+  - NO field in clear by mistake: encryption on and no key that loads, or a
+    security.yaml that cannot say whether it is on, refuses every field
+    write (EncryptionUnavailable), as a cipher error does; the manager
+    follows security.yaml and the key file while the platform runs
 
 Key management:
   1. Environment variable OPTI_ENCRYPTION_KEY (base64url-encoded 32-byte key)
@@ -35,6 +39,7 @@ import os
 import secrets
 import stat
 import struct
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -120,37 +125,28 @@ _KDF_ARGON2ID = b"A2"
 _KDF_PBKDF2 = b"P2"
 
 
-def _load_encryption_config() -> dict[str, Any]:
-    """Load encryption configuration from security.yaml."""
-    import yaml
-    cfg_path = Path(__file__).parent / "config" / "security.yaml"
-    try:
-        if cfg_path.exists():
-            with open(cfg_path, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
-            return data.get("encryption", {})
-    except Exception:
-        pass
-    return {}
+def _security_path() -> Path:
+    """The security.yaml the manager reads."""
+    return Path(__file__).parent / "config" / "security.yaml"
 
 
-def encryption_toggle(path: str | Path | None = None) -> bool | None:
-    """Whether security.yaml (or ``path``) turns encryption on, read strictly.
+def _encryption_section(path: str | Path | None = None) -> dict[str, Any] | None:
+    """security.yaml's (or ``path``'s) ``encryption`` section, read strictly.
 
-    False for a missing file, or a file with no ``encryption`` section or no
-    switch in it; the switch's truth for a mapping; None when the file cannot
-    say -- empty (a save caught between its truncation and its write),
-    unparsable, not a mapping, or a section that is not one. A store that
-    must never write in clear by mistake reads None as an unknown, never as
-    off; ``_load_encryption_config`` keeps its lenient reading for the
-    manager.
+    {} for a missing file, or a file with no ``encryption`` section; the
+    section for a mapping; None when the file cannot say -- no regular file (a
+    FIFO is never waited on), empty (a save caught between its truncation and
+    its write), unreadable, unparsable, not a mapping, or a section that is not
+    one.
     """
     import yaml
-    cfg_path = Path(path) if path is not None else Path(__file__).parent / "config" / "security.yaml"
+    cfg_path = Path(path) if path is not None else _security_path()
     try:
+        if not stat.S_ISREG(os.stat(cfg_path).st_mode):
+            return None
         text = cfg_path.read_text(encoding="utf-8")
     except FileNotFoundError:
-        return False
+        return {}
     except Exception:
         return None
     try:
@@ -161,10 +157,66 @@ def encryption_toggle(path: str | Path | None = None) -> bool | None:
         return None
     section = data.get("encryption")
     if section is None:
-        return False
+        return {}
     if not isinstance(section, dict):
         return None
-    return bool(section.get("enabled", False))
+    return section
+
+
+def _load_encryption_config() -> dict[str, Any] | None:
+    """The ``encryption`` section of security.yaml as the manager reads it:
+    strictly (``_encryption_section``), None when the file cannot say --
+    never read as off."""
+    return _encryption_section()
+
+
+def encryption_toggle(path: str | Path | None = None) -> bool | None:
+    """Whether security.yaml (or ``path``) turns encryption on, read strictly.
+
+    False for a missing file, or a file with no ``encryption`` section or no
+    switch in it; the switch's truth for a mapping; None when the file cannot
+    say -- empty (a save caught between its truncation and its write),
+    unparsable, not a mapping, or a section that is not one. A store that
+    must never write in clear by mistake reads None as an unknown, never as
+    off; the manager reads the same section (``_load_encryption_config``).
+    """
+    section = _encryption_section(path)
+    return None if section is None else bool(section.get("enabled", False))
+
+
+class EncryptionUnavailable(RuntimeError):
+    """A field cannot be sealed: encryption is on and no key loads, security.yaml
+    cannot say whether it is on, or the cipher failed. Raised where the value
+    would otherwise be written in clear; its message is the reason, said as it
+    is."""
+
+
+_CANNOT_SAY = ("security.yaml cannot say whether encryption is on (it does not load, or its encryption section "
+               "holds no mapping): nothing is written in clear until it is mended")
+_NO_KEY = ("encryption is on and no key loads (OPTI_ENCRYPTION_KEY, or the key file; a wrapped key file needs "
+           "OPTI_KEYFILE_PASSPHRASE): nothing is written in clear until a key loads -- a key file put back is read "
+           "at the next write, a variable when the platform restarts")
+_KEY_GONE = ("encryption is on and the key file the key in use came from is gone: nothing is written in clear "
+             "until a key file is put back")
+_KEY_CHANGED = ("encryption is on and the key file holds another key than the one in use: nothing is written in "
+                "clear until the platform restarts")
+_NO_CIPHER = ("encryption is on and no AES library is installed (cryptography or pycryptodome): nothing is written "
+              "in clear")
+
+
+def _seen_state() -> tuple:
+    """What a manager built from the files follows: security.yaml's and the key
+    file's identity (device, inode, size, modification and change times), None
+    for one that cannot be looked at."""
+    marks = []
+    for path in (_security_path(), _DEFAULT_KEYFILE):
+        try:
+            found = os.stat(path)
+        except OSError:
+            marks.append(None)
+        else:
+            marks.append((found.st_dev, found.st_ino, found.st_size, found.st_mtime_ns, found.st_ctime_ns))
+    return tuple(marks)
 
 
 # ============================================================================
@@ -807,7 +859,7 @@ def get_encryption_key() -> SecureBytes | None:
     Priority:
       1. Environment variable OPTI_ENCRYPTION_KEY
       2. Keyfile at data/.keyfile
-      3. None (encryption disabled)
+      3. None (no key: a manager that is on refuses every write)
     """
     env_key = _secret(_ENV_KEY_NAME)
     if env_key:
@@ -820,6 +872,9 @@ def get_encryption_key() -> SecureBytes | None:
             logger.warning("Failed to decode OPTI_ENCRYPTION_KEY: %s", e)
 
     try:
+        if not stat.S_ISREG(os.stat(_DEFAULT_KEYFILE).st_mode):
+            # A FIFO is never waited on, a device never read.
+            raise ValueError("the key file is no regular file: not opened")
         key, _, _ = load_keyfile()
         if len(key) == _KEY_SIZE:
             return key
@@ -844,32 +899,118 @@ class EncryptionManager:
     Encrypted content is stored with an 'ENC2:' prefix (AES-256-GCM) or
     legacy 'ENC:' prefix (AES-128-CBC, read-only for migration).
     Unencrypted content is returned as-is for gradual migration.
+
+    Three states: on (the switch on, or ``enabled`` given True, and a key),
+    off (the switch off, or ``enabled`` given False), and refusing
+    (``refusing`` the reason): the switch on, or given True, and no key loads
+    or no AES library is installed, security.yaml cannot say whether it is
+    on, or the cipher failed. Refusing, ``encrypt`` raises
+    ``EncryptionUnavailable`` and nothing is written in clear. A manager built
+    from the files (no ``enabled`` given) follows them (``follow``): the
+    switch turned on or off, the file mended, a key file put back; the setup
+    methods leave the refusing state.
     """
 
     def __init__(self, key: bytes | SecureBytes | None = None, enabled: bool | None = None):
-        cfg = _load_encryption_config()
-
-        if enabled is not None:
-            self._enabled = enabled
-        else:
-            self._enabled = cfg.get("enabled", False)
-
+        self._refusing: str | None = None
+        self._enabled = False
+        self._follows = enabled is None
+        self._following = threading.Lock()
+        self._given = key is not None
+        # Looked at before the switch is read: a change while it is read is followed next.
+        self._seen = _seen_state() if self._follows else None
         if key is not None:
             # Wrap raw bytes in SecureBytes for memory protection
             if isinstance(key, bytes):
                 self._key: SecureBytes | None = secure_key_from_bytes(key)
             else:
                 self._key = key
-        elif self._enabled:
-            self._key = get_encryption_key()
-            if self._key is None:
-                logger.warning(
-                    "Encryption enabled in config but no key available. "
-                    "Set OPTI_ENCRYPTION_KEY or create data/.keyfile"
-                )
-                self._enabled = False
         else:
             self._key = None
+        self._decide(_load_encryption_config() if enabled is None else {"enabled": enabled})
+        if self._refusing:
+            logger.error("Field encryption refuses every write: %s", self._refusing)
+
+    def _decide(self, cfg: dict[str, Any] | None) -> None:
+        """The state from the switch ``cfg`` (None: the file cannot say) and the
+        key held, a key loaded when none is held and the switch is on or cannot
+        say. The reason is set before the switch goes off, and cleared after
+        the key and the switch are in."""
+        if cfg is None:
+            self._refusing = _CANNOT_SAY
+            self._enabled = False
+            if self._key is None:
+                # A key that loads still reads what is sealed; nothing is sealed with it.
+                self._key = get_encryption_key()
+            return
+        if not cfg.get("enabled", False):
+            self._enabled = False
+            self._refusing = None
+            return
+        if self._key is None:
+            self._key = get_encryption_key()
+        if self._key is None or _CRYPTO_BACKEND is None:
+            self._refusing = _NO_KEY if self._key is None else _NO_CIPHER
+            self._enabled = False
+            return
+        failed = self._cipher_fails()
+        if failed:
+            self._refusing = failed
+            self._enabled = False
+            return
+        self._enabled = True
+        self._refusing = None
+
+    def _cipher_fails(self) -> str | None:
+        """Why the cipher does not seal a fixed value under the held key, or None."""
+        try:
+            encrypt_bytes(self._raw_key(), b"a fixed value the manager seals to try its cipher")
+        except Exception as e:
+            return f"the cipher failed ({type(e).__name__}): nothing is written in clear"
+        return None
+
+    def _check_held_key(self) -> None:
+        """Refuse when the key held came from the key file (no key variable, none
+        given) and the key file is gone, or holds another key now: rows sealed
+        under it would not open at the next start. A key file that does not
+        load here (wrapped, its passphrase not given) leaves the held key be."""
+        if self._key is None or self._given or _secret(_ENV_KEY_NAME):
+            return
+        try:
+            if not stat.S_ISREG(os.stat(_DEFAULT_KEYFILE).st_mode):
+                raise ValueError("the key file is no regular file: not opened")
+            on_disk, _, _ = load_keyfile()
+        except FileNotFoundError:
+            self._refusing = _KEY_GONE
+            self._enabled = False
+            self._key = None
+            return
+        except Exception as e:
+            if _wiped(e):
+                raise
+            return
+        if on_disk.as_bytes() != self._raw_key():
+            self._refusing = _KEY_CHANGED
+            self._enabled = False
+
+    def follow(self) -> None:
+        """Read security.yaml and the key file again when either changed since
+        they were last read, for a manager built from them (one told its state
+        never follows): the switch turned on or off, the file mended, a key file
+        put back where none was held. A held key is kept."""
+        if not self._follows or _seen_state() == self._seen:
+            return
+        with self._following:
+            seen = _seen_state()
+            if seen == self._seen:
+                return
+            before = self._refusing
+            self._decide(_load_encryption_config())
+            if self._enabled:
+                self._check_held_key()
+            self._seen = seen
+            if self._refusing and self._refusing != before:
+                logger.error("Field encryption refuses every write: %s", self._refusing)
 
     def _raw_key(self) -> bytes | None:
         """Return raw key bytes for crypto operations, or None."""
@@ -890,6 +1031,13 @@ class EncryptionManager:
         return self._key is not None
 
     @property
+    def refusing(self) -> str | None:
+        """Why the manager refuses to seal, or None: encryption on and no key that
+        loads, no AES library, the key file gone or holding another key, a
+        cipher that fails, or security.yaml unable to say whether it is on."""
+        return self._refusing
+
+    @property
     def algorithm(self) -> str:
         """Current encryption algorithm."""
         return "AES-256-GCM" if self.enabled else "none"
@@ -907,20 +1055,36 @@ class EncryptionManager:
     def encrypt(self, plaintext: str) -> str:
         """Encrypt a string field using AES-256-GCM.
 
-        Returns the original string if encryption is disabled.
-        Already-encrypted strings (V1 or V2) are returned unchanged.
+        Returns the original string if encryption is off. Refusing
+        (``refusing``), or the cipher failing, raises ``EncryptionUnavailable``:
+        never the string in clear. An empty string, and one already encrypted
+        (V1 or V2), are returned unchanged. A string that is no text (a lone
+        surrogate) raises its ``UnicodeEncodeError``, as it did; the manager
+        refuses nothing more for it.
         """
-        if not self.enabled or not plaintext:
+        if not plaintext:
             return plaintext
         if plaintext.startswith(_ENCRYPTED_PREFIX_V2) or plaintext.startswith(_ENCRYPTED_PREFIX_V1):
             return plaintext
+        # Read before the switch: a setup clears it last, once the key is in.
+        refusing = self._refusing
+        if refusing:
+            raise EncryptionUnavailable(refusing)
+        if not self.enabled:
+            return plaintext
 
+        data = plaintext.encode("utf-8")
         try:
-            raw = encrypt_bytes(self._raw_key(), plaintext.encode("utf-8"))
-            return _ENCRYPTED_PREFIX_V2 + base64.urlsafe_b64encode(raw).decode("ascii")
+            raw = encrypt_bytes(self._raw_key(), data)
         except Exception as e:
             logger.error("Encryption failed: %s", e)
-            return plaintext
+            kept = self._cipher_fails()
+            if kept:
+                # Kept while a fixed value does not seal either: the next write, and whoever asks before it, is told.
+                self._refusing = kept
+            raise EncryptionUnavailable(
+                f"the cipher failed ({type(e).__name__}): nothing is written in clear") from e
+        return _ENCRYPTED_PREFIX_V2 + base64.urlsafe_b64encode(raw).decode("ascii")
 
     def decrypt(self, ciphertext: str) -> str:
         """Decrypt a string field. Handles V1 and V2 formats.
@@ -1028,6 +1192,9 @@ class EncryptionManager:
             self._key.wipe()
         self._key = key
         self._enabled = True
+        self._refusing = None  # last: the key and the switch are in
+        # The key file's rights it tightened are not a change to follow.
+        self._seen = _seen_state() if self._follows else None
         logger.info("Encryption enabled with the existing key")
         return True
 
@@ -1045,6 +1212,9 @@ class EncryptionManager:
                 self._key.wipe()
             self._key = secure_key_from_bytes(key)
             self._enabled = True
+            self._refusing = None  # last: the key and the switch are in
+            # The key file it wrote is not a change to follow.
+            self._seen = _seen_state() if self._follows else None
             logger.info("Encryption configured from passphrase (kdf=%s)", kdf_name)
             return True
         except KeyfileExists:
@@ -1072,6 +1242,9 @@ class EncryptionManager:
                 self._key.wipe()
             self._key = secure_key_from_bytes(key)
             self._enabled = True
+            self._refusing = None  # last: the key and the switch are in
+            # The key file it wrote is not a change to follow.
+            self._seen = _seen_state() if self._follows else None
             logger.info("Encryption configured with random key")
             return True
         except KeyfileExists:
@@ -1081,14 +1254,17 @@ class EncryptionManager:
             return False
 
     def get_status(self) -> dict[str, Any]:
-        """Get detailed encryption status."""
+        """Get detailed encryption status: ``refusing`` says why every write is
+        refused, or None; ``config_enabled`` is the switch read strictly (False
+        when security.yaml cannot say)."""
         cfg = _load_encryption_config()
         keyfile_exists = _DEFAULT_KEYFILE.exists()
         env_key_set = bool(_secret(_ENV_KEY_NAME))
 
         return {
             "enabled": self.enabled,
-            "config_enabled": cfg.get("enabled", False),
+            "config_enabled": bool(cfg and cfg.get("enabled", False)),
+            "refusing": self.refusing,
             "has_key": self.has_key,
             "algorithm": self.algorithm,
             "kdf": self.kdf,
@@ -1119,12 +1295,27 @@ def get_encryption_manager() -> EncryptionManager:
     global _encryption_manager
     if _encryption_manager is None:
         _encryption_manager = EncryptionManager()
+    else:
+        _encryption_manager.follow()
     return _encryption_manager
 
 
 def encrypt_field(value: str) -> str:
-    """Convenience: encrypt a field value using the global manager."""
-    return get_encryption_manager().encrypt(value)
+    """Convenience: encrypt a field value using the global manager; a manager
+    that cannot be built (a held secret wiped) refuses as one that cannot seal."""
+    try:
+        manager = get_encryption_manager()
+    except Exception as exc:
+        raise EncryptionUnavailable(
+            f"the field encryption cannot be built ({type(exc).__name__}): nothing is written in clear") from exc
+    return manager.encrypt(value)
+
+
+def field_refusal() -> str | None:
+    """Why a field written now would be refused (the global manager's
+    ``refusing``), or None: asked before work whose result a store must save,
+    so that the refusal is said before anything runs."""
+    return get_encryption_manager().refusing
 
 
 def decrypt_field(value: str) -> str:

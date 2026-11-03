@@ -68,6 +68,32 @@ except ImportError:
     # encryption writes (a contract holds them equal to encryption.py's).
     _ENCRYPTED_PREFIXES = ("ENC2:", "ENC:")
 
+
+def _refuse_while_encryption_refuses() -> None:
+    """Raise the field encryption's refusal (``encryption.field_refusal``) while
+    it refuses, before a write that may hold a field; nothing where this store
+    was loaded beside no encryption module that says one."""
+    try:
+        from .encryption import EncryptionUnavailable, field_refusal
+    except ImportError:
+        return
+    try:
+        reason = field_refusal()
+    except Exception as exc:
+        raise EncryptionUnavailable(
+            f"the field encryption cannot be built ({type(exc).__name__}): nothing is written in clear") from exc
+    if reason:
+        raise EncryptionUnavailable(reason)
+
+
+def _encryption_refusal(exc: BaseException) -> str | None:
+    """The reason when ``exc`` is the field encryption's refusal to write in clear
+    (``encryption.EncryptionUnavailable``), else None: asked by its class's name,
+    as ``encryption._wiped`` asks."""
+    if type(exc).__name__ == "EncryptionUnavailable" and type(exc).__module__ == "opti_oignon.encryption":
+        return str(exc)
+    return None
+
 # ============================================================================
 # Automatic titles
 # ============================================================================
@@ -1758,6 +1784,9 @@ class ConversationManager:
                     )
                 return renamed
             except Exception as e:
+                if _encryption_refusal(e):
+                    # Refused, not missing: the route says why.
+                    raise
                 logger.error(f"Error renaming conversation {conv_id}: {e}")
                 return False
             finally:
@@ -1830,8 +1859,11 @@ class ConversationManager:
 
         The user's own title (manual) is let go: the title is derived again from
         the typed words of the first turns, or is the placeholder. One
-        transaction, one publish.
+        transaction, one publish. While the field encryption refuses, raises
+        its refusal and changes nothing: the title it derives could not be
+        sealed.
         """
+        _refuse_while_encryption_refuses()
         now = datetime.now().isoformat()
         with self._lock:
             conn = self._get_connection()

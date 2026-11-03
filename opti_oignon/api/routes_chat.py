@@ -741,6 +741,30 @@ def _resolve_model_and_route(message: str, request: ChatRequest):
         return None, f"Routing error: {e}"
 
 
+def _turn_refusal() -> str | None:
+    """Why a turn is refused before it runs because the store could not save it, or None.
+
+    The conversation store is there and its field encryption refuses to
+    write in clear (``encryption.field_refusal``: no key, no AES library, a
+    key file gone or holding another key, a cipher that fails, a
+    security.yaml that cannot say), or cannot be asked: the turn's rows would
+    be refused after its answer, where nobody hears it. With no encryption
+    module there is no refusal to say. Asked on a worker thread: building
+    the manager may derive a key.
+    """
+    if not CONVERSATION_AVAILABLE or conversation_manager is None:
+        return None
+    try:
+        from opti_oignon.encryption import field_refusal
+    except ImportError:
+        return None
+    try:
+        reason = field_refusal()
+    except Exception as exc:  # noqa: BLE001 - a manager that cannot be built cannot seal the turn either
+        return f"Not saved, so not run: the field encryption cannot be asked ({type(exc).__name__})"
+    return f"Not saved, so not run: {reason}" if reason else None
+
+
 async def _send_token(ws: WebSocket, token_type: str, content: str = "",
                       metadata: dict | None = None) -> bool:
     """Send a ChatToken via WebSocket. Returns False if connection is closed."""
@@ -2017,6 +2041,13 @@ async def chat_stream(websocket: WebSocket) -> None:
         await websocket.close()
         return
 
+    # The store's field encryption refusing to write in clear: said, not answered unsaved
+    refused = await asyncio.to_thread(_turn_refusal)
+    if refused:
+        await _send_token(websocket, "error", refused)
+        await websocket.close()
+        return
+
     try:
         # Receive request from client
         raw_data = await websocket.receive_json()
@@ -2195,6 +2226,13 @@ async def chat_retry(websocket: WebSocket) -> None:
         await _send_token(
             websocket, "error", _emergency_stop.refusal_payload()["message"]
         )
+        await websocket.close()
+        return
+
+    # The store's field encryption refusing to write in clear: said, not answered unsaved
+    refused = await asyncio.to_thread(_turn_refusal)
+    if refused:
+        await _send_token(websocket, "error", refused)
         await websocket.close()
         return
 

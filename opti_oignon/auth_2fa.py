@@ -332,26 +332,36 @@ def _retire_unbound(conn: Any) -> None:
 # ---------------------------------------------------------------------------
 
 def _encrypt_secret(plaintext: str) -> str:
-    """Encrypt a TOTP secret using the project encryption module."""
+    """Encrypt a TOTP secret using the project encryption module: sealed when
+    encryption is on, base64 (``B64:``, no secret) only when it is off. When it
+    is on and no key loads, or security.yaml cannot say, or the cipher fails,
+    raises ``EncryptionUnavailable`` with the reason, and nothing is stored."""
+    from opti_oignon.encryption import EncryptionManager
     try:
-        from opti_oignon.encryption import EncryptionManager
         mgr = EncryptionManager()
-        if mgr.enabled and mgr.has_key:
-            return mgr.encrypt(plaintext)
-    except Exception:
-        pass
-    # Fallback: base64 (not secure, but allows operation without encryption)
+    except Exception as exc:
+        from opti_oignon.encryption import EncryptionUnavailable
+        raise EncryptionUnavailable(
+            f"the field encryption cannot be built ({type(exc).__name__}): nothing is stored") from exc
+    # A manager with no refusing state is on or off.
+    refusing = getattr(mgr, "refusing", None)
+    if refusing:
+        from opti_oignon.encryption import EncryptionUnavailable
+        raise EncryptionUnavailable(refusing)
+    if mgr.enabled:
+        return mgr.encrypt(plaintext)
     return "B64:" + base64.b64encode(plaintext.encode()).decode()
 
 
 def _decrypt_secret(ciphertext: str) -> str:
-    """Decrypt a stored TOTP secret."""
+    """Decrypt a stored TOTP secret: with the key whenever one loads, also while
+    the manager refuses to seal (a security.yaml that cannot say)."""
     if ciphertext.startswith("B64:"):
         return base64.b64decode(ciphertext[4:]).decode()
     try:
         from opti_oignon.encryption import EncryptionManager
         mgr = EncryptionManager()
-        if mgr.enabled and mgr.has_key:
+        if mgr.has_key:
             return mgr.decrypt(ciphertext)
     except Exception:
         pass

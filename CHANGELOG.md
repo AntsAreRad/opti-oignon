@@ -3487,6 +3487,24 @@ package costs.
 
 ### Fixed
 
+- With encryption turned on, no conversation message or title, memory
+  fact or two-factor secret is written in clear any more. A
+  `security.yaml` that could not be read or parsed counted as encryption
+  off, a key that did not load (the key file gone, a wrapped key file
+  without `OPTI_KEYFILE_PASSPHRASE`) turned field encryption off with
+  one log line, a failing cipher stored the text as it was, and
+  encryption turned on while the platform ran was not applied until it
+  restarted.
+  Now the chat refuses each turn and says why; naming or renaming a
+  conversation, giving its title back to the automatic rule and
+  enrolling a two-factor authenticator answer 503 with the reason; and
+  `GET /api/security/encryption` says it in `refusing`, until a key
+  loads, the file is mended or the cipher seals again -- a key file put
+  back and `security.yaml` are read at the next write; the command line,
+  remote inference and the benchmarks log the save they could not make.
+  What is already sealed is still read with a key that loads. ef1-ef6 in
+  the new
+  `tests/test_field_encryption_fails_closed_contracts.py`.
 - Changing the security configuration through the API now asks the
   owner's password. `PUT /api/security/config` could turn off the login
   rate limiter, encryption, the cookie settings, CORS and the security

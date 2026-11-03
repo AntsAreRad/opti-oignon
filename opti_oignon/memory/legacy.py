@@ -492,14 +492,16 @@ class MemoryManager:
             new_confidence: Nouveau score de confiance (optionnel)
 
         Returns:
-            True if updated, False otherwise
+            True if updated, False otherwise; raises the field encryption's
+            refusal (``EncryptionUnavailable``) when the new text cannot be
+            sealed, and nothing is written
         """
         updates = []
         params: list = []
 
         if new_fact is not None:
             updates.append("fact = ?")
-            params.append(new_fact.strip())
+            params.append(_encrypt(new_fact.strip()))  # encrypt at rest, as add_fact
         if new_category is not None:
             cat = new_category.strip().lower()
             if cat not in VALID_CATEGORIES:

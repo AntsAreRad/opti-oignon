@@ -44,6 +44,14 @@ def _check_available():
         )
 
 
+def _refused(exc: BaseException) -> HTTPException | None:
+    """503 with the reason when ``exc`` is the field encryption's refusal to write in clear
+    (``encryption.EncryptionUnavailable``, asked by its class's name), else None."""
+    if type(exc).__name__ == "EncryptionUnavailable" and type(exc).__module__ == "opti_oignon.encryption":
+        return HTTPException(status_code=503, detail=f"Not saved: {exc}")
+    return None
+
+
 def _refinement():
     """The title refinement's module, or None where it cannot be loaded: asked at the call."""
     try:
@@ -170,7 +178,7 @@ def create_conversation(body: ConversationCreate) -> dict:
         return _conv_to_summary(conv)
     except Exception as e:
         logger.error(f"Erreur creation conversation: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise _refused(e) or HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/{conv_id}", response_model=ConversationDetail)
@@ -243,7 +251,13 @@ def rename_conversation(conv_id: str, body: ConversationRename) -> dict:
         raise HTTPException(status_code=422, detail="A title is one line of text, not empty, within the bound")
     # The user's title: a refinement of the automatic one writes nothing now.
     _cancel_refinement(conv_id)
-    renamed = conversation_manager.rename_conversation(conv_id, title)
+    try:
+        renamed = conversation_manager.rename_conversation(conv_id, title)
+    except Exception as e:
+        refused = _refused(e)
+        if refused is None:
+            raise
+        raise refused from e
     if not renamed:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -260,7 +274,14 @@ def use_automatic_title(conv_id: str) -> dict:
     """Give the conversation's title back to the store's rule: derived from the typed words of its first turns."""
     _check_available()
 
-    if not conversation_manager.use_automatic_title(conv_id):
+    try:
+        found = conversation_manager.use_automatic_title(conv_id)
+    except Exception as e:
+        refused = _refused(e)
+        if refused is None:
+            raise
+        raise refused from e
+    if not found:
         raise HTTPException(status_code=404, detail="Conversation not found")
     conv = conversation_manager.get_conversation(conv_id)
     if not conv:

@@ -264,7 +264,8 @@ tampering. This covers:
   when the backend next starts, except one that begins as a ciphertext
   does, which stays as it is -- and a title still encrypted (the key
   absent, or another key's) is shown empty
-- Two-factor authentication secrets
+- Two-factor authentication secrets (in base64, which hides nothing,
+  only when encryption is off)
 - Note attachments (one subkey per attachment, streamed in
   authenticated frames)
 - Backup archives
@@ -272,6 +273,26 @@ tampering. This covers:
 - The [run journal](../agent/run-journal.md), when it is on: each line
   sealed under the journal's own subkey of the master key (a fresh nonce
   per line); with encryption off, Bulbe keeps none of it
+
+With encryption on and no key that loads -- the key file gone or
+unreadable, a wrapped one without `OPTI_KEYFILE_PASSPHRASE`, an
+`OPTI_ENCRYPTION_KEY` that is no key --, the key file the key in use
+came from removed or holding another key, no AES library installed, a
+cipher that fails, or with a `security.yaml` that cannot say whether it
+is on (it does not load, or its `encryption` section holds no mapping),
+no conversation message or title, memory fact or two-factor secret is
+written in clear: the chat refuses each turn before it runs and says
+why; naming or renaming a conversation, giving its title back to the
+automatic rule and enrolling a two-factor authenticator answer 503 with
+the reason; the command line, remote inference and the benchmarks log
+the save they could not make; and `GET /api/security/encryption` says it
+in `refusing`. A key that loads still reads what it sealed. The platform
+follows `security.yaml` and the key file while it runs: encryption
+turned on is applied at the next write, and a key file put back, the
+file mended or a cipher that seals again is read then;
+`OPTI_ENCRYPTION_KEY` is read when the platform starts. Setting
+encryption up makes a new key only where no key file is left, and a new
+key does not read what a lost one sealed.
 
 Keys are derived from passphrases with Argon2id, or with PBKDF2-SHA256
 at 600,000 iterations when argon2-cffi is not installed. Each user's
