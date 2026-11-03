@@ -23,6 +23,8 @@ import type {
 	UserSettings,
 	TwoFactorAnswer,
 	TwoFactorChallenge,
+	TwoFactorEnrolment,
+	TwoFactorEnrolmentSecret,
 } from '$lib/types';
 
 // ---------------------------------------------------------------------------
@@ -262,28 +264,36 @@ export async function initAuth(): Promise<void> {
 	}
 }
 
-/** Register a new account. */
+/** What the registration gives: the user, or -- in Bulbe -- the enrolment of the account's first second factor. */
+export type RegisterOutcome = { user: AuthUser } | { enrolment: TwoFactorEnrolment };
+
+/** Register a new account: the user signed in, or -- in Bulbe -- the enrolment its first session waits for. */
 export async function doRegister(
 	username: string,
 	password: string,
 	email = ''
-): Promise<AuthUser> {
-	const tokens = await authApi.register({ username, password, email });
-	storeTokens(tokens);
-	scheduleRefresh(tokens.expires_in);
-
-	const user = await authApi.getMe();
-	currentUser.set(user);
-	await loadUserSettings();
-	return user;
+): Promise<RegisterOutcome> {
+	const answer = await authApi.register({ username, password, email });
+	if ('requires_2fa_enrolment' in answer && answer.requires_2fa_enrolment) {
+		return { enrolment: answer };
+	}
+	return { user: await finishLogin(answer as AuthTokens) };
 }
 
-/** What the login's first step gives: the user, or the challenge its second step answers. */
-export type LoginOutcome = { user: AuthUser } | { challenge: TwoFactorChallenge };
+/** What the login's first step gives: the user, the challenge its second step answers, or -- in Bulbe, for an
+ * account with no second factor -- the enrolment of a first one. */
+export type LoginOutcome =
+	| { user: AuthUser }
+	| { challenge: TwoFactorChallenge }
+	| { enrolment: TwoFactorEnrolment };
 
-/** Log in with username and password: the user, or -- for an account with a second factor -- its challenge. */
+/** Log in with username and password: the user, or -- for an account with a second factor -- its challenge, or the
+ * enrolment Bulbe asks of an account with none. */
 export async function doLogin(username: string, password: string): Promise<LoginOutcome> {
 	const answer = await authApi.login({ username, password });
+	if ('requires_2fa_enrolment' in answer && answer.requires_2fa_enrolment) {
+		return { enrolment: answer };
+	}
 	if ('requires_2fa' in answer && answer.requires_2fa) {
 		return { challenge: answer };
 	}
@@ -293,6 +303,27 @@ export async function doLogin(username: string, password: string): Promise<Login
 /** The login's second step: the code or the security key's assertion the challenge asked for. */
 export async function doLoginSecondStep(answer: TwoFactorAnswer): Promise<AuthUser> {
 	return finishLogin(await authApi.login2fa(answer));
+}
+
+/** Begin the TOTP an enrolment asks for: the secret and the QR code to show. */
+export async function beginEnrolment(challengeId: string): Promise<TwoFactorEnrolmentSecret> {
+	return authApi.enrolBegin({ challenge_id: challengeId });
+}
+
+/** Confirm it with one of its codes: the session's tokens and the recovery codes to show this once -- nothing
+ * stored and no user set yet: a signed-in user on the login page is sent on at once by the root layout, which would
+ * leave the codes unseen. The session begins with `finishEnrolment`, once they were shown. */
+export async function completeEnrolment(
+	challengeId: string,
+	code: string
+): Promise<{ tokens: AuthTokens; recoveryCodes: string[] }> {
+	const answer = await authApi.enrolComplete({ challenge_id: challengeId, code });
+	return { tokens: answer, recoveryCodes: answer.recovery_codes ?? [] };
+}
+
+/** Begin the session an enrolment gave, after its recovery codes were shown. */
+export async function finishEnrolment(tokens: AuthTokens): Promise<AuthUser> {
+	return finishLogin(tokens);
 }
 
 async function finishLogin(tokens: AuthTokens): Promise<AuthUser> {

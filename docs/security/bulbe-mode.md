@@ -23,6 +23,11 @@ When Bulbe mode is active, the following constraints apply:
   externally
 - **Mandatory authentication** -- all API endpoints require a valid
   JWT session cookie; no anonymous access
+- **Mandatory second factor** -- a session needs a second factor: an
+  account with no second factor enrols a TOTP at its next login, or at
+  its registration, before its first session. Whoever completes that
+  enrolment first holds the factor, so set every account's factor up
+  before switching (see `authentication.md`)
 - **Full audit chain** -- security-relevant actions are logged to the
   SHA-512 hash-chain audit log, whose anchor is keyed with HMAC-SHA256
   (tamper-evident, not signed; see `audit-chain.md`)

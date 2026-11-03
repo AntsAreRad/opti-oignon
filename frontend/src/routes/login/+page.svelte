@@ -10,17 +10,20 @@
   app in all five palettes with no per-page theme code.
 
   Two steps: the password, then -- for an account with a second factor -- a
-  code (TOTP or recovery) or the security key the first step offered.
+  code (TOTP or recovery) or the security key the first step offered. In
+  Bulbe, an account with no second factor enrols one instead
+  (EnrolSecondFactor): its first session comes with it.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { doLogin, doLoginSecondStep } from '$lib/stores/auth';
 	import { requestOptions, serializeAssertion } from '$lib/webauthn';
 	import { httpRefusal } from '$lib/switches/serverSwitch';
-	import type { TwoFactorChallenge } from '$lib/types';
+	import type { TwoFactorChallenge, TwoFactorEnrolment } from '$lib/types';
 	import Card from '$lib/ds/Card.svelte';
 	import Input from '$lib/ds/Input.svelte';
 	import Button from '$lib/ds/Button.svelte';
+	import EnrolSecondFactor from '$lib/components/auth/EnrolSecondFactor.svelte';
 
 	let username = '';
 	let password = '';
@@ -30,6 +33,9 @@
 	// The second step, once the first answered a challenge.
 	let challenge: TwoFactorChallenge | null = null;
 	let code = '';
+
+	// The enrolment of a first factor, once the first step asked one.
+	let enrolment: TwoFactorEnrolment | null = null;
 
 	$: offersCode = !!challenge && (challenge.methods.includes('totp') || challenge.methods.includes('recovery'));
 	$: offersKey = !!challenge && challenge.methods.includes('webauthn') && !!challenge.webauthn_options;
@@ -45,6 +51,11 @@
 
 		try {
 			const outcome = await doLogin(username.trim(), password);
+			if ('enrolment' in outcome) {
+				enrolment = outcome.enrolment;
+				password = '';
+				return;
+			}
 			if ('challenge' in outcome) {
 				challenge = outcome.challenge;
 				password = '';
@@ -136,6 +147,12 @@
 		errorMsg = '';
 	}
 
+	/** An enrolment that ended -- expired, locked, its account changed -- sends back to the password, with why. */
+	function restartEnrolment(event: CustomEvent<{ reason: string }>) {
+		enrolment = null;
+		errorMsg = event.detail.reason;
+	}
+
 	function handleCodeKeydown(e: KeyboardEvent) {
 		if (e.key === 'Enter') submitCode();
 	}
@@ -150,14 +167,20 @@
 			</div>
 
 			<p class="oo-auth-subtitle">
-				{challenge ? 'Confirm it is you: a second factor' : 'Sign in to your account'}
+				{enrolment
+					? 'Set up a second factor to sign in'
+					: challenge
+						? 'Confirm it is you: a second factor'
+						: 'Sign in to your account'}
 			</p>
 
 			{#if errorMsg}
 				<div class="oo-auth-error" role="alert">{errorMsg}</div>
 			{/if}
 
-			{#if challenge}
+			{#if enrolment}
+			<EnrolSecondFactor {enrolment} on:done={() => goto('/chat')} on:restart={restartEnrolment} />
+			{:else if challenge}
 			<div class="oo-auth-form">
 				{#if offersCode}
 					<Input

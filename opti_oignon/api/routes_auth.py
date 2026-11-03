@@ -5,6 +5,8 @@ Authentication API routes.
 POST   /api/auth/register           -- Create account
 POST   /api/auth/login              -- Get JWT token (or 2FA challenge)
 POST   /api/auth/login/2fa          -- Complete 2FA challenge
+POST   /api/auth/login/2fa/enrol/begin    -- Begin the TOTP of an enrolment challenge (Bulbe, no factor yet)
+POST   /api/auth/login/2fa/enrol/complete -- Confirm it: the first session and the recovery codes
 POST   /api/auth/logout             -- Invalidate session
 POST   /api/auth/refresh            -- Refresh token pair
 GET    /api/auth/me                 -- Get current user profile
@@ -114,6 +116,23 @@ class TokenResponse(BaseModel):
     user_id: str = ""
 
 
+class EnrolledTokenResponse(TokenResponse):
+    """The first session of an account that enrolled its second factor at login, and its recovery codes, shown once:
+    none when they could not be made (the settings make them)."""
+    recovery_codes: list[str] = []
+
+
+class EnrolBeginRequest(BaseModel):
+    """Request body for the first step of an enrolment at login."""
+    challenge_id: str = Field(description="Enrolment challenge ID from step-1 login")
+
+
+class EnrolCompleteRequest(BaseModel):
+    """Request body for the last step of an enrolment at login."""
+    challenge_id: str = Field(description="Enrolment challenge ID from step-1 login")
+    code: str = Field(default="", description="A code of the TOTP the first step began")
+
+
 class TwoFALoginRequest(BaseModel):
     """Request body for 2FA login step."""
     challenge_id: str = Field(description="Challenge ID from step-1 login")
@@ -138,6 +157,8 @@ class _ChallengeStore:
       - attempts: number of failed 2FA attempts
       - locked: True if max attempts exceeded
       - methods: list of available 2FA methods for this user
+      - enrol: True for the challenge of an account that enrols its first factor (Bulbe), answered through
+        ``/login/2fa/enrol/*`` alone
 
     Thread-safe via a simple lock.  Periodic cleanup of expired
     entries happens on every create() call.
@@ -150,9 +171,9 @@ class _ChallengeStore:
         self._store: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
 
-    def create(self, user_id: str, methods: list[str], *, webauthn_key: str = "") -> str:
+    def create(self, user_id: str, methods: list[str], *, webauthn_key: str = "", enrol: bool = False) -> str:
         """Create a new challenge and return its ID; ``webauthn_key`` names the security key's assertion state this
-        login began, its own."""
+        login began, its own; ``enrol`` marks the challenge of an enrolment."""
         self._cleanup()
         challenge_id = secrets.token_urlsafe(32)
         with self._lock:
@@ -163,6 +184,7 @@ class _ChallengeStore:
                 "locked": False,
                 "methods": methods,
                 "webauthn_key": webauthn_key,
+                "enrol": enrol,
             }
         return challenge_id
 
@@ -187,6 +209,14 @@ class _ChallengeStore:
             if entry["attempts"] >= self.MAX_ATTEMPTS:
                 entry["locked"] = True
             return entry["locked"]
+
+    def renew(self, challenge_id: str) -> None:
+        """Start a live challenge's time again: an enrolment's five minutes run from its latest begin, the time it
+        takes to scan the secret that begin made."""
+        with self._lock:
+            entry = self._store.get(challenge_id)
+            if entry is not None:
+                entry["created_at"] = time.time()
 
     def consume(self, challenge_id: str) -> bool:
         """Remove a challenge after successful 2FA validation; True for the one caller that removed it."""
@@ -245,6 +275,26 @@ def _get_2fa_manager():
         return two_factor_manager
     except Exception:
         return None
+
+
+_NO_FACTOR_SET_UP = "A second factor cannot be set up here: login refused."
+
+
+def _enrolment_challenge(tfa_mgr: Any, user: Any) -> JSONResponse:
+    """What a password alone gives, in Bulbe, an account with no second factor: no token, the challenge of its
+    enrolment -- a TOTP begun and confirmed through ``/login/2fa/enrol/*``, its first session with it --, or 503 when
+    no factor can be set up here. Refusing would leave the account no way to enrol: the routes that add a factor
+    need a session."""
+    if not tfa_mgr.totp_checkable():
+        logger.warning("No second factor can be set up here: login refused for user=%s", user.user_id)
+        raise HTTPException(status_code=503, detail=_NO_FACTOR_SET_UP)
+    challenge_id = _challenge_store.create(user_id=user.user_id, methods=["totp"], enrol=True)
+    logger.info("2FA enrolment asked at login: user=%s", user.user_id)
+    return JSONResponse(status_code=200, content={
+        "requires_2fa_enrolment": True,
+        "challenge_id": challenge_id,
+        "methods": ["totp"],
+    })
 
 
 def _get_rate_limiter():
@@ -723,7 +773,8 @@ def set_auth_mode(req: AuthModeRequest, current_user: dict = Depends(_require_ow
 
 @router.post("/register", response_model=TokenResponse)
 def register(req: RegisterRequest, request: Request, response: Response) -> dict:
-    """Register a new user account and return tokens.
+    """Register a new user account and return tokens -- in Bulbe, the challenge of its second factor's enrolment
+    instead (``login``): its first session comes with its first factor.
 
     Also sets httpOnly cookies when cookie_mode is enabled.
     """
@@ -734,6 +785,21 @@ def register(req: RegisterRequest, request: Request, response: Response) -> dict
         raise HTTPException(
             status_code=403,
             detail="Registration is disabled. Contact an administrator.",
+        )
+
+    # Whether the new account enrols a second factor first, told before it is made: a two-factor module that cannot
+    # be reached, or a factor that cannot be set up where one is asked, refuses with no account left behind.
+    tfa_mgr = _get_2fa_manager()
+    if tfa_mgr is None:
+        raise HTTPException(
+            status_code=503,
+            detail="The second factor cannot be checked here: registration refused.",
+        )
+    enrols = tfa_mgr.required_by_mode()
+    if enrols and not tfa_mgr.totp_checkable():
+        raise HTTPException(
+            status_code=503,
+            detail="A second factor cannot be set up here: registration refused.",
         )
 
     user = mgr.create_user(
@@ -749,6 +815,9 @@ def register(req: RegisterRequest, request: Request, response: Response) -> dict
 
     # Log audit
     mgr._log_audit(user.user_id, "register", "user", user.user_id)
+
+    if enrols:
+        return _enrolment_challenge(tfa_mgr, user)
 
     tokens = mgr.create_tokens(user)
 
@@ -877,6 +946,11 @@ def login(req: LoginRequest, request: Request, response: Response) -> dict:
             content["webauthn_options"] = webauthn_options
         return JSONResponse(status_code=200, content=content)
 
+    # No factor active, and one asked all the same (Bulbe, or a mode that cannot be read): the password alone gives
+    # no session, the enrolment of a first factor instead.
+    if tfa_mgr.is_2fa_required(user.user_id, status=status):
+        return _enrolment_challenge(tfa_mgr, user)
+
     # No 2FA required: issue tokens immediately
     mgr._log_audit(user.user_id, "login", "user", user.user_id)
     tokens = mgr.create_tokens(user)
@@ -916,6 +990,13 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
         raise HTTPException(
             status_code=403,
             detail="Too many 2FA attempts. Please log in again.",
+        )
+
+    # An enrolment is answered through its own routes: no code of a factor the account does not hold yet is tried.
+    if challenge.get("enrol"):
+        raise HTTPException(
+            status_code=403,
+            detail="This login enrols a second factor first. Please log in again.",
         )
 
     user_id = challenge["user_id"]
@@ -1027,6 +1108,156 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
         )
 
     return TokenResponse(**tokens.to_dict())
+
+
+def _live_enrolment(challenge_id: str) -> tuple[dict[str, Any], Any]:
+    """The enrolment challenge and the second-factor manager, while the account still has no factor; or the refusal
+    that sends back to the password -- an unknown, expired or locked challenge, one of a second step, one whose
+    account has a factor active since (its own other login enrolled one) -- or 503 when the second factor's state
+    cannot be read."""
+    challenge = _challenge_store.get(challenge_id)
+    if challenge is None or not challenge.get("enrol"):
+        raise HTTPException(
+            status_code=403,
+            detail="Invalid or expired enrolment. Please log in again.",
+        )
+    if challenge["locked"]:
+        raise HTTPException(
+            status_code=403,
+            detail="Too many 2FA attempts. Please log in again.",
+        )
+    tfa_mgr = _get_2fa_manager()
+    if tfa_mgr is None:
+        raise HTTPException(
+            status_code=503,
+            detail="2FA module not available.",
+        )
+    try:
+        status = tfa_mgr.get_status(challenge["user_id"])
+    except Exception as exc:  # noqa: BLE001 - an unreadable second factor refuses
+        raise HTTPException(
+            status_code=503,
+            detail="The second factor's state cannot be read: login refused.",
+        ) from exc
+    if status.any_method_active:
+        _factor_since(challenge_id)
+    return challenge, tfa_mgr
+
+
+def _factor_since(challenge_id: str) -> None:
+    """An enrolment whose account has a factor active since -- its own other login enrolled one --: the challenge
+    is spent and the page sent back to the password."""
+    _challenge_store.consume(challenge_id)
+    raise HTTPException(
+        status_code=403,
+        detail="This account has a second factor now. Please log in again.",
+    )
+
+
+@router.post("/login/2fa/enrol/begin")
+def login_2fa_enrol_begin(req: EnrolBeginRequest) -> dict:
+    """Begin the TOTP of an enrolment challenge: its secret, its provisioning URI and, where it can be drawn, its QR
+    code. It may be begun again until it is confirmed; the latest begun is the one the codes are checked against, and
+    the enrolment's five minutes run from it. A TOTP confirmed meanwhile is never replaced: the setup refuses in the
+    statement that writes, and the page is sent back to log in. 503 when encryption is on and the secret cannot be
+    sealed."""
+    challenge, tfa_mgr = _live_enrolment(req.challenge_id)
+    user = _get_auth_manager().get_user(challenge["user_id"])
+    if not user:
+        raise HTTPException(
+            status_code=403,
+            detail="This account no longer exists. Please log in again.",
+        )
+    try:
+        begun = tfa_mgr.totp_setup(user.user_id, label=user.username)
+    except Exception as exc:
+        # The field encryption's refusal (encryption.EncryptionUnavailable), asked by its class's name.
+        if type(exc).__name__ != "EncryptionUnavailable" or type(exc).__module__ != "opti_oignon.encryption":
+            raise
+        raise HTTPException(status_code=503, detail=f"TOTP not set up: {exc}") from exc
+    if begun.get("error") == "already_active":
+        _factor_since(req.challenge_id)
+    if not begun.get("success"):
+        raise HTTPException(status_code=503, detail=_NO_FACTOR_SET_UP)
+    _challenge_store.renew(req.challenge_id)
+    answer = {"secret": begun["secret"], "uri": begun["uri"]}
+    if begun.get("qr_code_base64"):
+        answer["qr_code_base64"] = begun["qr_code_base64"]
+    return answer
+
+
+@router.post("/login/2fa/enrol/complete", response_model=EnrolledTokenResponse)
+def login_2fa_enrol_complete(req: EnrolCompleteRequest, request: Request, response: Response) -> dict:
+    """Confirm the TOTP an enrolment challenge began, with one of its codes: the factor is active, the recovery codes
+    are made and shown this once, and the account's first session is given. A wrong code is a try, counted as the
+    second step counts them, and counted for the account too, across its logins: past five in five minutes, 429 until
+    the window ends. A right code for a secret another login set up again meanwhile activates nothing: the page is
+    sent back to log in. Of two right answers sent together, one signs in."""
+    challenge, tfa_mgr = _live_enrolment(req.challenge_id)
+    user_id = challenge["user_id"]
+    code = "".join(unicodedata.normalize("NFKC", req.code or "").split())
+    if not code:
+        raise HTTPException(
+            status_code=400,
+            detail="A 2FA code is required for this method.",
+        )
+    verified = tfa_mgr.totp_verify(user_id, code)
+    if verified.get("error") == "rate_limited":
+        raise HTTPException(
+            status_code=429,
+            detail="Too many wrong codes for this account. Wait a few minutes, then log in again.",
+        )
+    if verified.get("error") == "changed":
+        _challenge_store.consume(req.challenge_id)
+        raise HTTPException(
+            status_code=403,
+            detail="Another login set this enrolment's secret up again. Please log in again.",
+        )
+    if not verified.get("success", False):
+        locked = _challenge_store.record_attempt(req.challenge_id)
+        remaining = _ChallengeStore.MAX_ATTEMPTS - (challenge["attempts"] + 1)
+        detail = "Invalid 2FA code."
+        if locked:
+            detail = "Too many 2FA attempts. Please log in again."
+        elif remaining > 0:
+            detail = f"Invalid 2FA code. {remaining} attempt(s) remaining."
+        raise HTTPException(status_code=403, detail=detail)
+
+    if not _challenge_store.consume(req.challenge_id):
+        raise HTTPException(
+            status_code=403,
+            detail="This login has ended. Please log in again.",
+        )
+
+    mgr = _get_auth_manager()
+    user = mgr.get_user(user_id)
+    if not user:
+        raise HTTPException(
+            status_code=403,
+            detail="This account no longer exists. Please log in again.",
+        )
+    try:
+        recovery_codes = tfa_mgr.generate_recovery_codes(user_id)
+    except Exception as exc:  # noqa: BLE001 - the factor is active; the codes can be made from the settings
+        logger.warning("Recovery codes not made at enrolment (%s): user=%s", type(exc).__name__, user_id)
+        recovery_codes = []
+
+    mgr._log_audit(
+        user.user_id, "login_2fa_enrolled", "user", user.user_id,
+        details={"method": "totp", "recovery_codes": len(recovery_codes)},
+    )
+    tokens = mgr.create_tokens(user)
+
+    if _is_cookie_mode():
+        _set_auth_cookies(
+            request,
+            response,
+            tokens.access_token,
+            tokens.refresh_token,
+            access_max_age=tokens.expires_in if tokens.expires_in > 0 else 3600,
+        )
+
+    return EnrolledTokenResponse(**tokens.to_dict(), recovery_codes=recovery_codes)
 
 
 @router.post("/refresh", response_model=TokenResponse)

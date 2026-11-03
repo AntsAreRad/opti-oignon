@@ -3487,6 +3487,44 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] In Bulbe mode a session now needs a second factor.
+  The login asked a second factor only of an account that had one, so
+  in Bulbe an account with none signed in with its password, and the
+  registration gave a new account its tokens at once; the rule that
+  Bulbe asks every account a factor (`is_2fa_required`) had no caller.
+  Now the login and the registration of an account with no factor
+  answer, in Bulbe and wherever the mode cannot be read, with an
+  enrolment instead of tokens: `POST /api/auth/login/2fa/enrol/begin`
+  sets a TOTP up for that account, and `.../enrol/complete` confirms it
+  with one of its codes, makes the recovery codes, shown once, and gives
+  the first session, audited `login_2fa_enrolled`; the code that
+  confirmed it does not sign in again. An enrolment lasts five minutes
+  from its latest begin and allows five wrong codes, an account five
+  wrong confirmation codes in five minutes across its logins; it is
+  never answered through `/login/2fa`. A TOTP confirmed meanwhile by
+  another login of the account is never replaced -- the TOTP setup no
+  longer overwrites an active secret, in the settings either (409) --,
+  and a code checked against a secret another login set up again
+  meanwhile activates nothing. The login and register
+  pages answer it, and begin the session only once the recovery codes
+  were shown. The enrolment trusts whoever completes it first: for an
+  account with no factor yet, its password still decides who holds the
+  factor, so set the factors up before switching to Bulbe.
+  Refusing the login instead would have left such an account no way to
+  enrol, since adding a factor needs a session, and Bulbe is also
+  reached by the configuration, the emergency stop or a mode file that
+  cannot be read. Where no TOTP can be set up (`pyotp` missing) both are
+  refused (503) in Bulbe; the registration is refused too, in any mode,
+  when the two-factor module cannot be reached, as the login already
+  was, and in both cases before any account is made. Security keys are
+  added from the settings once signed in, and a session opened before
+  the switch to Bulbe is not ended by it. en1-en7 in the new
+  `tests/test_bulbe_login_enrols_a_factor_contracts.py` and
+  `tests/test_bulbe_login_enrols_a_factor_frontend_contracts.py`; en7
+  in place of vb1 and vb3 of
+  `tests/test_auth_2fa_verification_bounds_contracts.py`, which took the
+  code that had confirmed a TOTP for a first use, deselected.
+
 - [SECURITY] The audit chain no longer re-anchors in silence. Its
   startup check recreated a missing anchor file without a word, and
   passed over an anchor it did not recognize or one written under

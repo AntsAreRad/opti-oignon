@@ -2820,6 +2820,27 @@ export interface TwoFactorAnswer {
 	webauthn_response?: Record<string, unknown>;
 }
 
+/** The login's (or the registration's) first step in Bulbe for an account with no second factor: no token, the
+ * enrolment of a first one. */
+export interface TwoFactorEnrolment {
+	requires_2fa_enrolment: true;
+	challenge_id: string;
+	methods: Array<'totp'>;
+}
+
+/** The TOTP an enrolment began: its secret, its provisioning URI, and its QR code where the server could draw it. */
+export interface TwoFactorEnrolmentSecret {
+	secret: string;
+	uri: string;
+	qr_code_base64?: string;
+}
+
+/** The first session of an account that enrolled at login, and its recovery codes, shown once (none when they
+ * could not be made: the settings make them). */
+export interface EnrolledTokens extends AuthTokens {
+	recovery_codes: string[];
+}
+
 export interface AuthStatus {
 	available: boolean;
 	single_user_mode: boolean;

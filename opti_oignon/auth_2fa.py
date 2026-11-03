@@ -525,6 +525,10 @@ class TwoFactorAuthManager:
         self._challenges_lock = threading.Lock()
         self._totp_attempts: dict[str, list[float]] = {}  # user_id -> timestamps
         self._recovery_attempts: dict[str, list[float]] = {}
+        # The wrong codes sent to confirm a TOTP, per account: the enrolment at login makes a new challenge at each
+        # login, so its tries are counted here too, across them.
+        self._totp_confirm_failures: dict[str, list[float]] = {}
+        self._confirm_lock = threading.Lock()
 
     # -- Status ---------------------------------------------------------------
 
@@ -615,17 +619,21 @@ class TwoFactorAuthManager:
         """Whether a code has a recovery code's shape: as many hexadecimal characters as the generator makes."""
         return len(code) == RECOVERY_CODE_LENGTH and all(c in string.hexdigits for c in code)
 
-    def is_2fa_required(self, user_id: str) -> bool:
-        """Check if 2FA is required for this user based on mode."""
+    @staticmethod
+    def required_by_mode() -> bool:
+        """Whether the mode asks a second factor of every account: in Bulbe, and when the mode cannot be read."""
         try:
             from opti_oignon.security_mode import is_bulbe
-            if is_bulbe():
-                return True
-        except ImportError:
-            pass
-        # In Daily mode, 2FA is required only if user has enabled it
-        status = self.get_status(user_id)
-        return status.any_method_active
+            return bool(is_bulbe())
+        except Exception:  # noqa: BLE001 - an unreadable mode is read as Bulbe, where the factor is asked
+            return True
+
+    def is_2fa_required(self, user_id: str, status: TwoFAStatus | None = None) -> bool:
+        """Whether the login asks this account a second factor: every account in Bulbe (and when the mode cannot be
+        read), in Daily one with a factor active -- read from ``status`` when the caller holds it."""
+        if self.required_by_mode():
+            return True
+        return (status if status is not None else self.get_status(user_id)).any_method_active
 
     # -- WebAuthn/FIDO2 -------------------------------------------------------
 
@@ -887,7 +895,9 @@ class TwoFactorAuthManager:
         """Generate a new TOTP secret for a user.
 
         Returns the secret and provisioning URI, whose account name is ``label`` (the account's username) when
-        given, else the user id.  The secret must be verified with totp_verify() before it becomes active.
+        given, else the user id.  The secret must be verified with totp_verify() before it becomes active.  A secret
+        that is active is never replaced, whoever asks and whenever: the setup then answers ``already_active``, in the
+        same statement that would have replaced it.
         """
         if not TOTP_AVAILABLE:
             return {"success": False, "error": "totp_unavailable",
@@ -898,16 +908,24 @@ class TwoFactorAuthManager:
 
         conn = _get_2fa_conn()
         try:
-            # Upsert: replace existing unverified config
-            conn.execute(
-                """INSERT OR REPLACE INTO totp_config
-                   (user_id, secret_encrypted, verified, created_at)
-                   VALUES (?, ?, 0, ?)""",
+            # Upsert: replace an unverified config only -- the condition and the write are one statement, so a
+            # confirmation committed by another request since a status was read is never undone.
+            replaced = conn.execute(
+                """INSERT INTO totp_config
+                   (user_id, secret_encrypted, verified, last_step, created_at)
+                   VALUES (?, ?, 0, 0, ?)
+                   ON CONFLICT(user_id) DO UPDATE SET
+                     secret_encrypted = excluded.secret_encrypted, verified = 0, last_step = 0,
+                     created_at = excluded.created_at
+                   WHERE totp_config.verified = 0""",
                 (user_id, encrypted, time.time()),
-            )
+            ).rowcount
             conn.commit()
         finally:
             conn.close()
+        if replaced == 0:
+            return {"success": False, "error": "already_active",
+                    "message": "TOTP is already active for this user"}
 
         totp = pyotp.TOTP(secret)
         uri = totp.provisioning_uri(name=label or user_id, issuer_name=RP_NAME)
@@ -938,10 +956,28 @@ class TwoFactorAuthManager:
         """Verify a TOTP code and activate TOTP for the user.
 
         Called during setup to confirm the user has correctly
-        configured their authenticator app.
+        configured their authenticator app.  The step the code matched is
+        recorded as consumed (AU-06): the code that confirmed the secret does
+        not sign in.  The secret activated is the one the code was checked
+        against, in the statement that activates it: one another setup put in
+        its place meanwhile is never activated (``changed``).  Wrong codes are
+        counted per account, five per window, each try reserved before its code
+        is read, so that tries sent together are all counted; past them the
+        answer is ``rate_limited`` until the window ends.
         """
         if not TOTP_AVAILABLE:
             return {"success": False, "error": "totp_unavailable"}
+
+        now = time.time()
+        with self._confirm_lock:
+            failures = [t for t in self._totp_confirm_failures.get(user_id, []) if now - t < TOTP_WINDOW_SECONDS]
+            if len(failures) >= MAX_TOTP_ATTEMPTS_PER_WINDOW:
+                self._totp_confirm_failures[user_id] = failures
+                logger.warning("TOTP confirmation rate limit exceeded for user %s", user_id)
+                return {"success": False, "error": "rate_limited",
+                        "message": "Too many wrong codes for this account: wait a few minutes"}
+            failures.append(now)
+            self._totp_confirm_failures[user_id] = failures
 
         conn = _get_2fa_conn()
         try:
@@ -950,24 +986,36 @@ class TwoFactorAuthManager:
                 (user_id,),
             ).fetchone()
             if not row:
+                self._release_confirm_try(user_id, now)
                 return {"success": False, "error": "not_configured",
                         "message": "TOTP not set up for this user"}
 
             secret = _decrypt_secret(row["secret_encrypted"])
             totp = pyotp.TOTP(secret)
 
-            if totp.verify(code, valid_window=1):
-                conn.execute(
-                    "UPDATE totp_config SET verified = 1 WHERE user_id = ?",
-                    (user_id,),
-                )
-                conn.commit()
-                return {"success": True, "message": "TOTP verified and activated"}
-            else:
+            if not totp.verify(code, valid_window=1):
                 return {"success": False, "error": "invalid_code",
                         "message": "Invalid TOTP code"}
+            self._release_confirm_try(user_id, now)
+            activated = conn.execute(
+                "UPDATE totp_config SET verified = 1, last_step = ? "
+                "WHERE user_id = ? AND secret_encrypted = ?",
+                (_totp_matched_step(totp, code, now) or 0, user_id, row["secret_encrypted"]),
+            ).rowcount
+            conn.commit()
+            if activated == 0:
+                return {"success": False, "error": "changed",
+                        "message": "The TOTP secret was set up again while this code was checked"}
+            return {"success": True, "message": "TOTP verified and activated"}
         finally:
             conn.close()
+
+    def _release_confirm_try(self, user_id: str, at: float) -> None:
+        """Give back a try ``totp_verify`` reserved at ``at``: its code was right, or there was nothing to check."""
+        with self._confirm_lock:
+            held = self._totp_confirm_failures.get(user_id, [])
+            if at in held:
+                held.remove(at)
 
     def totp_validate(self, user_id: str, code: str) -> bool:
         """Validate a TOTP code during authentication.
@@ -1301,6 +1349,7 @@ class TwoFactorAuthManager:
                 del self._webauthn_challenges[slot]
         self._totp_attempts.pop(user_id, None)
         self._recovery_attempts.pop(user_id, None)
+        self._totp_confirm_failures.pop(user_id, None)
         return counts
 
     def disable_all(self, user_id: str) -> dict[str, Any]:

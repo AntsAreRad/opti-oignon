@@ -1797,6 +1797,8 @@ async def totp_setup(
         if type(exc).__name__ != "EncryptionUnavailable" or type(exc).__module__ != "opti_oignon.encryption":
             raise
         raise HTTPException(status_code=503, detail=f"TOTP not set up: {exc}") from exc
+    if result.get("error") == "already_active":
+        raise HTTPException(status_code=409, detail="TOTP is already active: disable it first to set it up again.")
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", ""))
     return result

@@ -7,13 +7,19 @@
   but inherits the palette from data-oo-theme (set by the root layout's
   initPreferences on every route). All controls use ds primitives, so the
   page matches the app in all five palettes.
+
+  In Bulbe the new account enrols a second factor before its first session
+  (EnrolSecondFactor); an enrolment that ends sends to the login, which asks
+  it again.
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { doRegister, authStatus } from '$lib/stores/auth';
+	import type { TwoFactorEnrolment } from '$lib/types';
 	import Card from '$lib/ds/Card.svelte';
 	import Input from '$lib/ds/Input.svelte';
 	import Button from '$lib/ds/Button.svelte';
+	import EnrolSecondFactor from '$lib/components/auth/EnrolSecondFactor.svelte';
 
 	let username = '';
 	let email = '';
@@ -21,6 +27,9 @@
 	let confirmPassword = '';
 	let loading = false;
 	let errorMsg = '';
+
+	// The enrolment of the new account's first factor, once the registration asked one.
+	let enrolment: TwoFactorEnrolment | null = null;
 
 	$: registrationDisabled = $authStatus && !$authStatus.registration_enabled;
 
@@ -48,7 +57,13 @@
 		errorMsg = '';
 
 		try {
-			await doRegister(username.trim(), password, email.trim());
+			const outcome = await doRegister(username.trim(), password, email.trim());
+			if ('enrolment' in outcome) {
+				enrolment = outcome.enrolment;
+				password = '';
+				confirmPassword = '';
+				return;
+			}
 			goto('/chat');
 		} catch (e: unknown) {
 			const msg = e instanceof Error ? e.message : 'Registration failed';
@@ -73,9 +88,13 @@
 				<h1 class="oo-auth-title">Opti-Oignon</h1>
 			</div>
 
-			<p class="oo-auth-subtitle">Create your account</p>
+			<p class="oo-auth-subtitle">
+				{enrolment ? 'Set up a second factor to sign in' : 'Create your account'}
+			</p>
 
-			{#if registrationDisabled}
+			{#if enrolment}
+				<EnrolSecondFactor {enrolment} on:done={() => goto('/chat')} on:restart={() => goto('/login')} />
+			{:else if registrationDisabled}
 				<div class="oo-auth-error" role="alert">
 					Registration is currently disabled. Contact an administrator.
 				</div>

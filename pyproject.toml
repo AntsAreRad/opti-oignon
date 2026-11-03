@@ -1325,6 +1325,16 @@ fail_under = 0
 # post-quantum check warns, never passes), blocks nothing in Daily, and in Bulbe or a mode that cannot be read is
 # blocked by the bind check alone. They stay in the tree word for word.
 #
+# The code that confirms a TOTP no longer signs in again (block 225). vb1 and vb3 of
+# tests/test_auth_2fa_verification_bounds_contracts.py validated the code that had just confirmed the TOTP as its
+# first use -- vb3 in so many words, "the same code must validate once the enrollment is verified" --: the
+# confirmation did not record its time-step, so that code, typed in front of whoever watched the enrolment, signed in
+# again within its window. The confirmation now records the step it matched (AU-06). vb1 and vb3 give way to en7 of
+# tests/test_bulbe_login_enrols_a_factor_contracts.py, which asserts the rest of what they pin -- single use inside
+# the window, the next step still valid, an unverified enrolment and an unknown user refused, the refusal being the
+# verification flag -- with a code of the next step, and the confirming code refused. They stay in the tree word for
+# word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1786,4 +1796,6 @@ addopts = """
     --deselect=tests/test_run_journal_contracts.py::test_rj15_the_security_settings_the_journal_reads_are_written_whole
     --deselect=tests/test_startup_boot_guard_contracts.py::test_c3_machinery_failure_is_fail_open
     --deselect=tests/test_pqc_refusal_is_fired_contracts.py::test_b4_an_uninspectable_module_warns_and_never_refuses_the_boot
+    --deselect=tests/test_auth_2fa_verification_bounds_contracts.py::test_vb1_totp_code_is_single_use_within_its_window
+    --deselect=tests/test_auth_2fa_verification_bounds_contracts.py::test_vb3_unverified_or_unknown_enrollment_is_refused
 """

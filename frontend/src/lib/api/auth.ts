@@ -12,6 +12,9 @@ import type {
 	AuthStatus,
 	TwoFactorAnswer,
 	TwoFactorChallenge,
+	TwoFactorEnrolment,
+	TwoFactorEnrolmentSecret,
+	EnrolledTokens,
 	UserSettings,
 	RegisterRequest,
 	LoginRequest,
@@ -32,19 +35,30 @@ export async function getAuthStatus(): Promise<AuthStatus> {
 	return apiGet<AuthStatus>(`${BASE}/status`);
 }
 
-/** Register a new account and get tokens. */
-export async function register(req: RegisterRequest): Promise<AuthTokens> {
-	return apiPost<AuthTokens>(`${BASE}/register`, req);
+/** Register a new account and get tokens -- in Bulbe, the enrolment of its first second factor instead. */
+export async function register(req: RegisterRequest): Promise<AuthTokens | TwoFactorEnrolment> {
+	return apiPost<AuthTokens | TwoFactorEnrolment>(`${BASE}/register`, req);
 }
 
-/** Log in: tokens, or -- for an account with a second factor -- the challenge its second step answers. */
-export async function login(req: LoginRequest): Promise<AuthTokens | TwoFactorChallenge> {
-	return apiPost<AuthTokens | TwoFactorChallenge>(`${BASE}/login`, req);
+/** Log in: tokens, or -- for an account with a second factor -- the challenge its second step answers, or -- in
+ * Bulbe, for an account with none -- the enrolment of a first one. */
+export async function login(req: LoginRequest): Promise<AuthTokens | TwoFactorChallenge | TwoFactorEnrolment> {
+	return apiPost<AuthTokens | TwoFactorChallenge | TwoFactorEnrolment>(`${BASE}/login`, req);
 }
 
 /** The login's second step: tokens once the factor is right. */
 export async function login2fa(req: TwoFactorAnswer): Promise<AuthTokens> {
 	return apiPost<AuthTokens>(`${BASE}/login/2fa`, req);
+}
+
+/** Begin the TOTP an enrolment challenge asks for: its secret, its URI, its QR code. */
+export async function enrolBegin(req: { challenge_id: string }): Promise<TwoFactorEnrolmentSecret> {
+	return apiPost<TwoFactorEnrolmentSecret>(`${BASE}/login/2fa/enrol/begin`, req);
+}
+
+/** Confirm it with one of its codes: the first session, and the recovery codes shown once. */
+export async function enrolComplete(req: { challenge_id: string; code: string }): Promise<EnrolledTokens> {
+	return apiPost<EnrolledTokens>(`${BASE}/login/2fa/enrol/complete`, req);
 }
 
 /** Refresh token pair. */

@@ -86,6 +86,28 @@ never asked at login, and are removed at the first start of this version
 that can write to the store, their counts audited: the owner is told to
 set them up again.
 
+In Bulbe mode every account is asked a second factor, and a security
+mode that cannot be read counts as Bulbe. An account that has none yet
+gets no session from its password alone: the login, and the
+registration, answer with an enrolment instead. The page sets a TOTP up
+there and then -- its QR code and its secret shown, a code from the app
+confirming it --, shows the account's recovery codes once, and only then
+signs in; the code that confirmed the TOTP does not sign in again. An
+enrolment lasts five minutes from its latest begin and allows five wrong
+codes, and an account five wrong confirmation codes in five minutes
+across its logins. A TOTP confirmed meanwhile by another login of the
+account is never replaced, and a code checked against a secret another
+login set up again meanwhile activates nothing: either login is then
+sent back to log in. The enrolment trusts whoever
+completes it first: for an account with no factor yet, whoever holds its
+password can enrol a factor of their own, and the account's owner then
+finds a code asked that is not theirs. Set every account's factor up
+before switching to Bulbe. Where no TOTP can be set up (the `pyotp`
+library missing) the login and the registration are refused in Bulbe
+(503), never let through. Security keys are added from the settings once
+signed in. Switching to Bulbe ends no session already open: the
+enrolment is asked at the account's next login.
+
 ### WebAuthn / FIDO2
 
 Hardware security key authentication using the WebAuthn standard.
