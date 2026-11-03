@@ -53,7 +53,10 @@ cookies with server-side algorithm enforcement. Multi-user RBAC with
 per-user data isolation (separate encryption keys derived via Argon2id).
 Optional 2FA via WebAuthn/FIDO2 and TOTP with recovery codes. Login
 timing oracle prevention (dummy bcrypt on invalid usernames). Rate
-limiting with exponential lockout. CSRF double-submit cookie on the
+limiting with exponential lockout: a login checks one password at a time
+for an address and for an account, so that tries sent together are each
+counted, and a code sent at the second step is counted before it is
+read. CSRF double-submit cookie on the
 state-changing endpoints of a signed-in browser session (in single-user
 Daily mode, which has no session cookie, and for the few routes it exempts,
 the gate's origin check below is what refuses another site).

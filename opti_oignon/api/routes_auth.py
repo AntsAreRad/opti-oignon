@@ -199,16 +199,20 @@ class _ChallengeStore:
                 return None
             return dict(entry)
 
-    def record_attempt(self, challenge_id: str) -> bool:
-        """Record a failed 2FA attempt.  Returns True if now locked."""
+    def take_attempt(self, challenge_id: str) -> int | None:
+        """Count a 2FA try before its answer is read, and return the tries counted with it: tries sent together are
+        each counted before any is checked, and one past the cap is never checked. None when the challenge is gone or
+        expired, 0 when it is locked; the try that reaches the cap locks it."""
         with self._lock:
             entry = self._store.get(challenge_id)
-            if entry is None:
-                return True
+            if entry is None or time.time() - entry["created_at"] > self.CHALLENGE_TTL_SECONDS:
+                return None
+            if entry["locked"]:
+                return 0
             entry["attempts"] += 1
             if entry["attempts"] >= self.MAX_ATTEMPTS:
                 entry["locked"] = True
-            return entry["locked"]
+            return entry["attempts"]
 
     def renew(self, challenge_id: str) -> None:
         """Start a live challenge's time again: an enrolment's five minutes run from its latest begin, the time it
@@ -295,6 +299,27 @@ def _enrolment_challenge(tfa_mgr: Any, user: Any) -> JSONResponse:
         "challenge_id": challenge_id,
         "methods": ["totp"],
     })
+
+
+# The addresses and the accounts whose login password is being checked: one check at a time for each, refused rather
+# than queued, so that tries sent together meet the limiter one after the other -- each failure counted before the
+# next try is asked -- and no worker thread waits on another.
+_logging_in: set[tuple[str, str]] = set()
+_logging_in_lock = threading.Lock()
+
+
+def _claim_login(client_ip: str, username: str) -> bool:
+    keys = {("address", client_ip), ("account", username)}
+    with _logging_in_lock:
+        if keys & _logging_in:
+            return False
+        _logging_in.update(keys)
+        return True
+
+
+def _release_login(client_ip: str, username: str) -> None:
+    with _logging_in_lock:
+        _logging_in.difference_update({("address", client_ip), ("account", username)})
 
 
 def _get_rate_limiter():
@@ -851,7 +876,8 @@ def login(req: LoginRequest, request: Request, response: Response) -> dict:
       - If 2FA IS active: return ``{requires_2fa: true, challenge_id, methods}``
         with NO tokens yet.  Client must call ``POST /login/2fa`` next.
 
-    Rate-limited per IP and per username.
+    Rate-limited per IP and per username, one password checked at a time for each: a login that finds one being
+    checked for its address or its username is refused (429) before its password is read, and is not counted.
     Sets httpOnly cookies when cookie_mode is enabled.
     """
     mgr = _get_auth_manager()
@@ -860,34 +886,44 @@ def login(req: LoginRequest, request: Request, response: Response) -> dict:
     rate_limiter = _get_rate_limiter()
     client_ip = _extract_client_ip(request)
 
-    if rate_limiter:
-        allowed, retry_after = rate_limiter.check_rate_limit(
-            client_ip, req.username,
+    if not _claim_login(client_ip, req.username):
+        logger.warning("Login refused while another is checked: ip=%s, user=%s", client_ip, req.username)
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "A login for this account or from this address is being checked. Try again."},
+            headers={"Retry-After": "1"},
         )
-        if not allowed:
-            logger.warning(
-                "Login rate limited: ip=%s, user=%s, retry_after=%ds",
-                client_ip, req.username, retry_after,
-            )
-            return JSONResponse(
-                status_code=429,
-                content={"detail": "Too many login attempts. Please try again later."},
-                headers={"Retry-After": str(retry_after)},
-            )
-
-    user = mgr.authenticate(req.username, req.password)
-    if not user:
-        # Record failure
+    try:
         if rate_limiter:
-            rate_limiter.record_failure(client_ip, req.username)
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid username or password.",
-        )
+            allowed, retry_after = rate_limiter.check_rate_limit(
+                client_ip, req.username,
+            )
+            if not allowed:
+                logger.warning(
+                    "Login rate limited: ip=%s, user=%s, retry_after=%ds",
+                    client_ip, req.username, retry_after,
+                )
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "Too many login attempts. Please try again later."},
+                    headers={"Retry-After": str(retry_after)},
+                )
 
-    # Record success (resets username counters)
-    if rate_limiter:
-        rate_limiter.record_success(client_ip, req.username)
+        user = mgr.authenticate(req.username, req.password)
+        if not user:
+            # Record failure
+            if rate_limiter:
+                rate_limiter.record_failure(client_ip, req.username)
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid username or password.",
+            )
+
+        # Record success (resets username counters)
+        if rate_limiter:
+            rate_limiter.record_success(client_ip, req.username)
+    finally:
+        _release_login(client_ip, req.username)
 
     # Check if 2FA is active for this user. A second factor whose state cannot be read -- the two-factor module
     # unreachable, its store unreadable -- refuses the login: it never lets one through without the factor it may
@@ -983,8 +1019,9 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
     Validates the 2FA code/response against the challenge issued in step 1.
     On success, returns JWT tokens.  On failure, returns 403.
 
-    Rate limited: 5 attempts per challenge, then the challenge is locked
-    and the user must restart login from step 1.
+    Rate limited: 5 attempts per challenge, each counted before its answer is
+    read, then the challenge is locked and the user must restart login from
+    step 1.
     """
     # Retrieve challenge
     challenge = _challenge_store.get(req.challenge_id)
@@ -1016,9 +1053,35 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
         )
 
     # Only what the first step offered: a method it did not offer -- an app password among them -- is a failed try.
+    # An offered method's answer that is not there is refused before any try is counted: nothing is read.
     offered = list(challenge.get("methods") or [])
-    if req.method != "auto" and req.method not in offered:
-        locked = _challenge_store.record_attempt(req.challenge_id)
+    not_offered = req.method != "auto" and req.method not in offered
+    # TOTP or recovery: the code in its plain form -- the spaces an app shows inside it removed, compatibility forms
+    # (fullwidth digits) folded as the TOTP library folds them.
+    code = "".join(unicodedata.normalize("NFKC", req.code or "").split())
+    if not not_offered and req.method == "webauthn" and not req.webauthn_response:
+        raise HTTPException(
+            status_code=400,
+            detail="A security key's answer is required for this method.",
+        )
+    if not not_offered and req.method != "webauthn" and not code:
+        raise HTTPException(
+            status_code=400,
+            detail="A 2FA code is required for this method.",
+        )
+
+    # The try counted before its answer is read: tries sent together are each counted, and one past the cap is
+    # refused unread.
+    taken = _challenge_store.take_attempt(req.challenge_id)
+    if not taken:
+        raise HTTPException(
+            status_code=403,
+            detail=("Invalid or expired 2FA challenge. Please log in again." if taken is None
+                    else "Too many 2FA attempts. Please log in again."),
+        )
+    locked = taken >= _ChallengeStore.MAX_ATTEMPTS
+
+    if not_offered:
         raise HTTPException(
             status_code=403,
             detail=("Too many 2FA attempts. Please log in again." if locked
@@ -1031,11 +1094,6 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
 
     if req.method == "webauthn":
         # WebAuthn assertion validation, against the options the first step gave
-        if not req.webauthn_response:
-            raise HTTPException(
-                status_code=400,
-                detail="A security key's answer is required for this method.",
-            )
         try:
             result = tfa_mgr.webauthn_auth_complete(
                 user_id, req.webauthn_response, key=challenge.get("webauthn_key") or None,
@@ -1046,17 +1104,9 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
             logger.warning("WebAuthn validation error: %s", exc)
             success = False
     else:
-        # TOTP or recovery, as offered: the code in its plain form -- the spaces an app shows inside it removed,
-        # compatibility forms (fullwidth digits) folded as the TOTP library folds them. A code is tried as a recovery
-        # code only when it has one's shape (as many hexadecimal characters as the generator makes), whichever method
-        # names it, and auto tries any other as a TOTP code -- so that only a well-formed recovery code ever spends
-        # one of their few tries.
-        code = "".join(unicodedata.normalize("NFKC", req.code or "").split())
-        if not code:
-            raise HTTPException(
-                status_code=400,
-                detail="A 2FA code is required for this method.",
-            )
+        # TOTP or recovery, as offered. A code is tried as a recovery code only when it has one's shape (as many
+        # hexadecimal characters as the generator makes), whichever method names it, and auto tries any other as a
+        # TOTP code -- so that only a well-formed recovery code ever spends one of their few tries.
         if req.method == "auto":
             shaped = "recovery" if tfa_mgr.recovery_shaped(code) else "totp"
             tried = [shaped] if shaped in offered else []
@@ -1072,8 +1122,7 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
                 break
 
     if not success:
-        locked = _challenge_store.record_attempt(req.challenge_id)
-        remaining = _ChallengeStore.MAX_ATTEMPTS - (challenge["attempts"] + 1)
+        remaining = _ChallengeStore.MAX_ATTEMPTS - taken
         detail = "Invalid 2FA code."
         if locked:
             detail = "Too many 2FA attempts. Please log in again."
@@ -1209,6 +1258,15 @@ def login_2fa_enrol_complete(req: EnrolCompleteRequest, request: Request, respon
             status_code=400,
             detail="A 2FA code is required for this method.",
         )
+    # The try counted before its code is read, as the second step counts its own; a code that is not there is not
+    # one.
+    taken = _challenge_store.take_attempt(req.challenge_id)
+    if not taken:
+        raise HTTPException(
+            status_code=403,
+            detail=("Invalid or expired enrolment. Please log in again." if taken is None
+                    else "Too many 2FA attempts. Please log in again."),
+        )
     verified = tfa_mgr.totp_verify(user_id, code)
     if verified.get("error") == "rate_limited":
         raise HTTPException(
@@ -1222,10 +1280,9 @@ def login_2fa_enrol_complete(req: EnrolCompleteRequest, request: Request, respon
             detail="Another login set this enrolment's secret up again. Please log in again.",
         )
     if not verified.get("success", False):
-        locked = _challenge_store.record_attempt(req.challenge_id)
-        remaining = _ChallengeStore.MAX_ATTEMPTS - (challenge["attempts"] + 1)
+        remaining = _ChallengeStore.MAX_ATTEMPTS - taken
         detail = "Invalid 2FA code."
-        if locked:
+        if remaining <= 0:
             detail = "Too many 2FA attempts. Please log in again."
         elif remaining > 0:
             detail = f"Invalid 2FA code. {remaining} attempt(s) remaining."

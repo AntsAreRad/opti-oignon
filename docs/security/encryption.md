@@ -139,7 +139,13 @@ shows -- cut short, of another version or length, naming a key derivation
 unknown or that the Python at hand cannot run -- is said as such; a byte
 changed for another in its salt, or in its wrapped key past the version
 byte, fails as a wrong passphrase does, and is said as one: nothing can
-tell the two apart. Both
+tell the two apart. The backend unwraps a wrapped key file once for each
+text and the passphrase it was started with, and keeps that key and that
+passphrase in memory, locked where the system allows, until the key file
+is replaced or the backend stops: the security mode read again, its
+status, a downgrade and a plugin approval derive nothing more, and a
+passphrase refused is refused again without a derivation. A passphrase
+given to a command is never kept. Both
 launchers hand the passphrase, and `OPTI_ENCRYPTION_KEY`, to the backend
 alone: the frontend, the browser and every other command they run start
 without them, and `launch.sh`, run as it is, runs itself and the

@@ -525,6 +525,9 @@ class TwoFactorAuthManager:
         self._challenges_lock = threading.Lock()
         self._totp_attempts: dict[str, list[float]] = {}  # user_id -> timestamps
         self._recovery_attempts: dict[str, list[float]] = {}
+        # The two windows above, each read, checked and written back under this lock: tries sent together are each
+        # counted before any code is read.
+        self._attempts_lock = threading.Lock()
         # The wrong codes sent to confirm a TOTP, per account: the enrolment at login makes a new challenge at each
         # login, so its tries are counted here too, across them.
         self._totp_confirm_failures: dict[str, list[float]] = {}
@@ -997,8 +1000,10 @@ class TwoFactorAuthManager:
                 return {"success": False, "error": "invalid_code",
                         "message": "Invalid TOTP code"}
             self._release_confirm_try(user_id, now)
+            # The step is never written back below one a sign-in consumed: a confirmation of an active TOTP with an
+            # earlier code would let a used code sign in again.
             activated = conn.execute(
-                "UPDATE totp_config SET verified = 1, last_step = ? "
+                "UPDATE totp_config SET verified = 1, last_step = MAX(COALESCE(last_step, 0), ?) "
                 "WHERE user_id = ? AND secret_encrypted = ?",
                 (_totp_matched_step(totp, code, now) or 0, user_id, row["secret_encrypted"]),
             ).rowcount
@@ -1020,23 +1025,28 @@ class TwoFactorAuthManager:
     def totp_validate(self, user_id: str, code: str) -> bool:
         """Validate a TOTP code during authentication.
 
-        Rate limited: max 5 attempts per 5 minutes. AU-06: a code is single-use
-        within its validity window -- the consumed time-step is recorded per
-        user and a code at or below the stored step is rejected, so a captured
-        live code cannot be replayed during the +/-1 step window.
+        Rate limited: max 5 attempts per 5 minutes, each counted before its
+        code is read, so that tries sent together are each counted. AU-06: a
+        code is single-use within its validity window -- the consumed
+        time-step is recorded per user and a code at or below the stored step
+        is rejected, so a captured live code cannot be replayed during the
+        +/-1 step window; the step is written only over an earlier one, here
+        and at the setup's confirmation, so of two right codes sent together one
+        signs in, and no confirmation brings a used code back.
         """
         if not TOTP_AVAILABLE:
             return False
 
         # Rate limiting
         now = time.time()
-        attempts = self._totp_attempts.get(user_id, [])
-        attempts = [t for t in attempts if now - t < TOTP_WINDOW_SECONDS]
-        if len(attempts) >= MAX_TOTP_ATTEMPTS_PER_WINDOW:
-            logger.warning("TOTP rate limit exceeded for user %s", user_id)
-            return False
-        attempts.append(now)
-        self._totp_attempts[user_id] = attempts
+        with self._attempts_lock:
+            attempts = self._totp_attempts.get(user_id, [])
+            attempts = [t for t in attempts if now - t < TOTP_WINDOW_SECONDS]
+            if len(attempts) >= MAX_TOTP_ATTEMPTS_PER_WINDOW:
+                logger.warning("TOTP rate limit exceeded for user %s", user_id)
+                return False
+            attempts.append(now)
+            self._totp_attempts[user_id] = attempts
 
         conn = _get_2fa_conn()
         try:
@@ -1060,11 +1070,16 @@ class TwoFactorAuthManager:
                 logger.warning("TOTP replay rejected for user %s", user_id)
                 return False
             if matched_step is not None:
-                conn.execute(
-                    "UPDATE totp_config SET last_step = ? WHERE user_id = ?",
-                    (matched_step, user_id),
-                )
+                # The write is the check: of two right codes read together, only the one that moves the step on
+                # signs in, and a step is never written back below a later one.
+                moved = conn.execute(
+                    "UPDATE totp_config SET last_step = ? WHERE user_id = ? AND COALESCE(last_step, 0) < ?",
+                    (matched_step, user_id, matched_step),
+                ).rowcount
                 conn.commit()
+                if moved != 1:
+                    logger.warning("TOTP replay rejected for user %s", user_id)
+                    return False
             return True
         except Exception:
             return False
@@ -1120,21 +1135,23 @@ class TwoFactorAuthManager:
     def validate_recovery_code(self, user_id: str, code: str) -> bool:
         """Validate and consume a recovery code.  One-time use.
 
-        Rate limited: 3 attempts per hour. AU-03: matches both the v2
+        Rate limited: 3 attempts per hour, each counted before its code is
+        read, as TOTP codes are. AU-03: matches both the v2
         (master-key-derived) and the legacy hash schemes; a match against a
         legacy hash is still accepted, and the user's remaining recovery codes
         are reported as needing re-issue via recovery_reissue_required().
         """
         now = time.time()
-        attempts = self._recovery_attempts.get(user_id, [])
-        attempts = [t for t in attempts if now - t < 3600]
-        if len(attempts) >= MAX_RECOVERY_ATTEMPTS_PER_HOUR:
-            logger.warning(
-                "Recovery code rate limit exceeded for user %s", user_id
-            )
-            return False
-        attempts.append(now)
-        self._recovery_attempts[user_id] = attempts
+        with self._attempts_lock:
+            attempts = self._recovery_attempts.get(user_id, [])
+            attempts = [t for t in attempts if now - t < 3600]
+            if len(attempts) >= MAX_RECOVERY_ATTEMPTS_PER_HOUR:
+                logger.warning(
+                    "Recovery code rate limit exceeded for user %s", user_id
+                )
+                return False
+            attempts.append(now)
+            self._recovery_attempts[user_id] = attempts
 
         conn = _get_2fa_conn()
         try:
@@ -1347,9 +1364,11 @@ class TwoFactorAuthManager:
             for slot in [k for k, v in self._webauthn_challenges.items()
                          if k == user_id or v.get("user_id") == user_id]:
                 del self._webauthn_challenges[slot]
-        self._totp_attempts.pop(user_id, None)
-        self._recovery_attempts.pop(user_id, None)
-        self._totp_confirm_failures.pop(user_id, None)
+        with self._attempts_lock:
+            self._totp_attempts.pop(user_id, None)
+            self._recovery_attempts.pop(user_id, None)
+        with self._confirm_lock:
+            self._totp_confirm_failures.pop(user_id, None)
         return counts
 
     def disable_all(self, user_id: str) -> dict[str, Any]:

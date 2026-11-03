@@ -3515,6 +3515,24 @@ package costs.
   origin. Contracts op1-op8 in
   `tests/test_another_port_is_another_site_contracts.py`; xs2 gives way
   to them.
+- [SECURITY] Tries sent together are each counted. A login asked the
+  limiter, checked the password, then counted the failure, so tries sent
+  together all passed the limiter before the first was counted, as many
+  as the server's thread pool runs; the second step and the enrolment at
+  login counted a code after reading it, and the account's TOTP and
+  recovery windows were read and written back unguarded. Now a login
+  checks one password at a time for an address and for an account, and
+  refuses (429) one that finds another being checked before reading its
+  password; a code is counted before it is read, and the account's
+  windows are read and written under one lock. Two right TOTP codes sent
+  together both signed in, the replay guard reading the last step used
+  before either wrote it: a step is now written only over an earlier
+  one, and a code that cannot write it is refused. And every load of a
+  wrapped key file derived its key again (Argon2id over 64 MiB, or
+  PBKDF2), on the event loop for the security mode's status, its mode
+  reads, a downgrade and a plugin approval: every request waited. A
+  wrapped key file is now unwrapped once per process for each text and
+  the passphrase the backend was started with.
 - [SECURITY] Remote access now refuses a revoked device's certificate.
   The check of each request read the client certificate from a transport
   uvicorn never puts in a request's scope, so it ran only on a header a

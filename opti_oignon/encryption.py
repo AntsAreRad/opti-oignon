@@ -33,6 +33,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import hmac
 import json
 import logging
 import os
@@ -775,6 +776,47 @@ def save_keyfile(
     return fpath
 
 
+# The key file this process last unwrapped with the passphrase it holds (``OPTI_KEYFILE_PASSPHRASE``): the digest
+# of its text, that passphrase -- held as a key is held --, and the key, or the refusal of a passphrase the envelope
+# refused. The derivation (Argon2id over 64 MiB, or PBKDF2) then runs once for each text and passphrase, not at every
+# load: a mode read, an approval, a status asked on the event loop would each stop every request for it. One text at
+# a time: the slot a new one takes is wiped, so a key file replaced leaves neither its key nor its passphrase here. A
+# passphrase given as an argument is never kept, nor what it opened; no digest of a passphrase is kept -- one would
+# test guesses at a hash's speed --; a slot wiped (every key is, at exit and on a signal) is unwrapped again.
+_unwrapped_slot: tuple[bytes, Any, Any] | None = None
+_unwrapped_lock = threading.Lock()
+
+
+def _unwrapped(text_digest: bytes, passphrase: str) -> Any:
+    """The key or the refusal kept for this text and passphrase, or None. Compared and copied under the lock the slot
+    is replaced under: a load never copies a key the replacement is zeroing."""
+    with _unwrapped_lock:
+        slot = _unwrapped_slot
+        if slot is None or slot[0] != text_digest:
+            return None
+        _digest, held, outcome = slot
+        try:
+            if not hmac.compare_digest(held.as_bytes(), passphrase.encode("utf-8")):
+                return None
+            if isinstance(outcome, str):
+                return outcome
+            raw = outcome.as_bytes()
+        except RuntimeError:  # wiped
+            return None
+    # A key every key's wipe (at exit, on a signal) zeroed as it was copied is no key: unwrapped again.
+    return secure_key_from_bytes(raw) if any(raw) else None
+
+
+def _remember_unwrapped(text_digest: bytes, passphrase: str, outcome: Any) -> None:
+    global _unwrapped_slot
+    slot = (text_digest, SecureBytes(bytearray(passphrase.encode("utf-8"))), outcome)
+    with _unwrapped_lock:
+        replaced, _unwrapped_slot = _unwrapped_slot, slot
+    for held in replaced[1:] if replaced is not None else ():
+        if not isinstance(held, str):
+            held.wipe()
+
+
 def load_keyfile(
     path: Path | None = None,
     *,
@@ -785,7 +827,10 @@ def load_keyfile(
     Auto-detects the format: an enveloped keyfile is decrypted with the
     passphrase (from ``passphrase`` or ``OPTI_KEYFILE_PASSPHRASE``); a legacy
     unprotected keyfile is read directly (with a deprecation warning).
-    Permissions are verified and tightened to 600.
+    Permissions are verified and tightened to 600, and the file read, at every
+    call; an envelope opened with the passphrase the process holds is
+    unwrapped once per process for each text and passphrase
+    (``_unwrapped_slot``), each call given a key of its own.
 
     Returns:
         Tuple of (key_as_SecureBytes, salt_or_None, kdf_name). The key is
@@ -824,6 +869,14 @@ def load_keyfile(
         blob = base64.urlsafe_b64decode(payload["blob"])
         if len(blob) != _ENVELOPE_BLOB or blob[0] != _FORMAT_VERSION:
             raise ValueError("Keyfile envelope is damaged: its blob is not the wrapped key of this format")
+        # Only the passphrase this process holds is kept (``_unwrapped_slot``); one given here never is.
+        kept = not passphrase
+        digest = hashlib.sha256(text.encode("ascii")).digest()
+        known = _unwrapped(digest, effective_pass) if kept else None
+        if isinstance(known, str):
+            raise PassphraseRefused(known)
+        if known is not None:
+            return known, kek_salt, kdf_name
         kek, _, _ = derive_key_from_passphrase(
             effective_pass, salt=kek_salt, force_pbkdf2=(kdf_name == "pbkdf2"),
         )
@@ -831,10 +884,17 @@ def load_keyfile(
             try:
                 raw_key = decrypt_bytes(kek, blob)
             except ValueError as exc:
+                if kept:
+                    _remember_unwrapped(digest, effective_pass, str(exc))
                 raise PassphraseRefused(str(exc)) from exc
         finally:
             kek = b"\x00" * len(kek)
-        return secure_key_from_bytes(raw_key), kek_salt, kdf_name
+        # The source of a SecureBytes is zeroed in place: the key kept is made from the key given, never from the
+        # bytes the given one was made from.
+        key = secure_key_from_bytes(raw_key)
+        if kept:
+            _remember_unwrapped(digest, effective_pass, secure_key_from_bytes(key.as_bytes()))
+        return key, kek_salt, kdf_name
 
     # Legacy unprotected format (line-based base64).
     logger.warning(
