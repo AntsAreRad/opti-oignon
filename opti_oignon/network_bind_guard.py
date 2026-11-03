@@ -509,10 +509,14 @@ def _check_ollama_ss(port: int) -> str | None:
     from opti_oignon.process_secrets import child_env
 
     try:
+        # A process name that is not UTF-8 is read with its bytes replaced:
+        # the address the pattern below reads is ASCII, so no verdict moves,
+        # and the check still looks.
         result = subprocess.run(
             ["ss", "-tlnp"],
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=5,
             env=child_env(),
         )

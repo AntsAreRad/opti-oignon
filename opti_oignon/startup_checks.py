@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 _SIGN_SCRIPT = _SCRIPTS_DIR / "sign_release.sh"
 _VERIFY_SCRIPT = _SCRIPTS_DIR / "verify_release.sh"
+_RECOGNIZED_MODES = ("daily", "bulbe")
 
 
 # ---------------------------------------------------------------------------
@@ -131,32 +132,36 @@ def run_startup_checks(*, force: bool = False) -> StartupCheckResult:
 
     result = StartupCheckResult(timestamp=time.time())
 
-    # --- Check 1: Code signing scripts ---
-    result.checks.append(_check_code_signing_scripts())
-
-    # --- Check 2: Ollama bind guard ---
-    result.checks.append(_check_ollama_bind())
-
-    # --- Check 3: LUKS encryption ---
-    result.checks.append(_check_luks())
-
-    # --- Check 4: Security mode ---
-    result.checks.append(_check_security_mode())
-
-    # --- Check 5: Encrypted swap ---
-    result.checks.append(_check_encrypted_swap())
-
-    # --- Check 6: Resource governor Ollama limits advisory ---
-    result.checks.append(_check_governor_ollama_limits())
-
-    # --- Check 7: Post-quantum signature primitive ---
-    result.checks.append(_check_pqc_primitive())
-
-    # --- Check 8: active-backend provenance coverage (advisory) ---
-    result.checks.append(_check_backend_provenance_coverage())
-
-    # --- Check 9: the platform's secrets out of this process's environment ---
-    result.checks.append(_check_process_secrets())
+    # Each check runs on its own: one whose exception escapes is reported
+    # not checked (_not_checked), and the checks after it still run. Each
+    # is looked up when it runs, as the module holds it then.
+    for name, check in (
+        # Check 1: Code signing scripts
+        ("code_signing_scripts", lambda: _check_code_signing_scripts()),
+        # Check 2: Ollama bind guard
+        ("ollama_bind", lambda: _check_ollama_bind()),
+        # Check 3: LUKS encryption
+        ("luks_encryption", lambda: _check_luks()),
+        # Check 4: Security mode
+        ("security_mode", lambda: _check_security_mode()),
+        # Check 5: Encrypted swap
+        ("encrypted_swap", lambda: _check_encrypted_swap()),
+        # Check 6: Resource governor Ollama limits advisory
+        ("governor_ollama_limits", lambda: _check_governor_ollama_limits()),
+        # Check 7: Post-quantum signature primitive
+        ("pqc_primitive", lambda: _check_pqc_primitive()),
+        # Check 8: active-backend provenance coverage (advisory)
+        ("backend_provenance_coverage", lambda: _check_backend_provenance_coverage()),
+        # Check 9: the platform's secrets out of this process's environment
+        ("process_secrets", lambda: _check_process_secrets()),
+    ):
+        try:
+            item = check()
+            if not isinstance(item, CheckItem):
+                raise TypeError(f"the check returned {type(item).__name__}, not a CheckItem")
+        except Exception as exc:  # noqa: BLE001 - said as not checked, never passed
+            item = _not_checked(name, exc)
+        result.checks.append(item)
 
     # --- Aggregate ---
     result.all_passed = all(c.passed for c in result.checks)
@@ -194,10 +199,72 @@ class StartupBlockedError(RuntimeError):
     """Raised at boot when a critical startup security check fails.
 
     Propagating this exception out of the application lifespan aborts
-    the ASGI startup phase, so the server refuses to serve. Only a
-    deliberate blocked verdict raises it; check machinery failures
-    never do.
+    the ASGI startup phase, so the server refuses to serve. A blocked
+    verdict raises it, and in Bulbe mode so does a checklist that
+    could not run.
     """
+
+
+def _named(exc: BaseException) -> str:
+    """The exception's type and message; its type alone when its message cannot be made."""
+    try:
+        return f"{type(exc).__name__}: {exc}"
+    except Exception:  # noqa: BLE001 - an exception whose message raises is still named by its type
+        return type(exc).__name__
+
+
+def _not_checked(name: str, exc: BaseException) -> CheckItem:
+    """The item of a check that failed before it could look: not checked, never passed.
+
+    A warning, and for the Ollama bind check in Bulbe mode (or a mode
+    that cannot be read or is not recognized) a critical failure that
+    blocks the boot: nothing after the boot refuses over Ollama's bind.
+    """
+    named = _named(exc)
+    logger.warning("Startup check %s failed: %s", name, named)
+    detail = f"{name}: not checked, the check failed ({named})"
+    if name == "ollama_bind" and _boot_mode() == "bulbe":
+        return CheckItem(
+            name=name,
+            passed=False,
+            severity="critical",
+            detail=detail + " -- BLOCKED: Bulbe mode does not start with Ollama's bind unchecked",
+            score_impact=-15,
+            tips=[
+                "Fix the error named above, then restart",
+                "Ollama's bind address must be checked before Bulbe mode serves",
+            ],
+        )
+    return CheckItem(
+        name=name,
+        passed=False,
+        severity="warning",
+        detail=detail,
+        score_impact=-5,
+        tips=["Fix the error named above, then run the checks again"],
+    )
+
+
+def _boot_mode() -> str:
+    """The security mode, read fail-secure as the bind guard reads it.
+
+    A mode that cannot be read, or is not exactly a recognized one, is
+    Bulbe. Read here rather than through the bind guard, so a guard
+    that does not import still leaves the mode read.
+    """
+    try:
+        from opti_oignon.security_mode import get_current_mode
+        mode = get_current_mode()
+    except Exception as exc:  # noqa: BLE001 - a mode that cannot be read is Bulbe
+        logger.warning(
+            "Cannot read the security mode (%s); read as 'bulbe'",
+            type(exc).__name__,
+        )
+        return "bulbe"
+    if mode not in _RECOGNIZED_MODES:
+        logger.warning("Unrecognized security mode %r; read as 'bulbe'", mode)
+        return "bulbe"
+    return mode
 
 
 def enforce_boot_checks() -> StartupCheckResult | None:
@@ -207,24 +274,33 @@ def enforce_boot_checks() -> StartupCheckResult | None:
     launch path (CLI launcher, UI launcher subprocess, direct ASGI
     server invocation). Behaviour:
 
-      - Runs ``run_startup_checks()``; the result is cached, so the
+      - Runs ``run_startup_checks(force=True)``, never an earlier run's
+        result; the result is cached, so the
         ``GET /api/security/startup-checks`` endpoint serves the
         boot-time report without re-running.
       - Raises :class:`StartupBlockedError` when the aggregated result
         is blocked (a critical check failed, e.g. Ollama exposed on a
         wildcard address in Bulbe mode).
-      - Never raises on check machinery failure: any other exception is
-        logged and swallowed and ``None`` is returned, so an unavailable
-        or crashing check can never break the boot on its own.
+      - When the checklist itself fails to run: in Bulbe mode (or a
+        mode that cannot be read or is not recognized) raises
+        :class:`StartupBlockedError` naming the failure; in Daily mode
+        logs it and returns ``None``, and the boot goes on.
 
     Returns:
         The StartupCheckResult when the checks ran and did not block,
-        or None when the check machinery itself failed.
+        or None when the checklist failed to run in Daily mode.
     """
     try:
-        result = run_startup_checks()
-    except Exception as exc:  # noqa: BLE001 - boot must not break on machinery
-        logger.warning("Startup checks unavailable at boot: %s", exc)
+        # Run now, never an earlier run's result: the verdict depends on the
+        # mode, which may have changed since.
+        result = run_startup_checks(force=True)
+    except Exception as exc:  # noqa: BLE001 - Daily boots on; Bulbe refuses below
+        if _boot_mode() == "bulbe":
+            raise StartupBlockedError(
+                f"Startup checks could not run ({_named(exc)}); Bulbe mode "
+                f"does not start without them"
+            ) from exc
+        logger.warning("Startup checks unavailable at boot: %s", _named(exc))
         return None
     if result.blocked:
         raise StartupBlockedError(
@@ -255,8 +331,10 @@ def _check_pqc_primitive() -> CheckItem:
 
     A check that cannot even IMPORT the module it inspects returns a warning and
     never a refusal. A broken tree is a machinery failure, not a security
-    verdict, and no check may brick a machine on the strength of its own
-    inability to run.
+    verdict, and this check may not brick a machine on the strength of its own
+    inability to run: the primitive is refused again where it is used. The
+    Ollama bind check is the other case: nothing after the boot refuses over
+    Ollama's bind, so in Bulbe mode a bind check that cannot run refuses.
 
     Whether the primitive RESOLVED is not the question. It resolves on a host
     holding no key at all, and this check reported green on exactly that host --
@@ -445,15 +523,8 @@ def _check_ollama_bind() -> CheckItem:
             detail=result.detail,
             score_impact=0,
         )
-    except Exception as exc:
-        logger.warning("Ollama bind check failed: %s", exc)
-        return CheckItem(
-            name="ollama_bind",
-            passed=True,
-            severity="info",
-            detail=f"Ollama bind check unavailable: {exc}",
-            score_impact=0,
-        )
+    except Exception as exc:  # noqa: BLE001 - not checked, never passed; Bulbe does not start past it
+        return _not_checked("ollama_bind", exc)
 
 
 def _check_luks() -> CheckItem:

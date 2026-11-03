@@ -27,7 +27,15 @@ When Bulbe mode is active, the following constraints apply:
   SHA-512 hash-chain audit log, whose anchor is keyed with HMAC-SHA256
   (tamper-evident, not signed; see `audit-chain.md`)
 - **Startup checklist** -- the full security checklist runs at startup
-  and must pass all critical checks
+  and must pass all critical checks. A checklist that does not load or
+  cannot run refuses startup too, and so does an Ollama bind check that
+  fails before it can look; a bind address the guard cannot determine
+  (Ollama not started yet, listening on IPv6 only, or the sockets
+  unreadable) still passes. Daily mode logs it and starts. A check whose
+  error escapes it is reported as not checked; checks that catch their
+  own errors report as before (the swap, Ollama limits, provenance and
+  security mode checks then pass as unavailable). A server run with
+  uvicorn's lifespan off runs no checklist, nor does the core daemon
 - **LUKS advisory** -- disk encryption status is checked and reported
   (advisory only, does not block startup even in Bulbe mode)
 - **Strict sandbox** -- every sandbox switch that lowers the bubblewrap

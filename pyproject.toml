@@ -1316,6 +1316,15 @@ fail_under = 0
 # password, and sy4 keeps rj15's assertions unchanged, the route given that password. They stay in the tree word for
 # word.
 #
+# Bulbe never boots past a startup checklist that could not run (block 223). c3 of
+# tests/test_startup_boot_guard_contracts.py held a checklist that raises to return None in every mode, and the second
+# assertion of b4 of tests/test_pqc_refusal_is_fired_contracts.py held a tree none of whose modules import to block
+# nothing, the bind check that could not look included: they give way to ub2 and ub4 of
+# tests/test_bulbe_never_boots_unchecked_contracts.py -- ub2 keeps c3's case and its None for Daily, and refuses the
+# boot in Bulbe or a mode that cannot be read; ub4 keeps b4's window and its first assertion, made stronger (the
+# post-quantum check warns, never passes), blocks nothing in Daily, and in Bulbe or a mode that cannot be read is
+# blocked by the bind check alone. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1775,4 +1784,6 @@ addopts = """
     --deselect=tests/test_mode_verdict_contracts.py::test_mv12_the_emergency_stop_escalates_when_no_key_loads[none_lockfile_a_folder]
     --deselect=tests/test_run_journal_contracts.py::test_rj7_sealed_and_never_in_plaintext_where_it_must_not_be
     --deselect=tests/test_run_journal_contracts.py::test_rj15_the_security_settings_the_journal_reads_are_written_whole
+    --deselect=tests/test_startup_boot_guard_contracts.py::test_c3_machinery_failure_is_fail_open
+    --deselect=tests/test_pqc_refusal_is_fired_contracts.py::test_b4_an_uninspectable_module_warns_and_never_refuses_the_boot
 """

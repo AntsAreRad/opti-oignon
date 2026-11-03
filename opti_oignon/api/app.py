@@ -120,6 +120,17 @@ class _PathWithoutQuery(logging.Filter):
         return True
 
 
+def _mode_without_checklist() -> str:
+    """The security mode for a boot whose checklist does not import, read fail-secure as the checklist reads it: a
+    mode that cannot be read, or is not exactly daily or bulbe, is bulbe."""
+    try:
+        from opti_oignon.security_mode import get_current_mode
+        mode = get_current_mode()
+    except Exception:  # noqa: BLE001 - a mode that cannot be read is Bulbe
+        return "bulbe"
+    return mode if mode in ("daily", "bulbe") else "bulbe"
+
+
 def _install_log_filters() -> None:
     """The query filter on uvicorn's access logger and on the logger its WebSocket handshakes are written to,
     once each."""
@@ -137,13 +148,19 @@ async def lifespan(app: FastAPI):
     # verdict (a critical guard failure, e.g. Ollama exposed on a wildcard
     # address in Bulbe mode) refuses startup on every launch path -- CLI
     # launcher, UI launcher subprocess, and direct ASGI server invocation
-    # alike. Guarded so unavailable check machinery can never break the boot:
-    # only the deliberate blocked verdict propagates, aborting the ASGI
-    # startup phase before any service below is armed.
+    # alike (a server run with uvicorn's lifespan off runs none of this). A
+    # checklist that does not import or cannot run refuses startup in Bulbe
+    # mode and is logged in Daily mode. The refusal propagates, aborting the
+    # ASGI startup phase before any service below is armed.
     _boot_guard = None
     try:
         from opti_oignon.startup_checks import enforce_boot_checks as _boot_guard
-    except Exception:  # noqa: BLE001 - boot must not break on import failure
+    except Exception as exc:  # noqa: BLE001 - Daily boots on; Bulbe refuses
+        if _mode_without_checklist() == "bulbe":
+            raise RuntimeError(
+                f"boot refused: the startup security checks do not import ({type(exc).__name__}: {exc}); "
+                "Bulbe mode does not start without them"
+            ) from exc
         logger.warning("boot: startup security checks unavailable", exc_info=True)
     if _boot_guard is not None:
         _boot_guard()

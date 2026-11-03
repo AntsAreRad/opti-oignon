@@ -3487,6 +3487,24 @@ package costs.
 
 ### Fixed
 
+- In Bulbe mode the server no longer starts when the startup security
+  checklist could not run. The check that refuses a start when Ollama
+  listens on every network interface -- and nothing after the start
+  refuses over that -- reported itself passed when it failed before it
+  could look, a checklist that raised let the start go on, and a
+  checklist that did not load was skipped with a warning, so Bulbe
+  served with Ollama perhaps open to the network. Now each of these
+  refuses the start in Bulbe mode, and in a mode that cannot be read or
+  is not exactly `daily` or `bulbe`, naming the error; in Daily mode
+  the start goes on as before. Each check now runs on its own: one
+  whose error escapes it is reported as not checked -- a warning, but
+  for the Ollama check in Bulbe mode -- and the others still run, where
+  one such error stopped the whole checklist; checks that catch their
+  own errors report as before. The Ollama check reads `ss` whatever
+  bytes a process name holds. The start runs the checklist afresh,
+  never an earlier run's result. An address the Ollama check cannot
+  determine still passes. ub1-ub8 in the new
+  `tests/test_bulbe_never_boots_unchecked_contracts.py`.
 - With encryption turned on, no conversation message or title, memory
   fact or two-factor secret is written in clear any more. A
   `security.yaml` that could not be read or parsed counted as encryption
