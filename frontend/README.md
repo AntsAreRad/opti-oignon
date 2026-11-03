@@ -272,7 +272,7 @@ CSS animations (all in `app.css`):
 
 | Variable              | Default                  | Description            |
 |-----------------------|--------------------------|------------------------|
-| `VITE_API_URL`        | same origin (empty)      | Backend API base URL. Unset, requests go to the page origin and the dev server proxies them; set it to `http://localhost:8001` to bypass the proxy. |
+| `VITE_API_URL`        | same origin (empty)      | Backend API base URL. Unset, requests go to the page origin and the dev server proxies them; set it to `http://localhost:8001` to bypass the proxy, and list the page's origin (`http://localhost:5173`) under `cors.origins` of `security.yaml`: the API answers another port's page only when it is listed. |
 
 
 ## API Communication

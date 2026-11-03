@@ -1335,6 +1335,17 @@ fail_under = 0
 # verification flag -- with a code of the next step, and the confirming code refused. They stay in the tree word for
 # word.
 #
+# A page of another port of this machine is another site (block 227). xs2 of
+# tests/test_api_changes_nothing_for_another_site_contracts.py answered a change from a page of any loopback origin on
+# any port -- "a page of this machine on another port", the frontend on localhost:5173 calling localhost:8001 unlisted,
+# an origin in capitals against another port -- and let another site's websocket reach its route: a dev server or a
+# local app changed anything in single-user Daily and opened every socket. It gives way to op2 and op3 of
+# tests/test_another_port_is_another_site_contracts.py: op2 keeps every other case of xs2 (the API's own address,
+# [::1], a listed name over https, Sec-Fetch-Site same-origin and none, the CLI, capitals, a GET, a HEAD and an
+# OPTIONS from another port) with the frontend through its proxy and a listed origin across ports; op3 closes another
+# site's socket at the gate and lets the same origin, a listed one and a client with no Origin through. It stays in
+# the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1798,4 +1809,5 @@ addopts = """
     --deselect=tests/test_pqc_refusal_is_fired_contracts.py::test_b4_an_uninspectable_module_warns_and_never_refuses_the_boot
     --deselect=tests/test_auth_2fa_verification_bounds_contracts.py::test_vb1_totp_code_is_single_use_within_its_window
     --deselect=tests/test_auth_2fa_verification_bounds_contracts.py::test_vb3_unverified_or_unknown_enrollment_is_refused
+    --deselect=tests/test_api_changes_nothing_for_another_site_contracts.py::test_xs2_the_machines_own_pages_and_the_cli_are_answered
 """

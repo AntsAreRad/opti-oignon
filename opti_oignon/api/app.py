@@ -24,7 +24,6 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from opti_oignon.__version__ import __version__
 
@@ -375,105 +374,20 @@ logger.info("Global auth middleware registered (deny-by-default)")
 # ---------------------------------------------------------------------------
 # CORS configuration (hardened)
 #
-# Default: localhost-only origins. Credentials are allowed ONLY when origins
-# are explicitly listed (never with wildcard).  The env var
-# OPTI_CORS_ORIGINS overrides; set to "*" for wide-open (credentials will
-# be forced OFF to prevent cookie/token theft from arbitrary sites).
+# Only the origins cors.origins of security.yaml lists (or OPTI_CORS_ORIGINS,
+# when the file lists none) are answered, with credentials; "*" answers any
+# origin without them. No loopback origin is added and no pattern answered:
+# a page of this site needs no CORS, and a page of another port of this
+# machine is another site, given no CORS header at all. The Host gate below
+# takes the same list.
 # ---------------------------------------------------------------------------
-import os as _os
-import re as _re
+from .host_gate import ListedOriginsCORS, cors_settings, listed_origins  # noqa: E402
 
-_LOCALHOST_ORIGINS: list[str] = [
-    "http://localhost",
-    "http://127.0.0.1",
-    "http://[::1]",
-]
+_listed_origins = listed_origins()
+_cors = cors_settings(_listed_origins)
+_cors_origins, _cors_credentials = _cors["allow_origins"], _cors["allow_credentials"]
 
-# Match localhost with any port (e.g. http://localhost:5173)
-_LOCALHOST_RE = _re.compile(
-    r"^https?://(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$"
-)
-
-
-def _resolve_cors_origins() -> tuple[list[str], bool]:
-    """Determine CORS origins and whether credentials should be allowed.
-
-    Returns (origins_list, allow_credentials).
-
-    Security rules:
-    - Empty / unset env var -> localhost-only, credentials ON
-    - Explicit origins list -> those origins, credentials ON
-    - "*" -> wildcard, credentials OFF (browser will not send tokens)
-    - security.yaml cors.origins takes precedence over env var
-    """
-    # Try security.yaml first
-    yaml_origins: list[str] | None = None
-    try:
-        import yaml as _yaml
-        _sec_path = _os.path.join(
-            _os.path.dirname(__file__), "..", "config", "security.yaml"
-        )
-        if _os.path.isfile(_sec_path):
-            with open(_sec_path, encoding="utf-8") as _fh:
-                _sec_cfg = _yaml.safe_load(_fh) or {}
-            cors_cfg = _sec_cfg.get("cors", {})
-            if isinstance(cors_cfg, dict) and "origins" in cors_cfg:
-                raw = cors_cfg["origins"]
-                if isinstance(raw, list):
-                    yaml_origins = [str(o).strip() for o in raw if str(o).strip()]
-                elif isinstance(raw, str):
-                    raw = raw.strip()
-                    if raw == "*":
-                        yaml_origins = ["*"]
-                    elif raw:
-                        yaml_origins = [o.strip() for o in raw.split(",") if o.strip()]
-    except Exception:
-        pass  # YAML loading is best-effort
-
-    # Env var (lower priority)
-    env_val = _os.environ.get("OPTI_CORS_ORIGINS", "").strip()
-
-    # Resolve: yaml (if non-empty) > env > default (localhost)
-    if yaml_origins:
-        origins = yaml_origins
-    elif env_val:
-        if env_val == "*":
-            origins = ["*"]
-        else:
-            origins = [o.strip() for o in env_val.split(",") if o.strip()]
-    else:
-        origins = []  # Will use localhost defaults
-
-    # Wildcard handling: credentials MUST be OFF
-    if "*" in origins:
-        logger.warning(
-            "CORS origins set to wildcard (*). Credentials are DISABLED to "
-            "prevent token theft. Set explicit origins for credential support."
-        )
-        return ["*"], False
-
-    # No origins specified -> default to localhost
-    if not origins:
-        origins = list(_LOCALHOST_ORIGINS)
-
-    # Always include localhost variants for dev convenience
-    for lo in _LOCALHOST_ORIGINS:
-        if lo not in origins:
-            origins.append(lo)
-
-    return origins, True
-
-
-_cors_origins, _cors_credentials = _resolve_cors_origins()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=_cors_origins,
-    allow_credentials=_cors_credentials,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    allow_origin_regex=_LOCALHOST_RE.pattern if _cors_credentials else None,
-)
+app.add_middleware(ListedOriginsCORS, **_cors)
 
 # ---------------------------------------------------------------------------
 # Host gate (DNS rebinding)
@@ -485,8 +399,8 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 from .host_gate import HostGateMiddleware  # noqa: E402
 
-app.add_middleware(HostGateMiddleware)
-logger.info("Host gate registered (loopback names and api.hosts)")
+app.add_middleware(HostGateMiddleware, origins=_listed_origins)
+logger.info("Host gate registered (loopback names, api.hosts and cors.origins)")
 
 # Router registration
 app.include_router(conversations_router)

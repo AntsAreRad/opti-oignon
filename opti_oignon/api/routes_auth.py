@@ -615,18 +615,26 @@ async def authenticate_websocket(websocket) -> dict | None:
       1. Cookie (oo_access_token) -- browser clients
       2. Query parameter (?token=xxx) -- CLI/API clients
 
-    Audit fix: validates the Origin header to prevent Cross-Site
-    WebSocket Hijacking (CSWSH).  A malicious website cannot connect
-    to ws://localhost:8000 because the browser sends the attacker's
-    Origin, which fails the check.
+    Cross-Site WebSocket Hijacking (CSWSH): the Host gate
+    (``api/host_gate.py``) closes, before any route, a handshake whose
+    Origin is not a page of this site -- the request's scheme and the
+    Host's name and port, or an origin listed under ``cors.origins`` --,
+    so a page of another port or scheme of this machine opens no socket,
+    and it marks the handshakes it lets through (``ORIGIN_CHECKED`` in the
+    scope), which this check takes as they are: a listed name over TLS, a
+    listed origin. A socket the gate did not see is held here to an Origin
+    whose host is a loopback name, any port, any scheme.
 
     Returns the validated payload dict, or None if auth fails.
     In single-user mode (non-Bulbe), returns a synthetic local user.
     """
-    # Audit fix: validate Origin header (CSWSH prevention). No Origin at all is a client that is no browser; an
-    # opaque one -- "null", from a sandboxed frame or a file -- or one without a host is a page of anywhere, refused.
+    # The gate's mark (host_gate.ORIGIN_CHECKED): its rule held. Without it, no Origin at all is a client that is no
+    # browser; an opaque one -- "null", from a sandboxed frame or a file -- or one without a loopback host is a page of
+    # anywhere, refused.
+    scope = getattr(websocket, "scope", None)
+    checked = isinstance(scope, dict) and scope.get("opti_oignon.origin_checked") is True
     origin = websocket.headers.get("origin")
-    if origin is not None:
+    if origin is not None and not checked:
         from urllib.parse import urlparse
         parsed = urlparse(origin)
         origin_host = parsed.hostname or ""

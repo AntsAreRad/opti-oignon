@@ -70,15 +70,41 @@ api:
 ```
 
 A page of another site can still send a request to the loopback address
-itself (a form, a `fetch` that does not ask to read the answer): the same
-gate refuses every state-changing request (any method but GET, HEAD and
-OPTIONS) whose `Origin` is neither a page of this machine (a loopback name,
-on any port) nor a listed name over `https` (a page served under a listed
-name over plain `http` changes nothing: serve remote access over TLS), and,
-with no `Origin`, one whose `Sec-Fetch-Site` is not `same-origin` or
-`none`. A client that sends neither header is no current browser (the CLI,
-curl) and is answered. A GET is not asked where it comes from: a route must
-not change anything on a GET.
+itself (a form, a `fetch` that does not ask to read the answer, a
+websocket): the same gate refuses every state-changing request (any method
+but GET, HEAD and OPTIONS) and every websocket handshake that a page of
+another site sends. A page is of this site when its `Origin` has the
+request's scheme and the name and the port of its Host header (over
+`https` for a name other than a loopback one: a page served under a listed
+name over plain `http` changes nothing, serve remote access over TLS), or
+when it is one of the origins listed under `cors.origins`. A page of
+another port of this machine (a dev server, a local app) or of another
+scheme is another site. A proxy that ends TLS in front of the API passes
+the scheme on (`X-Forwarded-Proto`, from an address uvicorn trusts), or
+lists its pages' origin. The routes' own socket check takes what the gate
+let through, and holds a socket the gate did not see to a loopback name.
+With no `Origin`, a request whose `Sec-Fetch-Site` is not `same-origin` or
+`none` is another site's. A client that sends neither header is no current
+browser (the CLI, curl) and is answered. A GET is not asked where it comes
+from: a route must not change anything on a GET.
+
+CORS answers only the origins `security.yaml` lists, with credentials; a
+page of this site needs none, and a page of an origin not listed gets no
+CORS header at all (the frontend's dev server answers no CORS of its own
+either):
+
+```yaml
+cors:
+  origins: ["http://localhost:5173"]
+```
+
+Each is an exact origin (`http` for a loopback name only, `https`
+otherwise, no path, no wildcard); one entry that is not refuses the whole
+list. `OPTI_CORS_ORIGINS` lists them when the file lists none; `"*"` lets
+any page read the answers, without credentials, and lists no origin for
+the gate. The frontend served through its dev server or its nginx proxy is
+of the API's own origin; a build whose `VITE_API_URL` names the API's own
+port is a page of another origin, to be listed.
 
 A list that cannot be read leaves the loopback names alone. The names are
 read when the server starts: a newly listed name needs a restart. A listed
@@ -86,10 +112,13 @@ name is only as safe as its resolution: on a local network, where another
 device can answer for a `.local` or local DNS name, prefer an IP literal.
 The garden's routes keep their own list (`api.hosts` in `allium.yaml`),
 checked after this one: a name the garden serves is listed in both. A
-reverse proxy in front of the API forwards the browser's Host (nginx:
-`proxy_set_header Host $host`); one that rewrites it to a loopback name
-(nginx's default with `proxy_pass http://127.0.0.1:8001`) turns the gate
-off.
+reverse proxy in front of the API forwards the browser's Host with its
+port (nginx: `proxy_set_header Host $http_host`; `$host` drops the port,
+and a page served on another port than its scheme's default then changes
+nothing); one that rewrites it to a loopback name (nginx's default with
+`proxy_pass http://127.0.0.1:8001`) turns the name check off (a rebound
+page reads the answers) and refuses every change and every socket of the
+proxy's own pages, whose origin is not the Host it forwards.
 
 Remote access (Daily mode, `remote_access.enabled`) is served over mutual
 TLS: each device holds a client certificate made on this machine. The

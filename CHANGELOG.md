@@ -3487,6 +3487,34 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] A page of another port of this machine is now another site.
+  The API took a change, a socket and a read from any page whose Origin
+  had a loopback name, whatever its port: a dev server or another local
+  app on another port could change anything in single-user Daily,
+  where no session cookie stands in its way, read every answer through
+  CORS, which answered any loopback origin on any port with credentials,
+  and open every websocket, the synthetic admin's stream, whose check
+  compared the Origin's host name alone (so `tauri://localhost` passed
+  too). Now a page is of this site when its Origin has the request's
+  scheme and the name and the port of its Host header, or when it is
+  listed under `cors.origins` of `security.yaml` (exact origins; one entry
+  that is not refuses the list): the Host gate refuses another site's
+  change, as before, and now closes its websocket handshake before any
+  route, and CORS answers the listed origins alone, with no implicit
+  loopback origin and no pattern, and an origin not listed gets no CORS
+  header at all (Starlette sent it `Access-Control-Allow-Credentials`);
+  the frontend's dev server, whose default CORS answered any loopback
+  origin before its proxy, answers none. The routes' own socket check, which
+  refused every name but a loopback one, takes the handshakes the gate let
+  through: a listed name's sockets over remote access now open. The
+  frontend's coding socket, opened on port 8001 from the page, now goes
+  through the page's own origin like the others (the dev server and the
+  nginx image proxy `/ws`), and the nginx image forwards the Host with its
+  port, to the port the backend image serves (8001, not 8000). A frontend
+  built with `VITE_API_URL` pointing at the API's port lists its page's
+  origin. Contracts op1-op8 in
+  `tests/test_another_port_is_another_site_contracts.py`; xs2 gives way
+  to them.
 - [SECURITY] Remote access now refuses a revoked device's certificate.
   The check of each request read the client certificate from a transport
   uvicorn never puts in a request's scope, so it ran only on a header a

@@ -57,7 +57,8 @@ from the environment, and ``RAG_HOME``, which moves the knowledge base to a
 directory the database encryption then reads: a key, a passphrase or a
 data directory the maintainer's shell carries to start the platform never
 reaches a contract, and a contract that wants one sets its own (SE13 holds
-it). The holder of the platform's secrets (``opti_oignon.process_secrets``)
+it). ``OPTI_CORS_ORIGINS`` goes too: the Host gate a contract builds
+without its own origins lists none, whatever the shell lists. The holder of the platform's secrets (``opti_oignon.process_secrets``)
 is imported once, when the session is configured, behind the firewall: a
 module that a suite loads under a stand-in package of its own finds it in
 the module cache, whichever suites ran before.
@@ -78,8 +79,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _data_firewall import REFUSED, DataFirewall  # noqa: E402
 
-# The key, the passphrase and the data directory a shell may carry to start the platform: never a contract's.
-for _name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME"):
+# The key, the passphrase and the data directory a shell may carry to start the platform: never a contract's; nor the
+# origins it lists for the API.
+for _name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME", "OPTI_CORS_ORIGINS"):
     os.environ.pop(_name, None)
 
 _PACKAGE = "opti_oignon"

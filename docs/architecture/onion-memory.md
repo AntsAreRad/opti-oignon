@@ -1162,8 +1162,11 @@ never compared (a rebound name is the attacker's, the port is not), and
 `X-Forwarded-Host` is never read. An Origin, when one is sent, must name
 the same set, over https for a listed name; a `Sec-Fetch-Site` other than
 `same-origin` or `none` is answered only beside such an Origin, so a page
-of another site cannot make the garden look, even with an image pointed at
-the loopback API. A refused request gets one closed line and a code, never
+of another machine's name cannot make the garden look, even with an image
+pointed at the loopback API. The garden compares names, not ports: a page
+of another port of this machine, which the rest of the API takes for
+another site, can make it look, a read whose answer that page cannot read
+(CORS lists none of its origins). A refused request gets one closed line and a code, never
 an echo of what it sent. A phone reads the status through a page served by
 this machine. Through the Vite dev server on the local network, list the
 PC's IP address (a name also needs Vite's `server.allowedHosts`). Behind
@@ -1171,8 +1174,8 @@ remote access over TLS, or a reverse proxy that forwards the Host, list the
 name the page is served under. A proxy that rewrites the Host to a loopback
 name (nginx's default, `proxy_set_header Host $proxy_host`) turns the name
 check off, as the dev proxy's `changeOrigin: true` did: forward the
-browser's Host (`proxy_set_header Host $host`) and give the proxy no
-catch-all server. Prefer an IP literal to a name for the phone: a name is
+browser's Host with its port (`proxy_set_header Host $http_host`) and give
+the proxy no catch-all server. Prefer an IP literal to a name for the phone: a name is
 only as safe as its resolution, and a device on the local network can
 answer for a `.local` name or a local DNS name. A page on one origin
 calling the API on another needs an https origin whose name is listed, and

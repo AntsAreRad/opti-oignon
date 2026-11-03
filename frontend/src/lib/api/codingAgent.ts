@@ -6,7 +6,7 @@
  * Also provides WebSocket connection for live progress.
  */
 
-import { apiGet, apiPost } from './client';
+import { apiGet, apiPost, wsUrl } from './client';
 import type {
 	CodingTaskRequest,
 	CodingPlanResponse,
@@ -71,12 +71,8 @@ export function connectCodingWebSocket(
 	onClose?: () => void
 ): WebSocket | null {
 	try {
-		const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-		const host = window.location.hostname;
-		const port = '8001';
-		const url = `${protocol}//${host}:${port}/ws/coding/live`;
-
-		const ws = new WebSocket(url);
+		// The page's own origin, like every other socket: the server closes a socket opened from another port.
+		const ws = new WebSocket(wsUrl('/ws/coding/live'));
 
 		ws.onmessage = (msg) => {
 			try {

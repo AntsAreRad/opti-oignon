@@ -5,11 +5,21 @@ export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
 		port: 5173,
+		// No CORS of the dev server's own: its default answers a page of any loopback port, which
+		// would read the API through the proxy. The app's pages are of this origin and need none.
+		cors: false,
 		proxy: {
 			'/api': {
 				target: 'http://localhost:8001',
 				// Keep the browser's own Host: the garden's routes refuse a name that is not
-				// this machine's, and behind a rewritten Host they could not tell.
+				// this machine's, and behind a rewritten Host they could not tell; the API takes
+				// a change or a socket only from a page of the Host's own origin.
+				changeOrigin: false,
+				ws: true
+			},
+			// The coding agent's live socket, served outside /api, through the same origin.
+			'/ws': {
+				target: 'http://localhost:8001',
 				changeOrigin: false,
 				ws: true
 			}
