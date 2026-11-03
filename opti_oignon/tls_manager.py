@@ -10,7 +10,8 @@ Certificate hierarchy:
   CA (self-signed) -> Server cert -> Client certs (per device)
 
 mTLS: server requires client certificate for mutual authentication.
-CRL: checked on every request, no caching (local file, sub-ms read).
+Revocation: checked at every connection, as soon as its handshake is done
+(client_cert_gate), from disk, no caching: the CRL and the devices' metadata.
 
 Key types: Ed25519 preferred, RSA-4096 fallback.
 CA key at rest: encrypted with AES-256-GCM, key derived via Argon2id.
@@ -24,11 +25,14 @@ Kerckhoffs compliance: security derives from:
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import logging
 import os
 import secrets
 import ssl
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -63,6 +67,15 @@ ARGON2_KEY_LENGTH = 32
 
 # AES-256-GCM nonce length
 AES_NONCE_LENGTH = 12
+
+# The connections client_cert_gate let through, until they are lost: transport -> (fingerprint, its loop). Written on
+# the server's loop, read by a revocation from any thread.
+_live_connections: dict[Any, tuple[str, Any]] = {}
+_live_lock = threading.Lock()
+
+# How often an open connection's certificate is asked again from disk: a revocation made by another process (the
+# loopback server the settings page talks to) ends the connections of the mTLS server within this.
+_RECHECK_S = 1.0
 
 
 # ---------------------------------------------------------------------------
@@ -438,15 +451,41 @@ def generate_client_cert(device_name: str, passphrase: str) -> dict[str, Any]:
     p12_path.write_bytes(p12_data)
     _set_file_permissions(p12_path, 0o600)
 
-    # Save metadata
-    _save_client_metadata(safe_name, {
-        "device_name": device_name,
-        "fingerprint": fp,
-        "serial_number": format(serial, "x"),
-        "created_at": time.time(),
-        "expires_at": (now + timedelta(days=CERT_VALIDITY_DAYS)).timestamp(),
-        "revoked": False,
-    })
+    # A certificate made again for a device replaces the one before: the
+    # record keeps the old serial among the device's withdrawn ones, the CRL
+    # lists it, its connections end, and client_cert_gate no longer finds its
+    # fingerprint.
+    with _revocation_lock():
+        replaced = _load_client_metadata(safe_name)
+        replaced = replaced if isinstance(replaced, dict) else {}
+        previous = replaced.get("previous_serials")
+        withdrawn = [entry for entry in previous if isinstance(entry, dict)] if isinstance(previous, list) else []
+        if replaced.get("serial_number"):
+            withdrawn.append({
+                "serial_number": replaced["serial_number"],
+                "withdrawn_at": replaced.get("revoked_at") or time.time(),
+            })
+
+        # Save metadata
+        _save_client_metadata(safe_name, {
+            "device_name": device_name,
+            "fingerprint": fp,
+            "serial_number": format(serial, "x"),
+            "created_at": time.time(),
+            "expires_at": (now + timedelta(days=CERT_VALIDITY_DAYS)).timestamp(),
+            "revoked": False,
+            "previous_serials": withdrawn,
+        })
+        if replaced.get("serial_number"):
+            try:
+                _write_crl(ca_key, ca_cert, {})
+            except Exception as exc:
+                logger.error(
+                    "The CRL could not be written again (%s): the replaced "
+                    "certificate stays refused as no device's.", exc,
+                )
+    if replaced.get("fingerprint") and replaced["fingerprint"] != fp:
+        _end_connections_of(replaced["fingerprint"])
 
     _audit_log(
         "client_cert_generated",
@@ -467,8 +506,12 @@ def generate_client_cert(device_name: str, passphrase: str) -> dict[str, Any]:
 def revoke_client_cert(device_name: str) -> dict[str, Any]:
     """Revoke a client certificate by adding it to the CRL.
 
-    Takes effect on the NEXT request (no caching). An attacker who
-    reads this code knows there is zero grace period.
+    Takes effect at once in the process that revokes: the live connections
+    of that certificate are ended, and every new one is checked from disk
+    (client_cert_gate); a server in another process sees it within
+    _RECHECK_S. An attacker who reads this code knows there is no grace
+    period beyond that. Revoking a device already revoked writes the CRL
+    again when it does not load or does not list it.
 
     Args:
         device_name: The device name used when generating the cert.
@@ -481,7 +524,19 @@ def revoke_client_cert(device_name: str) -> dict[str, Any]:
     safe_name = "".join(
         c if c.isalnum() or c in "-_" else "_" for c in device_name
     )
+    with _revocation_lock():
+        return _revoke(device_name, safe_name)
 
+
+def _revoke(device_name: str, safe_name: str) -> dict[str, Any]:
+    """revoke_client_cert, under the revocation lock.
+
+    The record first: from it client_cert_gate refuses the certificate at
+    every connection, whatever follows. Then its live connections end. Then
+    the CRL is written, with the serial the record names (the certificate
+    file is read only when the record names none): a CRL that cannot be
+    written then is said in the answer and undoes nothing.
+    """
     metadata = _load_client_metadata(safe_name)
     if not metadata:
         return {
@@ -489,84 +544,36 @@ def revoke_client_cert(device_name: str) -> dict[str, Any]:
             "error": "cert_not_found",
             "message": f"No certificate found for device '{device_name}'.",
         }
+    if not isinstance(metadata, dict):
+        return {
+            "success": False,
+            "error": "record_unreadable",
+            "message": f"The record of device '{device_name}' cannot be read.",
+        }
 
-    if metadata.get("revoked", False):
+    already = bool(metadata.get("revoked", False))
+    if already and _crl_lists(metadata.get("serial_number")):
         return {
             "success": True,
             "already_revoked": True,
             "message": f"Certificate for '{device_name}' was already revoked.",
         }
 
-    # Load client cert for serial number
-    client_cert_path = _CLIENT_DIR / safe_name / "client.crt"
-    if not client_cert_path.exists():
-        return {
-            "success": False,
-            "error": "cert_file_missing",
-            "message": "Certificate file not found on disk.",
-        }
-
     try:
-        from cryptography import x509
-        from cryptography.hazmat.primitives import hashes
+        serial = _record_serial(metadata, safe_name)
 
-        client_cert = x509.load_pem_x509_certificate(
-            client_cert_path.read_bytes()
-        )
-
-        # Load CA key and cert for CRL signing
-        ca_key = _load_ca_key()
-        ca_cert = _load_ca_cert()
-        if ca_key is None or ca_cert is None:
-            return {
-                "success": False,
-                "error": "ca_not_available",
-                "message": "Cannot revoke: CA not available.",
-            }
-
-        # Load existing CRL and add revoked cert
-        from cryptography.hazmat.primitives.serialization import Encoding
-        crl_builder = x509.CertificateRevocationListBuilder()
-        crl_builder = crl_builder.issuer_name(ca_cert.subject)
-        now = datetime.now(timezone.utc)
-        crl_builder = crl_builder.last_update(now)
-        crl_builder = crl_builder.next_update(
-            now + timedelta(days=CERT_VALIDITY_DAYS)
-        )
-
-        # Load existing revoked certs from CRL
-        existing_revoked = _load_existing_revoked_serials()
-        for serial in existing_revoked:
-            revoked_cert = (
-                x509.RevokedCertificateBuilder()
-                .serial_number(serial)
-                .revocation_date(now)
-                .build()
-            )
-            crl_builder = crl_builder.add_revoked_certificate(revoked_cert)
-
-        # Add the new revocation
-        revoked_cert = (
-            x509.RevokedCertificateBuilder()
-            .serial_number(client_cert.serial_number)
-            .revocation_date(now)
-            .build()
-        )
-        crl_builder = crl_builder.add_revoked_certificate(revoked_cert)
-
-        # Sign and save CRL
-        crl = crl_builder.sign(ca_key, hashes.SHA384())
-        _CRL_PATH.write_bytes(
-            crl.public_bytes(Encoding.PEM)
-        )
-
-        # Update metadata
+        # The record: from now on the certificate is refused
         metadata["revoked"] = True
-        metadata["revoked_at"] = time.time()
+        if not already:
+            metadata["revoked_at"] = time.time()
         _save_client_metadata(safe_name, metadata)
 
-        # RA-01: kill any live remote session bound to this fingerprint, in
-        # addition to the persistent CRL/metadata check enforced per request.
+        # End the live connections of this certificate; a server in another
+        # process ends them at its next check of each (client_cert_gate).
+        if metadata.get("fingerprint"):
+            _end_connections_of(metadata["fingerprint"])
+
+        # RA-01: kill any live remote session bound to this fingerprint.
         try:
             from opti_oignon.remote_session_guard import (
                 remote_session_guard as _guard,
@@ -585,11 +592,36 @@ def revoke_client_cert(device_name: str) -> dict[str, Any]:
             fingerprint=metadata.get("fingerprint", ""),
         )
 
-        return {
+        # The CRL with every earlier revocation, and this one
+        crl_error = ""
+        ca_key = _load_ca_key()
+        ca_cert = _load_ca_cert()
+        if ca_key is None or ca_cert is None:
+            crl_error = "the CA is not available"
+        else:
+            try:
+                _write_crl(ca_key, ca_cert, {} if serial is None else {serial: datetime.now(timezone.utc)})
+            except Exception as exc:
+                crl_error = str(exc) or type(exc).__name__
+
+        result: dict[str, Any] = {
             "success": True,
             "device_name": device_name,
-            "message": f"Certificate for '{device_name}' has been revoked.",
+            "message": (
+                f"Certificate for '{device_name}' was already revoked; the CRL was written again." if already
+                else f"Certificate for '{device_name}' has been revoked."
+            ),
         }
+        if already:
+            result["already_revoked"] = True
+        if crl_error:
+            logger.error("Revoked %s, but the CRL could not be written: %s", device_name, crl_error)
+            result["crl_written"] = False
+            result["message"] = (
+                f"Certificate for '{device_name}' is revoked and refused at every connection, but the CRL "
+                f"could not be written ({crl_error})."
+            )
+        return result
 
     except TLSSecurityError:
         raise
@@ -600,6 +632,20 @@ def revoke_client_cert(device_name: str) -> dict[str, Any]:
             "error": "revocation_failed",
             "message": f"Revocation failed: {exc}",
         }
+
+
+def _record_serial(metadata: dict, safe_name: str) -> int | None:
+    """The serial of the certificate a device's record names; read from its certificate file only when the record
+    names none (a file a certificate made again may already have replaced). None when neither tells."""
+    try:
+        return int(str(metadata.get("serial_number", "")), 16)
+    except ValueError:
+        pass
+    try:
+        from cryptography import x509
+        return x509.load_pem_x509_certificate((_CLIENT_DIR / safe_name / "client.crt").read_bytes()).serial_number
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -635,11 +681,12 @@ def get_tls_config() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 def is_cert_revoked(cert_fingerprint: str) -> bool:
-    """Check if a client certificate is revoked.
+    """Check if a client certificate is revoked, by its device's record.
 
-    Reads CRL from disk on EVERY call (no caching). The CRL file
-    is local, reads are sub-millisecond. No cache window means no
-    grace period for revoked certs.
+    Reads the devices' records from disk on EVERY call (no caching). No
+    cache window means no grace period for revoked certs. A fingerprint no
+    record names reads False here; the connections themselves are checked
+    by client_cert_gate, which also reads the CRL and refuses it.
 
     An attacker reading this code sees: zero grace period.
 
@@ -666,18 +713,123 @@ def is_cert_revoked(cert_fingerprint: str) -> bool:
 def is_cert_serial_revoked(serial_number: int) -> bool:
     """Check if a serial number appears in the CRL.
 
-    No caching. Fresh disk read every time.
+    No caching. Fresh disk read every time. A CRL that is there and does
+    not load answers True: what it holds cannot be told.
     """
-    if not _CRL_PATH.exists():
-        return False
+    try:
+        return serial_number in _crl_entries()
+    except Exception:
+        return True
 
+
+def client_cert_refusal(cert_der: bytes | None) -> str | None:
+    """Why the server refuses a client certificate, or None for one it issued to a device and has not revoked.
+
+    Read from disk at every call, no cache. "cannot_check": no certificate, one that does not parse, a CRL that is
+    there and does not load, or devices whose metadata cannot be read while none that can names it. "revoked": its
+    serial in the CRL, or its device's metadata says revoked. "not_issued_here": no device's metadata names its
+    fingerprint (a certificate made again for a device replaces the one before). A CRL that is not there holds no
+    serial: setup_tls writes one, and every revocation writes it again.
+    """
+    if not cert_der:
+        return "cannot_check"
     try:
         from cryptography import x509
-        crl = x509.load_pem_x509_crl(_CRL_PATH.read_bytes())
-        revoked = crl.get_revoked_certificate_by_serial_number(serial_number)
-        return revoked is not None
+        serial = x509.load_der_x509_certificate(cert_der).serial_number
+        if serial in _crl_entries():
+            return "revoked"
+        folders = [d for d in _CLIENT_DIR.iterdir() if d.is_dir()] if _CLIENT_DIR.exists() else []
     except Exception:
-        return False
+        return "cannot_check"
+    fingerprint = hashlib.sha256(cert_der).hexdigest()
+    unread = False
+    for folder in folders:
+        meta = _load_client_metadata(folder.name)
+        if not isinstance(meta, dict):
+            unread = unread or meta is not None or (folder / "metadata.json").exists()
+            continue
+        if meta.get("fingerprint") == fingerprint:
+            return None if meta.get("revoked", False) is False else "revoked"
+    return "cannot_check" if unread else "not_issued_here"
+
+
+def client_cert_gate(base: type) -> type:
+    """The HTTP protocol class an mTLS server is served with: uvicorn's ``base``, ending every connection whose client
+    certificate client_cert_refusal refuses as soon as its handshake is done, before a request on it is read.
+
+    uvicorn puts no transport in a request's scope, so no request can ask which certificate it came with: the
+    connection is where it is known. The connections let through are kept until they are lost, so that revoking
+    their certificate ends them, and asked again every _RECHECK_S, so that a revocation made by another process
+    ends them too.
+    """
+
+    class ClientCertGate(base):
+        def connection_made(self, transport):
+            super().connection_made(transport)
+            try:
+                ssl_object = transport.get_extra_info("ssl_object")
+                cert_der = ssl_object.getpeercert(binary_form=True) if ssl_object is not None else None
+                refusal = client_cert_refusal(cert_der)
+            except Exception:
+                cert_der, refusal = None, "cannot_check"
+            fingerprint = hashlib.sha256(cert_der).hexdigest() if cert_der else ""
+            if refusal is not None:
+                logger.warning(
+                    "Remote connection refused: client certificate %s (%s...).",
+                    refusal, fingerprint[:16],
+                )
+                transport.abort()
+                return
+            loop = asyncio.get_running_loop()
+            with _live_lock:
+                for gone in [t for t in _live_connections if t.is_closing()]:
+                    del _live_connections[gone]
+                _live_connections[transport] = (fingerprint, loop)
+            loop.call_later(_RECHECK_S, _recheck, transport, cert_der, loop)
+
+        def connection_lost(self, exc):
+            with _live_lock:
+                _live_connections.pop(getattr(self, "transport", None), None)
+            super().connection_lost(exc)
+
+    return ClientCertGate
+
+
+def _recheck(transport, cert_der: bytes, loop) -> None:
+    """Ask again, from disk, for a connection client_cert_gate let through: end it once refused, or ask again in
+    _RECHECK_S while it is open."""
+    if transport.is_closing():
+        with _live_lock:
+            _live_connections.pop(transport, None)
+        return
+    try:
+        refusal = client_cert_refusal(cert_der)
+    except Exception:
+        refusal = "cannot_check"
+    if refusal is None:
+        loop.call_later(_RECHECK_S, _recheck, transport, cert_der, loop)
+        return
+    logger.warning(
+        "Open remote connection ended: client certificate %s (%s...).",
+        refusal, hashlib.sha256(cert_der).hexdigest()[:16],
+    )
+    with _live_lock:
+        _live_connections.pop(transport, None)
+    transport.abort()
+
+
+def _end_connections_of(fingerprint: str) -> int:
+    """Abort the live connections client_cert_gate let through with this certificate, on their loop."""
+    with _live_lock:
+        ending = [(t, loop) for t, (fp, loop) in _live_connections.items() if fp == fingerprint]
+        for transport, _loop in ending:
+            del _live_connections[transport]
+    for transport, loop in ending:
+        try:
+            loop.call_soon_threadsafe(transport.abort)
+        except RuntimeError:
+            pass  # its loop is closed, and the connection with it
+    return len(ending)
 
 
 # ---------------------------------------------------------------------------
@@ -888,16 +1040,123 @@ def _init_crl(ca_key, ca_cert) -> None:
     _CRL_PATH.write_bytes(crl.public_bytes(Encoding.PEM))
 
 
-def _load_existing_revoked_serials() -> list[int]:
-    """Load serial numbers from existing CRL."""
+def _crl_entries() -> dict[int, datetime]:
+    """The serials of the CRL on disk, with their revocation dates; none when there is no CRL.
+
+    Raises when the CRL is there and does not load: what it holds cannot be told.
+    """
     if not _CRL_PATH.exists():
-        return []
+        return {}
+    from cryptography import x509
+    crl = x509.load_pem_x509_crl(_CRL_PATH.read_bytes())
+    # revocation_date_utc is cryptography 42's; 41 (the floor) has the naive revocation_date, in UTC
+    return {
+        entry.serial_number: getattr(entry, "revocation_date_utc", None)
+        or entry.revocation_date.replace(tzinfo=timezone.utc)
+        for entry in crl
+    }
+
+
+def _crl_lists(serial_hex: Any) -> bool:
+    """Whether the CRL loads and lists the serial a device's record holds (hexadecimal)."""
     try:
-        from cryptography import x509
-        crl = x509.load_pem_x509_crl(_CRL_PATH.read_bytes())
-        return [revoked.serial_number for revoked in crl]
+        return int(str(serial_hex), 16) in _crl_entries()
     except Exception:
-        return []
+        return False
+
+
+@contextlib.contextmanager
+def _revocation_lock():
+    """Hold the CRL and the devices' records for one revocation or one certificate made again, against another
+    thread or process doing the same (an flock on a file beside the CRL; without fcntl -- Windows -- nothing is
+    held)."""
+    try:
+        import fcntl
+    except ImportError:
+        yield
+        return
+    _TLS_DIR.mkdir(parents=True, exist_ok=True)
+    with open(_TLS_DIR / ".crl.lock", "a+b") as held:
+        fcntl.flock(held, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(held, fcntl.LOCK_UN)
+
+
+def _write_crl(ca_key, ca_cert, adding: dict[int, datetime]) -> None:
+    """Sign and write the CRL: every serial it listed, their dates kept, every certificate the devices' records name
+    as revoked or replaced, and ``adding``. A CRL that does not load is written again from the records alone. Called
+    under _revocation_lock."""
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.serialization import Encoding
+
+    try:
+        revoked = _crl_entries()
+    except Exception as exc:
+        logger.error("The CRL does not load (%s): written again from the devices' records.", exc)
+        revoked = {}
+    for serial, when in {**adding, **_recorded_withdrawn_serials()}.items():
+        revoked.setdefault(serial, when)
+    now = datetime.now(timezone.utc)
+    builder = (
+        x509.CertificateRevocationListBuilder()
+        .issuer_name(ca_cert.subject)
+        .last_update(now)
+        .next_update(now + timedelta(days=CERT_VALIDITY_DAYS))
+    )
+    for serial, when in sorted(revoked.items()):
+        builder = builder.add_revoked_certificate(
+            x509.RevokedCertificateBuilder()
+            .serial_number(serial)
+            .revocation_date(when)
+            .build()
+        )
+    _write_atomically(_CRL_PATH, builder.sign(ca_key, hashes.SHA384()).public_bytes(Encoding.PEM))
+
+
+def _recorded_withdrawn_serials() -> dict[int, datetime]:
+    """The serials the devices' records name as withdrawn, with their dates: a device's own when it is revoked, and
+    every certificate it held before one made again (``previous_serials``)."""
+    withdrawn: dict[int, datetime] = {}
+    if not _CLIENT_DIR.exists():
+        return withdrawn
+    for client_dir in _CLIENT_DIR.iterdir():
+        if not client_dir.is_dir():
+            continue
+        meta = _load_client_metadata(client_dir.name)
+        if not isinstance(meta, dict):
+            continue
+        previous = meta.get("previous_serials")
+        named = [entry for entry in previous if isinstance(entry, dict)] if isinstance(previous, list) else []
+        if meta.get("revoked", False):
+            named.append({"serial_number": meta.get("serial_number", ""), "withdrawn_at": meta.get("revoked_at")})
+        for entry in named:
+            try:
+                serial = int(str(entry.get("serial_number", "")), 16)
+            except ValueError:
+                logger.warning("Device %s names a withdrawn certificate with no serial number.", client_dir.name)
+                continue
+            when = entry.get("withdrawn_at")
+            try:
+                withdrawn[serial] = (
+                    datetime.fromtimestamp(when, timezone.utc) if isinstance(when, (int, float))
+                    else datetime.now(timezone.utc)
+                )
+            except (OverflowError, OSError, ValueError):
+                withdrawn[serial] = datetime.now(timezone.utc)
+    return withdrawn
+
+
+def _write_atomically(path: Path, data: bytes) -> None:
+    """Write ``data`` to ``path`` through a sibling file renamed over it: a reader sees the old file or the new."""
+    staged = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        staged.write_bytes(data)
+        os.replace(staged, path)
+    finally:
+        staged.unlink(missing_ok=True)
 
 
 def _save_client_metadata(safe_name: str, metadata: dict) -> None:
@@ -905,7 +1164,7 @@ def _save_client_metadata(safe_name: str, metadata: dict) -> None:
     import json
     meta_path = _CLIENT_DIR / safe_name / "metadata.json"
     meta_path.parent.mkdir(parents=True, exist_ok=True)
-    meta_path.write_text(json.dumps(metadata, indent=2), encoding="utf-8")
+    _write_atomically(meta_path, json.dumps(metadata, indent=2).encode("utf-8"))
 
 
 def _load_client_metadata(safe_name: str) -> dict | None:

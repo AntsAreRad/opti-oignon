@@ -3487,6 +3487,37 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] Remote access now refuses a revoked device's certificate.
+  The check of each request read the client certificate from a transport
+  uvicorn never puts in a request's scope, so it ran only on a header a
+  client chose to send, and the TLS layer loaded no CRL: a revoked
+  device kept its access, before and after a restart. Now the launcher
+  serves mTLS through a protocol that checks the client certificate at
+  every connection, as soon as its handshake is done and before a request
+  on it is read, and again every second while it is open, from the CRL
+  and the devices' records on disk: a revoked certificate, one made again
+  for its device since, and one that cannot be checked are refused.
+  Revoking a device, or making its certificate again, ends its open
+  connections, at once in the server that does it and within a second in
+  another one -- the settings page talks to the loopback server, the
+  devices to the mTLS one. A revocation now marks the device's record
+  first, which refuses it, and takes the serial from it: a certificate
+  file or a CA key that is gone, or a CRL that cannot be written, no
+  longer leaves the device in. A revocation kept no earlier one when the
+  CRL did not load, writing it again from nothing: the CRL is now written
+  from the one before, its dates kept, and from every certificate the
+  devices' records name as revoked or replaced (a device's record keeps
+  the serials of the certificates it held before, from this version on),
+  atomically, one revocation at a time across processes where `fcntl` is;
+  the next revocation or certificate made again writes a CRL that does
+  not load again, and so does revoking a device already revoked. A serial
+  looked up in a CRL that does not load reads revoked. With remote access on and a TLS
+  file missing, the launcher served the network address in plain HTTP,
+  and without the CA asked no client certificate: an address that is not
+  a loopback name is now served only with the whole mTLS, or not at all
+  (`remote_bind_refused` audited). Contracts tg1-tg7 in
+  `tests/test_revoked_device_never_reaches_the_api_contracts.py`.
+
 - [SECURITY] In Bulbe mode a session now needs a second factor.
   The login asked a second factor only of an account that had one, so
   in Bulbe an account with none signed in with its password, and the

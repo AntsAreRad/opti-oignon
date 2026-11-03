@@ -83,6 +83,9 @@ def cmd_api(args):
     except ImportError:
         pass
 
+    # Build TLS config if remote access is allowed (Daily mode only)
+    ssl_kwargs = _serving_kwargs(actual_host, _get_tls_kwargs())
+
     print(f"Starting Opti-Oignon API on {actual_host}:{args.port}")
     # The API answers only the names it is served as (api/host_gate.py): an
     # address that binds every interface is no name to browse to
@@ -91,10 +94,44 @@ def cmd_api(args):
     if shown not in ("localhost", "127.0.0.1", "::1"):
         print("  (answered only if listed under api.hosts in security.yaml)")
 
-    # Build TLS config if remote access is allowed (Daily mode only)
-    ssl_kwargs = _get_tls_kwargs()
-
     uvicorn.run(app, host=actual_host, port=args.port, **ssl_kwargs)
+
+
+_LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")
+
+
+def _serving_kwargs(host: str, ssl_kwargs: dict) -> dict:
+    """The TLS kwargs uvicorn serves ``host`` with.
+
+    A server that asks a client certificate is served through
+    ``tls_manager.client_cert_gate``, which refuses a revoked device's, or one
+    no device holds any more, at every connection. A host that is not a
+    loopback name is served with the whole mTLS only (key, certificate, CA,
+    a client certificate asked): otherwise this says why and exits, before
+    anything binds.
+    """
+    import ssl
+
+    asks_client_cert = ssl_kwargs.get("ssl_cert_reqs") == ssl.CERT_REQUIRED
+    whole_mtls = asks_client_cert and all(
+        ssl_kwargs.get(key) for key in ("ssl_keyfile", "ssl_certfile", "ssl_ca_certs")
+    )
+    if host not in _LOOPBACK_HOSTS and not whole_mtls:
+        print(f"[ERR] Remote access would serve {host} without mTLS: a TLS file is missing")
+        print("      (server key, server certificate or CA) or could not be read. Not started.")
+        print("      Start on 127.0.0.1 (--host), or turn remote access off in security.yaml.")
+        try:
+            from .network_bind_guard import _audit_critical_event
+            _audit_critical_event("remote_bind_refused", bound_address=host)
+        except ImportError:
+            pass
+        sys.exit(1)
+    if not asks_client_cert:
+        return ssl_kwargs
+    from uvicorn.protocols.http.auto import AutoHTTPProtocol
+
+    from .tls_manager import client_cert_gate
+    return {**ssl_kwargs, "http": client_cert_gate(AutoHTTPProtocol)}
 
 
 def _get_tls_kwargs() -> dict:

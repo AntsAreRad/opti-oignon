@@ -440,8 +440,11 @@ def build_remote_jwt_claims(
 def extract_cert_fingerprint_from_request(request) -> str | None:
     """Extract client certificate SHA256 fingerprint from a request.
 
-    In mTLS, the client cert is available via the SSL transport.
-    Returns None if no client cert is presented.
+    Read from ``scope["transport"]`` where a server puts one (uvicorn does
+    not), else from the ``X-Client-Cert-Fingerprint`` header a reverse proxy
+    sets. Returns None when neither names one: a request served over mTLS by
+    uvicorn itself, whose certificate ``tls_manager.client_cert_gate`` checks
+    at its connection.
     """
     try:
         # Uvicorn/Starlette: client cert info in scope

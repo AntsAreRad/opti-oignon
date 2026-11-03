@@ -207,7 +207,7 @@ STORES: tuple[Entry, ...] = (
     # of the key's contracts): it is not spelled here.
     Entry("the install's keys (the stores that remain are sealed or signed with them, the server's certificates)",
           (".pqc_keypair", ".veilid_signing_key", "tls", "ca.crt", "ca.key", "ca.key.enc", "client.crt", "clients",
-           "crl.pem", "metadata.json", "server.crt", "server.key", "*"),
+           "crl.pem", ".crl.lock", "metadata.json", "server.crt", "server.key", "*"),
           ("pqc_signatures.py", "veilid/signing.py", "tls_manager.py", "network_bind_guard.py", "encryption.py"),
           SECRETS, NOT_THE_USERS),
 )

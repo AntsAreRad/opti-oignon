@@ -91,6 +91,30 @@ reverse proxy in front of the API forwards the browser's Host (nginx:
 (nginx's default with `proxy_pass http://127.0.0.1:8001`) turns the gate
 off.
 
+Remote access (Daily mode, `remote_access.enabled`) is served over mutual
+TLS: each device holds a client certificate made on this machine. The
+launcher (`opti-oignon api`) serves an address that is not a loopback name
+only with the whole of it -- the server's key and certificate, the CA,
+a client certificate asked --, and otherwise does not start. Every
+connection is checked as soon as its handshake is done, before a request
+on it is read, from the CRL and the devices' records on disk, and again
+every second while it is open: a revoked certificate, one made again for
+its device since (the new one replaces it), or one that cannot be checked
+(a CRL or a record that does not load) is refused, after a restart too.
+Revoking a device ends its open connections at once in the server that
+revokes it, and within a second in another one (the settings page talks
+to the loopback server, the devices to the mTLS one). A revocation marks
+the device's record first, which refuses it, then writes the CRL: a CRL
+that cannot be written then is said in the answer and undoes nothing.
+The CRL lists every certificate revoked, or replaced since this version (one
+replaced before it is refused by the devices' records alone): a revocation
+keeps the ones it listed, and a CRL that does not load, which refuses
+every device, is written again from the devices' records by the next
+revocation or certificate made again for a device (revoking, through the
+API, a device already revoked does it too). Revocations are one at a time
+across processes where `fcntl` is (not on Windows). Starting uvicorn
+directly skips the launcher and these checks.
+
 ### Layer 2 -- Encryption at rest
 
 AES-256-GCM encryption for sensitive data fields, conversation messages
@@ -298,10 +322,11 @@ binding at the OS level. The backend literally cannot accept connections
 from external hosts. Additionally:
 
 - Authentication is always enforced
-- A TOTP or a security key is asked at login of every account that set
-  one up, a recovery code standing in for either; an account none of
-  whose factors can be checked here is refused at login (an account
-  with neither is not refused yet)
+- A second factor is asked at login of every account: a TOTP or a
+  security key, a recovery code standing in for either; an account none
+  of whose factors can be checked here is refused at login, and one that
+  has none yet sets a TOTP up there before its first session (see
+  docs/security/authentication.md)
 - Web search is disabled
 - Ollama bind guard blocks 0.0.0.0 exposure
 - Per-turn RAM wipe of sensitive context

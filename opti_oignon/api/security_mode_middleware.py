@@ -142,13 +142,15 @@ def _is_plugin_allowed(request: Request) -> bool:
 
 
 def _reject_if_cert_revoked(request: Request) -> "JSONResponse | None":
-    """Reject a request that presents a revoked client certificate (RA-01).
+    """Reject a request whose client certificate fingerprint is revoked (RA-01).
 
-    Local requests present no client certificate, so this is a no-op for them.
-    For a request that does present one (remote mTLS), the persistent CRL /
-    metadata is consulted with zero grace period; if the revocation status of a
-    cert-bearing request cannot be determined, the request is denied (fail
-    closed).
+    It acts only on a fingerprint a reverse proxy in front of the API puts in
+    the ``X-Client-Cert-Fingerprint`` header: uvicorn puts no transport in a
+    request's scope, so a request served over mTLS directly names no
+    certificate here. Those are checked at their connection, and again while
+    it is open, by ``tls_manager.client_cert_gate``. The devices' records are
+    consulted with zero grace period; if the revocation status of a named
+    fingerprint cannot be determined, the request is denied (fail closed).
     """
     try:
         from opti_oignon.remote_session_guard import (
