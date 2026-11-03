@@ -1310,6 +1310,12 @@ fail_under = 0
 # their cases and assert what check now says of them, and what the emergency stop now writes and says over them
 # (security.yaml says Bulbe after the stop, as mv12 asserted). They stay in the tree word for word.
 #
+# The security configuration route asks the owner's password (block 221). rj7 and rj15 of
+# tests/test_run_journal_contracts.py called the route bare, as any session could: they give way to sy3 and sy4 of
+# tests/test_security_config_asks_the_owner_contracts.py -- sy3 runs rj7 whole, its route step given the owner's
+# password, and sy4 keeps rj15's assertions unchanged, the route given that password. They stay in the tree word for
+# word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1767,4 +1773,6 @@ addopts = """
     --deselect=tests/test_sandbox_workspace_ownership_contracts.py::test_wl4_through_the_real_start
     --deselect=tests/test_mode_verdict_contracts.py::test_mv6_check_says_the_mode_the_platform_reads_and_why[lock_unread]
     --deselect=tests/test_mode_verdict_contracts.py::test_mv12_the_emergency_stop_escalates_when_no_key_loads[none_lockfile_a_folder]
+    --deselect=tests/test_run_journal_contracts.py::test_rj7_sealed_and_never_in_plaintext_where_it_must_not_be
+    --deselect=tests/test_run_journal_contracts.py::test_rj15_the_security_settings_the_journal_reads_are_written_whole
 """

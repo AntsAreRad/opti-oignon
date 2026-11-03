@@ -3487,6 +3487,25 @@ package costs.
 
 ### Fixed
 
+- Changing the security configuration through the API now asks the
+  owner's password. `PUT /api/security/config` could turn off the login
+  rate limiter, encryption, the cookie settings, CORS and the security
+  headers for any session -- in single-user Daily mode, any local
+  request -- where lowering a protection elsewhere asks the owner's
+  password. Its body now carries `password`, every change of any section
+  asks it, refusals are audited, and changes are audited by section name
+  where the audit can write. With no account made yet, single-user mode
+  has no owner's password, and every change is refused (403) until the
+  account is created. The routes that rewrite `security.yaml` (the
+  configuration, encryption setup, remote access on and off) no longer
+  write over a `security.yaml` that is there but cannot be loaded --
+  unreadable, not YAML, not a mapping, not a regular file -- keeping
+  only what they changed and dropping the security mode: they answer 409
+  with the reason and leave the file as it is. A section they change
+  that is not a mapping is refused the same way, before any key or TLS
+  file is made, where encryption setup could make a key and remote
+  access could make its TLS files before failing on it. sy1-sy4 in the
+  new `tests/test_security_config_asks_the_owner_contracts.py`.
 - A security mode lock file that is there but cannot be read no longer
   lets `security.yaml` alone choose the mode. When the lock file beside
   the databases could not be read -- its permissions, a folder at its

@@ -4,7 +4,7 @@ Security status and configuration API routes.
 
 GET    /api/security/status       -- Overall security posture with letter grade
 GET    /api/security/config       -- Current security configuration
-PUT    /api/security/config       -- Update security settings (admin only)
+PUT    /api/security/config       -- Update security settings (the owner's password)
 GET    /api/security/encryption   -- Encryption status
 POST   /api/security/encryption/setup -- Initialize encryption
 GET    /api/security/audit        -- Security audit trail
@@ -86,14 +86,53 @@ _SECURITY_YAML_PATH = os.path.join(
 # =========================================================================
 
 def _load_security_yaml() -> dict[str, Any]:
-    """Load the full security.yaml config."""
+    """Load the full security.yaml config: {} when there is none, as on a fresh install -- nothing at its name, a link
+    to nothing, an empty file, one of comments only or a null document.
+
+    A file that is there and does not load whole -- it cannot be looked at or read here, is no regular file, is no
+    YAML, or holds no mapping -- is refused with 409 and its reason, and left as it is: a write over it would keep
+    only the sections it was given, the security mode among those it drops, and a reader told {} would show
+    defaults the platform does not read. Its type is looked at before the open, so that nothing the look finds
+    other than a regular file is opened, and again on what was opened, without blocking or taking a terminal: a
+    FIFO, a folder or a device swapped in between is refused, never waited on, its descriptor closed."""
     try:
-        if os.path.isfile(_SECURITY_YAML_PATH):
-            with open(_SECURITY_YAML_PATH, encoding="utf-8") as fh:
-                return yaml.safe_load(fh) or {}
-    except Exception as exc:
-        logger.warning("Failed to load security.yaml: %s", exc)
-    return {}
+        reason = "is not a regular file"
+        if stat.S_ISREG(os.stat(_SECURITY_YAML_PATH).st_mode):
+            fd = os.open(_SECURITY_YAML_PATH, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0))
+            try:
+                if stat.S_ISREG(os.fstat(fd).st_mode):
+                    with open(fd, encoding="utf-8", closefd=False) as fh:
+                        config = yaml.safe_load(fh)
+                    if config is None:
+                        return {}
+                    if isinstance(config, dict):
+                        return config
+                    reason = "holds no mapping"
+            finally:
+                os.close(fd)
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:  # noqa: BLE001 - whatever stops the load, the file is not taken for none
+        reason = f"does not load here ({type(exc).__name__})"
+    logger.warning("security.yaml %s: left as it is", reason)
+    raise HTTPException(
+        status_code=409,
+        detail=f"security.yaml is there and {reason}: it is left as it is. Mend it or move it aside by hand.",
+    )
+
+
+def _security_section(config: dict[str, Any], name: str) -> dict[str, Any]:
+    """The ``name`` section of a loaded security.yaml, for a write to merge into: {} when it is absent or null. One
+    that holds no mapping is refused with 409 and left as it is -- a writer checks it before its first effect."""
+    held = config.get(name)
+    if held is None:
+        return {}
+    if not isinstance(held, dict):
+        raise HTTPException(
+            status_code=409,
+            detail=f"The {name} section of security.yaml holds no mapping: it is left as it is.",
+        )
+    return held
 
 
 def _replace_text(path: str, text: str) -> None:
@@ -415,7 +454,8 @@ def _compute_security_score() -> tuple[int, str, list[dict[str, Any]]]:
 # =========================================================================
 
 class SecurityConfigUpdate(BaseModel):
-    """Request body for updating security configuration."""
+    """Request body for updating security configuration: the sections to merge, and the owner's password."""
+    password: str = Field(..., description="The owner's password")
     cors: dict[str, Any] | None = Field(default=None, description="CORS settings")
     headers: dict[str, Any] | None = Field(default=None, description="Security headers")
     rate_limiting: dict[str, Any] | None = Field(default=None, description="Rate limiting")
@@ -425,6 +465,10 @@ class SecurityConfigUpdate(BaseModel):
     jwt: dict[str, Any] | None = Field(default=None, description="JWT cookie settings")
     search_safety: dict[str, Any] | None = Field(default=None, description="Search injection defense")
     backup: dict[str, Any] | None = Field(default=None, description="Backup encryption settings")
+
+
+_CONFIG_SECTIONS = ("cors", "headers", "rate_limiting", "sandbox", "plugins", "encryption", "jwt", "search_safety",
+                    "backup")
 
 
 # =========================================================================
@@ -474,8 +518,12 @@ def get_security_status() -> dict:
 
 @router.get("/config")
 def get_security_config() -> dict:
-    """Get the current security configuration from security.yaml."""
-    config = _load_security_yaml()
+    """Get the current security configuration from security.yaml; a file that does not load is said with its
+    reason."""
+    try:
+        config = _load_security_yaml()
+    except HTTPException as exc:
+        return {"loaded": False, "detail": exc.detail, "config": {}}
 
     if not config:
         return {
@@ -491,66 +539,52 @@ def get_security_config() -> dict:
 
 
 @router.put("/config")
-def update_security_config(update: SecurityConfigUpdate) -> dict:
-    """Update security configuration (persisted to security.yaml).
+def update_security_config(
+    update: SecurityConfigUpdate,
+    request: Request,
+    current: dict = Depends(_get_current_user),
+) -> dict:
+    """Update security configuration (persisted to security.yaml), the owner's password asked first.
 
-    Only provided sections are updated; others are left unchanged.
-    Note: some changes (CORS, headers) require a server restart to
-    take effect.
+    Only provided sections are updated; others are left unchanged. Every change asks the owner's password through
+    the owner's own session (``_ceremony_password``), whatever the section, before security.yaml is read: this route
+    can turn the login limiter, encryption, the cookie settings, CORS and the headers off, and no section is told
+    safe. A body that names no section changes nothing and checks no password. A security.yaml that is there and does
+    not load whole, or whose section given holds no mapping, is left as it is (409). The change is audited by its
+    sections' names where the audit can write. Note: some changes (CORS, headers) require a server restart to take
+    effect.
     """
-    current = _load_security_yaml()
-
-    changes: list[str] = []
-    if update.cors is not None:
-        current["cors"] = {**current.get("cors", {}), **update.cors}
-        changes.append("cors")
-    if update.headers is not None:
-        current["headers"] = {**current.get("headers", {}), **update.headers}
-        changes.append("headers")
-    if update.rate_limiting is not None:
-        current["rate_limiting"] = {
-            **current.get("rate_limiting", {}), **update.rate_limiting
-        }
-        changes.append("rate_limiting")
-    if update.sandbox is not None:
-        current["sandbox"] = {**current.get("sandbox", {}), **update.sandbox}
-        changes.append("sandbox")
-    if update.plugins is not None:
-        current["plugins"] = {**current.get("plugins", {}), **update.plugins}
-        changes.append("plugins")
-    if update.encryption is not None:
-        current["encryption"] = {**current.get("encryption", {}), **update.encryption}
-        changes.append("encryption")
-    if update.jwt is not None:
-        current["jwt"] = {**current.get("jwt", {}), **update.jwt}
-        changes.append("jwt")
-    if update.search_safety is not None:
-        current["search_safety"] = {**current.get("search_safety", {}), **update.search_safety}
-        changes.append("search_safety")
-    if update.backup is not None:
-        current["backup"] = {**current.get("backup", {}), **update.backup}
-        changes.append("backup")
-
-    if not changes:
+    sections = [name for name in _CONFIG_SECTIONS if getattr(update, name) is not None]
+    if not sections:
         return {"updated": False, "detail": "No sections provided"}
+    # A plain function: FastAPI runs it in a worker thread, so bcrypt never holds the event loop.
+    user_id = _ceremony_password("security_config", current, update.password, request)
+    config = _load_security_yaml()
+    for name in sections:
+        config[name] = {**_security_section(config, name), **getattr(update, name)}
 
-    _save_security_yaml(current)
+    _save_security_yaml(config)
     # Encryption turned on here, as setup turns it on: the run journal seals
     # now what it kept in plaintext.
-    if "encryption" in changes and (current.get("encryption") or {}).get("enabled") is True:
+    if "encryption" in sections and (config.get("encryption") or {}).get("enabled") is True:
         try:
             from opti_oignon import run_journal
             run_journal.on_encryption_enabled()
         except Exception:  # noqa: BLE001 - the journal counts its own failures
             logger.warning("the run journal could not seal its records after the change", exc_info=True)
 
-    logger.info("Security config updated: %s", ", ".join(changes))
+    logger.info("Security config updated: %s", ", ".join(sections))
+    try:
+        from opti_oignon.security_mode import _audit_log
+        _audit_log("security_config_changed", severity="WARNING", sections=sections, user_id=user_id)
+    except Exception:  # noqa: BLE001 - the audit is best effort; the change stands
+        logger.warning("the change of the security configuration could not be audited", exc_info=True)
 
     return {
         "updated": True,
-        "sections": changes,
+        "sections": sections,
         "detail": "Some changes may require server restart to take effect",
-        "config": current,
+        "config": config,
     }
 
 
@@ -679,6 +713,9 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
     # unreadable.
     from opti_oignon.process_secrets import secret
 
+    # A security.yaml that is there and does not load, or whose encryption section holds no mapping, is refused
+    # before a key is enabled or made: the write that turns encryption on would drop the rest of it, or fail (409).
+    _security_section(_load_security_yaml(), "encryption")
     wrapped = None
     if secret("OPTI_ENCRYPTION_KEY") and not _environment_key_loads():
         raise HTTPException(status_code=409, detail=_ENVIRONMENT_KEY_REFUSAL)
@@ -713,7 +750,7 @@ def setup_encryption(req: EncryptionSetupRequest) -> dict:
     still_plain = len(_plaintext_stores())
     # Enable in config
     current = _load_security_yaml()
-    current.setdefault("encryption", {})["enabled"] = True
+    current["encryption"] = {**_security_section(current, "encryption"), "enabled": True}
     _save_security_yaml(current)
     # The run journal seals now what it kept in plaintext while encryption was
     # off; one it cannot reach seals at its next pass, and setup stands.
@@ -1151,7 +1188,8 @@ def _ceremony_password(ceremony: str, current: dict, password: str, request: Req
     and audited by name, with no secret, where the audit can write. A ceremony's route awaits it in a worker thread,
     so that bcrypt never holds the event loop, and makes its change back on the loop, where the allowlist's
     revocations and the downgrade's cancellation run, so that the two never interleave; the search switch, which
-    its breaker engages from worker threads, holds a lock of its own and asks again under it."""
+    its breaker engages from worker threads, holds a lock of its own and asks again under it. The configuration
+    route, a plain function that FastAPI runs in a worker thread, asks it and writes security.yaml there."""
     from opti_oignon.ceremony_factors import check_password
 
     return _password_verdict(check_password, "ceremony_password_refused", {"ceremony": ceremony}, current,
@@ -2604,6 +2642,9 @@ async def remote_access_enable(
             status_code=400,
             detail="Confirmation required. Set confirm=true.",
         )
+    # Before any TLS file is made: a security.yaml that is there and does not load, or whose remote_access section
+    # holds no mapping, is left as it is (409).
+    _security_section(_load_security_yaml(), "remote_access")
 
     # Setup TLS if needed
     try:
@@ -2622,10 +2663,10 @@ async def remote_access_enable(
     # Enable in security.yaml
     try:
         cfg = _load_security_yaml()
-        if "remote_access" not in cfg:
-            cfg["remote_access"] = {}
-        cfg["remote_access"]["enabled"] = True
+        cfg["remote_access"] = {**_security_section(cfg, "remote_access"), "enabled": True}
         _save_security_yaml(cfg)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -2649,10 +2690,10 @@ async def remote_access_disable(
 
     try:
         cfg = _load_security_yaml()
-        if "remote_access" not in cfg:
-            cfg["remote_access"] = {}
-        cfg["remote_access"]["enabled"] = False
+        cfg["remote_access"] = {**_security_section(cfg, "remote_access"), "enabled": False}
         _save_security_yaml(cfg)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(
             status_code=500,
