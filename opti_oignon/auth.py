@@ -18,8 +18,10 @@ import hashlib
 import hmac
 import json
 import logging
+import os
 import secrets
 import sqlite3
+import stat
 import threading
 import time
 import uuid
@@ -274,6 +276,59 @@ def verify_password(password: str, password_hash: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _read_auth_yaml(path: Path) -> tuple[str | None, dict[str, Any]]:
+    """``(None, the configuration)`` for an auth file that loads whole, else ``(why it does not, {})``.
+
+    Opened without blocking (a FIFO at its name answers at once), read only
+    as a regular file, parsed as a stream (a parse error names the line, never
+    its text: the file holds a secret); an empty file is an empty mapping; a
+    mapping whose ``jwt``, ``password``, ``users`` and ``session`` sections are
+    mappings. What a loaded file gives for each setting is read by the caller.
+    """
+    try:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0))
+    except OSError as e:
+        return f"it cannot be opened ({type(e).__name__})", {}
+    try:
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return "it is not a regular file", {}
+        with os.fdopen(fd, "rb") as f:
+            fd = -1
+            cfg = yaml.safe_load(f)
+    except yaml.MarkedYAMLError as e:
+        mark = e.problem_mark
+        return f"{type(e).__name__}: {e.problem}" + (f" at line {mark.line + 1}" if mark else ""), {}
+    except Exception as e:  # noqa: BLE001 -- whatever stops the read or the parse, the file did not load
+        return type(e).__name__, {}
+    finally:
+        if fd >= 0:
+            os.close(fd)
+    if cfg is None:
+        cfg = {}
+    if not isinstance(cfg, dict):
+        return f"it holds a {type(cfg).__name__}, not a mapping", {}
+    for section in ("jwt", "password", "users", "session"):
+        if section in cfg and not isinstance(cfg[section], dict):
+            return f"its {section} section is not a mapping", {}
+    return None, cfg
+
+
+def _closed_where_unsaid(cfg: dict[str, Any], path: Path) -> dict[str, Any]:
+    """A loaded auth configuration whose ``single_user_mode`` or ``users.allow_registration`` is missing or no
+    boolean (a cut file, a misspelt ``false``): that setting reads closed -- authentication required, registration
+    closed -- and a warning says so; every other setting the file gives stands."""
+    if not isinstance(cfg.get("single_user_mode"), bool):
+        logger.warning("The auth configuration %s gives no single_user_mode as true or false: authentication is "
+                       "required", path)
+        cfg["single_user_mode"] = False
+    users = cfg.setdefault("users", {})
+    if not isinstance(users.get("allow_registration"), bool):
+        logger.warning("The auth configuration %s gives no users.allow_registration as true or false: registration "
+                       "is closed", path)
+        users["allow_registration"] = False
+    return cfg
+
+
 class AuthManager:
     """Central authentication and user management class.
 
@@ -305,16 +360,44 @@ class AuthManager:
     # -- Configuration -------------------------------------------------------
 
     def _load_config(self, config_path: str | Path | None) -> dict[str, Any]:
-        """Load auth configuration from YAML."""
+        """Load auth configuration from YAML.
+
+        No file: the built-in defaults (single-user, registration open). A
+        file that loads whole: it. A file that is there and does not load
+        whole closes the door -- the defaults with single-user off and
+        registration closed, an error that says why, and the reason kept in
+        ``config_unread``: one that cannot be looked at or read (its folder
+        unsearchable, its rights), that is not a regular file, that does not
+        parse, that is not a mapping, or whose sections are not mappings. A
+        file that loads but gives ``single_user_mode`` or
+        ``users.allow_registration`` as anything but a boolean, or not at all
+        (an empty or cut file: a missing key used to read open), has that
+        setting closed (``_closed_where_unsaid``). An operator who closed
+        them is never opened by a file the reader cannot take whole.
+        """
         path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
+        self.config_unread: str | None = None
         try:
-            if path.exists():
-                with open(path, encoding="utf-8") as f:
-                    cfg = yaml.safe_load(f) or {}
-                return cfg
-        except Exception as e:
-            logger.warning("Failed to load auth config from %s: %s", path, e)
-        # Defaults
+            os.lstat(path)
+        except FileNotFoundError:
+            return self._default_config()
+        except OSError as e:
+            self.config_unread = f"it cannot be looked at ({type(e).__name__})"
+        if self.config_unread is None:
+            self.config_unread, cfg = _read_auth_yaml(path)
+            if self.config_unread is None:
+                return _closed_where_unsaid(cfg, path)
+        logger.error(
+            "The auth configuration %s does not load (%s): authentication is required and registration is "
+            "closed until the file loads whole; fix it and restart the server", path, self.config_unread)
+        closed = self._default_config()
+        closed["single_user_mode"] = False
+        closed["users"]["allow_registration"] = False
+        return closed
+
+    @staticmethod
+    def _default_config() -> dict[str, Any]:
+        """The built-in auth configuration, for an install that carries no file."""
         return {
             "jwt": {
                 "secret_key": "",

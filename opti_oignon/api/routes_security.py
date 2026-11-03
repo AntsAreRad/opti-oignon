@@ -196,7 +196,9 @@ def _compute_security_score() -> tuple[int, str, list[dict[str, Any]]]:
     try:
         from opti_oignon.auth import auth_manager
         if auth_manager is not None:
-            passed = not getattr(auth_manager, "_single_user_mode", True)
+            # The flag the configuration gives, read without opening the account store (the property also
+            # counts the accounts): a second account that turns authentication on is not credited here
+            passed = not getattr(auth_manager, "config", {}).get("single_user_mode", True)
         else:
             passed = False
         checks.append({

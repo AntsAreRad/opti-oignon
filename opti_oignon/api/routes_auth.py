@@ -635,6 +635,8 @@ def auth_status() -> dict:
             "registration_enabled": mgr.config.get("users", {}).get("allow_registration", True),
             "user_count": mgr.count_users(),
             "cookie_mode": _is_cookie_mode(),
+            # The auth configuration does not load whole: sign-in is asked and registration closed until it does
+            "auth_config_unread": bool(getattr(mgr, "config_unread", None)),
         }
     except HTTPException:
         return {
@@ -659,32 +661,58 @@ def set_auth_mode(req: AuthModeRequest, current_user: dict = Depends(_require_ow
     Updates both the in-memory config and the YAML file on disk, and answers the mode in force, not the one asked:
     with more than one account the store keeps authentication on whatever the flag says.
     """
+    import os
+    import stat
+    import tempfile
     from pathlib import Path
 
     import yaml
 
     mgr = _get_auth_manager()
+    # A configuration that does not load whole has closed the door: the mode is not changed over it
+    if getattr(mgr, "config_unread", None):
+        raise HTTPException(
+            status_code=409,
+            detail="The auth configuration does not load; fix auth.yaml and restart the server first.",
+        )
 
-    # Update in-memory config
-    mgr.config["single_user_mode"] = req.single_user_mode
-
-    # Persist to auth.yaml
-    config_path = Path(__file__).parent.parent / "config" / "auth.yaml"
+    # Persist to auth.yaml first, whole -- a new file beside it (owner-only, then the file's own rights) renamed
+    # over it, through a link at its name -- then the mode in memory: a save that fails changes nothing
+    config_path = Path(os.path.realpath(Path(__file__).parent.parent / "config" / "auth.yaml"))
+    temp = None
     try:
         if config_path.exists():
             with open(config_path, encoding="utf-8") as f:
-                data = yaml.safe_load(f) or {}
+                data = yaml.safe_load(f)
+            if not isinstance(data, dict):
+                raise ValueError("auth.yaml holds no mapping")
+            rights = stat.S_IMODE(os.stat(config_path).st_mode)
         else:
             data = {}
+            rights = 0o600
 
         data["single_user_mode"] = req.single_user_mode
-        with open(config_path, "w", encoding="utf-8") as f:
+        handle, temp = tempfile.mkstemp(prefix=f".{config_path.name}.", suffix=".tmp", dir=config_path.parent)
+        with os.fdopen(handle, "w", encoding="utf-8") as f:
             yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+            f.flush()
+            os.fchmod(f.fileno(), rights)
+            os.fsync(f.fileno())
+        os.replace(temp, config_path)
+        temp = None
 
         logger.info("Auth mode changed: single_user_mode=%s", req.single_user_mode)
     except Exception as e:
+        if temp is not None:
+            try:
+                os.unlink(temp)
+            except OSError:
+                pass
         logger.error("Failed to persist auth mode change: %s", e)
         raise HTTPException(status_code=500, detail=f"Failed to save config: {e}")
+
+    # Update in-memory config
+    mgr.config["single_user_mode"] = req.single_user_mode
 
     in_force = bool(mgr.single_user_mode)
     message = "Authentication " + ("disabled" if in_force else "enabled")

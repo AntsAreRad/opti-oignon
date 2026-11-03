@@ -3487,6 +3487,20 @@ package costs.
 
 ### Fixed
 
+- An authentication settings file that cannot be read whole no longer
+  opens the door. When `auth.yaml` failed to load -- a typo that breaks
+  the YAML, a file the server cannot read -- the server fell back to
+  single-user mode with registration open, and a file cut short or with
+  a setting misspelt read those settings open the same way: on an
+  install where the owner had turned both off, anyone reaching it could
+  register, and while at most one account existed no sign-in was asked
+  at all. A file that does not load now means sign-in required and
+  registration closed, and a missing or misspelt setting reads closed;
+  the server says why in its log and in its auth status, refuses to
+  switch the mode until the file is fixed and the server restarted, and
+  writes the file whole, keeping its permissions, when it switches.
+  uc1-uc3 in the new
+  `tests/test_auth_config_unread_closes_the_door_contracts.py`.
 - A web page of another site can no longer send a state-changing request
   through the local API. Any page could post a form, or send a request
   it does not ask to read, to `127.0.0.1` itself; in single-user Daily

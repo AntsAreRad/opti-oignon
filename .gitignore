@@ -146,3 +146,6 @@ rust/allium/target/
 
 # A machine's own switches (the onion memory, the run journal), never committed.
 opti_oignon/config/local.yaml
+
+# A mode switch writes auth.yaml through a new file beside it; one a crash left behind holds the secret
+opti_oignon/config/.auth.yaml.*.tmp
