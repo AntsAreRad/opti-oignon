@@ -95,7 +95,10 @@ class SecurityModeState:
     # None when no key loads: the lockfile is not verified, which is not "invalid".
     hmac_valid: bool | None = False
     sources_agree: bool = True
-    lockfile_exists: bool = False
+    # None when whether it is there could not be looked at.
+    lockfile_exists: bool | None = False
+    # Why a lockfile that is there gives no field (it reads Bulbe), or None.
+    lock_unread: str | None = None
 
 
 @dataclass
@@ -247,18 +250,23 @@ def _lockfile_left(failure: OSError) -> tuple[str, str]:
     is left where it is -- as it was, or cut by a write in place that failed -- and what the mode reads of it is
     said, for the record and for the answer.
 
-    One that gives no field counts as none: security.yaml alone says Bulbe.
-    One that says Bulbe agrees with it. One that says another mode, or no
+    One that is not there counts as none: security.yaml alone says Bulbe.
+    One that is there and gives no field reads Bulbe from that, at every
+    start -- recorded each time. One that says Bulbe agrees with it. One that says another mode, or no
     mode, disagrees with security.yaml: the mode reads Bulbe from that
     disagreement at every start -- recorded each time -- and keeps it should
     security.yaml alone be edited back once a key file is made.
     """
     cause = type(failure).__name__
-    fields = _read_lockfile()
+    fields, unread = _read_lock()
     there = fields.get("MODE") or "no mode"
     if not fields:
-        return (f"not written ({cause}): none there",
-                f"no key loads, and the lockfile could not be written ({cause}): security.yaml alone says it")
+        if unread is None:
+            return (f"not written ({cause}): none there",
+                    f"no key loads, and the lockfile could not be written ({cause}): security.yaml alone says it")
+        return (f"not written ({cause}): it {unread}",
+                f"no key loads, and the lockfile could not be written ({cause}): it {unread}, and the mode reads "
+                "Bulbe from that")
     if there == MODE_BULBE:
         return (f"not written ({cause}): it says bulbe",
                 f"no key loads, and the lockfile could not be written ({cause}): it says Bulbe, with security.yaml")
@@ -362,7 +370,7 @@ def _put_lock_bytes(data: bytes) -> None:
     -- made writable first, a symbolic link at its place refused, never
     followed -- and a write that fails there leaves it cut, and writable.
     Every caller writes security.yaml first, so a lockfile cut part way reads
-    Bulbe or none, never a mode lower than the one written.
+    Bulbe or the mode written, never a lower one.
     """
     target = Path(_LOCKFILE_PATH).absolute()
     temp = target.parent / f".{target.name}.tmp-{os.urandom(4).hex()}"
@@ -393,24 +401,60 @@ def _put_lock_bytes(data: bytes) -> None:
             os.close(handle)
 
 
+# A lockfile is four short lines; one longer than this was written by no writer here.
+_LOCK_MOST_BYTES = 4096
+# The reason given when whether a lockfile is there cannot be looked at.
+_LOOK_REFUSED = "cannot be looked at here"
+
+
+def _read_lock() -> tuple[dict[str, str], str | None]:
+    """The lockfile's fields, from one read, and why one that is there gives none -- it cannot be looked at or read
+    here, it is no regular file or longer than any written, or it holds none --, or None: it gives some, or it is
+    not there."""
+    try:
+        os.lstat(_LOCKFILE_PATH)
+    except FileNotFoundError:
+        return {}, None
+    except OSError as exc:  # whether it is there is not known: it is not taken as absent
+        logger.warning("Failed to look at lockfile: %s", exc)
+        return {}, f"{_LOOK_REFUSED} ({type(exc).__name__})"
+    try:
+        # Only a regular file is opened -- a device behind a link at its name is never touched --, without blocking
+        # and taking no terminal, so that a FIFO swapped in since answers at once; it is checked again once open
+        if not stat.S_ISREG(os.stat(_LOCKFILE_PATH).st_mode):
+            return {}, "is not a regular file"
+        fd = os.open(_LOCKFILE_PATH, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOCTTY", 0))
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return {}, "is not a regular file"
+            data = b""
+            while len(data) <= _LOCK_MOST_BYTES:
+                chunk = os.read(fd, _LOCK_MOST_BYTES + 1 - len(data))
+                if not chunk:
+                    break
+                data += chunk
+        finally:
+            os.close(fd)
+        if len(data) > _LOCK_MOST_BYTES:
+            return {}, f"holds more than {_LOCK_MOST_BYTES} bytes"
+        text = data.decode("utf-8")
+    except Exception as exc:  # noqa: BLE001 - what stops the read is the reason
+        logger.warning("Failed to read lockfile: %s", exc)
+        return {}, f"cannot be read here ({type(exc).__name__})"
+    result: dict[str, str] = {}
+    for line in text.strip().splitlines():
+        if ":" in line:
+            k, v = line.split(":", 1)
+            result[k.strip()] = v.strip()
+    return result, None if result else "holds no field"
+
+
 def _read_lockfile() -> dict[str, str]:
     """Parse the lockfile into a dict of fields.
 
     Returns empty dict if the lockfile is missing or unreadable.
     """
-    try:
-        if not _LOCKFILE_PATH.exists():
-            return {}
-        text = _LOCKFILE_PATH.read_text(encoding="utf-8")
-        result: dict[str, str] = {}
-        for line in text.strip().splitlines():
-            if ":" in line:
-                k, v = line.split(":", 1)
-                result[k.strip()] = v.strip()
-        return result
-    except Exception as exc:
-        logger.warning("Failed to read lockfile: %s", exc)
-        return {}
+    return _read_lock()[0]
 
 
 def _same_text(given: str, held: str) -> bool:
@@ -526,14 +570,15 @@ def _write_yaml_mode(mode: str) -> None:
 # Audit logging
 # ---------------------------------------------------------------------------
 
-def _file_signature(path: Path) -> tuple | None:
+def _file_signature(path: Path, follow: bool = True) -> tuple | None:
     """A file's identity and last change, as the mode cache compares it; None when absent.
 
     A stat that fails otherwise is its own signature, by its error, so the
-    file is read again once it can be stated.
+    file is read again once it can be stated. With ``follow`` False, the
+    entry at its name itself: a link to nothing is not no file.
     """
     try:
-        st = os.stat(path)
+        st = os.stat(path) if follow else os.lstat(path)
     except FileNotFoundError:
         return None
     except OSError as exc:
@@ -595,7 +640,12 @@ def _read_mode(key_state: tuple | None = None) -> tuple[str, tuple | None]:
     used instead when given.
     """
     yaml_mode = _read_yaml_mode()
-    lockfile = _read_lockfile()
+    lockfile, unread = _read_lock()
+    if unread is not None:
+        # A lockfile that is there and gives no field -- it cannot be looked at or read here, or holds none -- is
+        # no absent lockfile: security.yaml alone would let whoever spoils the lock choose the mode
+        return MODE_BULBE, ("lockfile_unreadable", "WARNING", "Lockfile %s. Failing secure to Bulbe mode.",
+                            (unread,), {"yaml_mode": yaml_mode, "lock_unread": unread})
     if not lockfile:
         # No lockfile: trust YAML but create lockfile on next write
         return yaml_mode, None
@@ -663,7 +713,8 @@ class SecurityModeManager:
         recording = getattr(self._recording, "mode", None)
         if recording is not None:
             return recording
-        signature = (_file_signature(_SECURITY_YAML), _file_signature(_LOCKFILE_PATH))
+        signature = (_file_signature(_SECURITY_YAML), _file_signature(_LOCKFILE_PATH),
+                     _file_signature(_LOCKFILE_PATH, follow=False))
         if self._cached_mode is not None and signature == self._cached_signature:
             return self._cached_mode
 
@@ -702,13 +753,19 @@ class SecurityModeManager:
     def get_state(self) -> SecurityModeState:
         """Return full state including validation details."""
         yaml_mode = _read_yaml_mode()
-        lockfile = _read_lockfile()
+        lockfile, unread = _read_lock()
         key, _unavailable = _key_state()
 
         state = SecurityModeState(
             mode=self.get_current_mode(),
-            lockfile_exists=bool(lockfile),
+            # Whether one is there is not known when its folder could not be looked at
+            lockfile_exists=(None if unread is not None and unread.startswith(_LOOK_REFUSED)
+                             else bool(lockfile) or unread is not None),
+            lock_unread=unread,
         )
+        if unread is not None:
+            # It gives no mode to agree with, and nothing to verify
+            state.sources_agree, state.hmac_valid = False, None
 
         if lockfile:
             state.user_id = lockfile.get("USER_ID", "")
@@ -873,7 +930,12 @@ class SecurityModeManager:
         button that can say no is not a panic button.
         """
         current = self.get_current_mode()
-        if current == MODE_BULBE:
+        # A Bulbe read from a fault -- a lockfile that gives no field, sources that disagree, one that does not
+        # verify -- lasts only until the fault is repaired, and one kept from a fault the files no longer give no
+        # longer than the cache: the emergency stop writes Bulbe unless the files read it now, nothing failing.
+        # The key is loaded once for both reads.
+        key_state = _key_state() if current == MODE_BULBE and force else None
+        if current == MODE_BULBE and (not force or _read_mode(key_state) == (MODE_BULBE, None)):
             return {
                 "success": True,
                 "mode": MODE_BULBE,
@@ -881,7 +943,7 @@ class SecurityModeManager:
                 "changed": False,
             }
 
-        key, unavailable = _key_state()
+        key, unavailable = key_state if key_state is not None else _key_state()
         if not key and force:
             # No key signs the lockfile, and the emergency stop never takes
             # no for an answer. security.yaml says Bulbe; with no key file at
@@ -1246,6 +1308,7 @@ class SecurityModeManager:
             "mode": state.mode,
             "timestamp": state.timestamp,
             "lockfile_exists": state.lockfile_exists,
+            "lock_unread": state.lock_unread,
             "sources_agree": state.sources_agree,
             "hmac_valid": state.hmac_valid,
             "policy": {
@@ -1341,15 +1404,9 @@ def _yaml_said() -> str:
 
 
 def _lock_unread() -> str | None:
-    """Why a lockfile that is there gives no field (the mode reads it as none), as ``check`` says it; None when
-    there is no lockfile."""
-    if not os.path.lexists(_LOCKFILE_PATH):
-        return None
-    try:
-        _LOCKFILE_PATH.read_text(encoding="utf-8")
-    except Exception as exc:  # noqa: BLE001 - what stops the read is the reason
-        return f"cannot be read here ({type(exc).__name__})"
-    return "holds no field"
+    """Why a lockfile that is there gives no field (the mode reads Bulbe from it), as ``check`` says it; None when
+    there is no lockfile, or it gives some."""
+    return _read_lock()[1]
 
 
 def mode_report() -> dict[str, Any]:

@@ -1303,6 +1303,13 @@ fail_under = 0
 # assertions unchanged and stand for those by a file whose removal is refused and a folder whose rights cannot be
 # given back. They stay in the tree word for word.
 #
+# A mode lock that is there and gives no field reads Bulbe (block 220). mv6[lock_unread] and
+# mv12[none_lockfile_a_folder] of tests/test_mode_verdict_contracts.py pinned the opposite -- a lock that cannot be
+# read, or a folder at its name, read as none, security.yaml alone saying daily -- which let whoever spoils the lock
+# choose the mode: they give way to lk3 and lk4 of tests/test_mode_lock_unread_gives_bulbe_contracts.py, which keep
+# their cases and assert what check now says of them, and what the emergency stop now writes and says over them
+# (security.yaml says Bulbe after the stop, as mv12 asserted). They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1758,4 +1765,6 @@ addopts = """
     --deselect=tests/test_code_execution_in_the_sandbox_contracts.py::test_ce9_code_that_never_ran_is_never_handed_to_the_model_to_fix
     --deselect=tests/test_sandbox_workspace_ownership_contracts.py::test_wl3_the_hold_lasts_as_long_as_the_session
     --deselect=tests/test_sandbox_workspace_ownership_contracts.py::test_wl4_through_the_real_start
+    --deselect=tests/test_mode_verdict_contracts.py::test_mv6_check_says_the_mode_the_platform_reads_and_why[lock_unread]
+    --deselect=tests/test_mode_verdict_contracts.py::test_mv12_the_emergency_stop_escalates_when_no_key_loads[none_lockfile_a_folder]
 """

@@ -1096,7 +1096,8 @@ def _mode_line() -> str:
     if lock is None:
         source = "security.yaml" if said in ("daily", "bulbe") else f"security.yaml, which says {said}"
         if report["lock_unread"]:
-            return f"security mode: {report['mode']}, from {source}: its lock file {report['lock_unread']}, read as none"
+            return (f"security mode: {report['mode']}, failing secure: its lock file {report['lock_unread']}; "
+                    f"security.yaml says {said}")
         return f"security mode: {report['mode']}, from {source}: no lock file"
     if failure == "lockfile_hmac_failure":
         changed = report["key_changed"]

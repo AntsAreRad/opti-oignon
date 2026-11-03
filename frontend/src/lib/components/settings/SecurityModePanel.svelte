@@ -257,18 +257,18 @@
 		</div>
 
 		<!-- Integrity Status -->
-		{#if status.lockfile_exists}
+		{#if status.lockfile_exists || status.lock_unread}
 			<div class="flex gap-3 text-xs mb-4" style="color: var(--oo-fg-muted);">
 				<span>
 					Sources:
 					<span style="color: {status.sources_agree ? 'var(--oo-success)' : 'var(--oo-fg-error)'};">
-						{status.sources_agree ? 'aligned' : 'MISMATCH'}
+						{status.sources_agree ? 'aligned' : status.lock_unread ? `the lock file ${status.lock_unread}` : 'MISMATCH'}
 					</span>
 				</span>
 				<span>
 					HMAC:
 					<span style="color: {status.hmac_valid === true ? 'var(--oo-success)' : status.hmac_valid === false ? 'var(--oo-fg-error)' : 'var(--oo-fg-muted)'};">
-						{status.hmac_valid === true ? 'valid' : status.hmac_valid === false ? 'INVALID' : 'not verified: no key loads'}
+						{status.hmac_valid === true ? 'valid' : status.hmac_valid === false ? 'INVALID' : status.lock_unread ? 'not verified: the lock file gives no field' : 'not verified: no key loads'}
 					</span>
 				</span>
 			</div>

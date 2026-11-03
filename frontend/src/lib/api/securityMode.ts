@@ -35,7 +35,10 @@ export interface SecurityModeStatus {
   mode: string;
   available: boolean;
   timestamp?: number;
-  lockfile_exists?: boolean;
+  /** null when whether it is there could not be looked at. */
+  lockfile_exists?: boolean | null;
+  /** Why a lock file that is there gives no field (the mode reads Bulbe), or null. */
+  lock_unread?: string | null;
   sources_agree?: boolean;
   /** null when no key loads: the lockfile is not verified. */
   hmac_valid?: boolean | null;

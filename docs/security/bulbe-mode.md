@@ -224,8 +224,11 @@ and when either changes --, never waiting on the record it is writing.
 A platform started without the passphrase of its wrapped key file opens
 no encrypted database, and reads Bulbe as soon as a lockfile is there:
 set `OPTI_KEYFILE_PASSPHRASE` wherever it starts. Without a key file the
-lockfile is not verified, and a lockfile that cannot be read counts as
-none. `python3 -m opti_oignon.db_encryption check` says the mode the
+lockfile is not verified. A lockfile that is there and gives no field
+(it cannot be read or looked at, it is no regular file, or it holds
+none) reads Bulbe too; only one that is not there leaves `security.yaml`
+alone to say the mode, as on a fresh install.
+`python3 -m opti_oignon.db_encryption check` says the mode the
 platform reads and why -- with, for a lockfile that does not verify,
 when it says it was signed and when the key file changed.
 
@@ -239,7 +242,11 @@ name. The emergency stop escalates even when no key loads: it writes
 unsigned, so the two agree and a key file made later signs it; a key file
 that does not load keeps the lockfile it has, and a lockfile the stop
 cannot write is left where it is and said -- one that says Daily keeps
-the two disagreeing, which reads Bulbe. The lockfile is written whole
+the two disagreeing, which reads Bulbe. The stop writes Bulbe unless
+the files read Bulbe with nothing failing: a Bulbe read only from a
+fault -- a lockfile that gives no field, sources that disagree, one that
+does not verify -- would last only until the fault is repaired. The
+lockfile is written whole
 where its folder takes a new file, and in place where it does not, never
 through a symbolic link at its place.
 

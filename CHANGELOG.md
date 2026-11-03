@@ -3487,6 +3487,22 @@ package costs.
 
 ### Fixed
 
+- A security mode lock file that is there but cannot be read no longer
+  lets `security.yaml` alone choose the mode. When the lock file beside
+  the databases could not be read -- its permissions, a folder at its
+  name, a folder that cannot be searched, bytes that are not text -- or
+  held nothing, the platform read the mode from `security.yaml` alone,
+  as for a fresh install with no lock file: making the lock unreadable
+  and writing `security_mode: daily` gave Daily mode without the
+  downgrade ceremony. Such a lock file now reads Bulbe, failing secure,
+  logged with the reason and recorded in the audit chain where it takes
+  records; `check` and the security mode status say why, and the mode
+  comes back once the file can be read again. The emergency stop now
+  writes Bulbe even when the mode already reads Bulbe only because of
+  such a fault, so the stop outlasts the repair. A FIFO at the lock's
+  name no longer holds every reader of the mode. A lock file that is not
+  there at all still leaves `security.yaml` to say the mode. lk1-lk4 in
+  the new `tests/test_mode_lock_unread_gives_bulbe_contracts.py`.
 - An authentication settings file that cannot be read whole no longer
   opens the door. When `auth.yaml` failed to load -- a typo that breaks
   the YAML, a file the server cannot read -- the server fell back to
