@@ -3487,6 +3487,39 @@ package costs.
 
 ### Fixed
 
+- [SECURITY] The audit chain no longer re-anchors in silence. Its
+  startup check recreated a missing anchor file without a word, and
+  passed over an anchor it did not recognize or one written under
+  another key -- so deleting or garbling the anchor, or forging one
+  without the key, hid a truncated chain --; it never compared the
+  anchored hash, so a chain rewritten and rehashed at the anchored
+  height passed; each verdict was one log line, the anchor moved by the
+  next entry; and a chain truncated while the backend ran was anchored
+  over by its next entry. Now every verdict but an anchor that verifies,
+  and a chain grown past it, is written into the chain itself as an
+  `audit_anchor_<verdict>` entry, and only then does the anchor move,
+  past it: `tampered`, `truncated` and `rewritten` are critical under a
+  master key and warnings without one; a missing, unrecognized or
+  other-key anchor, one that cannot be looked at, and a comparison that
+  failed -- said once, and run again until it concludes -- are
+  warnings. A walk of the chain that fails no longer keeps the anchor
+  from being compared. Each entry the running backend writes first
+  checks that the chain still holds what it last anchored, and says a
+  truncation, an older copy put back or a rewrite right after it. A
+  process where a key is configured but does not load leaves an anchor
+  written under a key as it is, and writes no verdict; one whose check
+  ran under a key never writes an anchor without it.
+  `GET /api/security/audit-chain/status` reports the verdict under
+  `anchor`. The anchor is read without blocking and without following a
+  link -- a FIFO at its name held the first connection to the chain --
+  and written whole, never through a link at its name. Under a key, the
+  anchor names a truncation only while it is itself intact: deleted,
+  garbled or replaced, it gives a warning that does not name it. A
+  chain and an anchor both deleted still look like a first run, and an
+  older anchor put back with a chain truncated to its height still
+  passes; an anchor exported since and kept off the machine shows both.
+  ta1-ta10 in the new
+  `tests/test_audit_anchor_says_what_it_saw_contracts.py`.
 - In Bulbe mode the server no longer starts when the startup security
   checklist could not run. The check that refuses a start when Ollama
   listens on every network interface -- and nothing after the start
