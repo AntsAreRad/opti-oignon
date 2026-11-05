@@ -610,7 +610,9 @@ def _tighten(directory):
 def _default_connect():
     try:
         from opti_oignon.db_utils import safe_connect
-    except Exception:  # noqa: BLE001 - no keyed connection means no encrypted soil
+    except Exception as _exc:  # noqa: BLE001 - no keyed connection means no encrypted soil
+        if not (isinstance(_exc, ModuleNotFoundError) and _exc.name in ("opti_oignon", "opti_oignon.db_utils")):
+            raise  # a db_utils that is there and does not import is a failure, never the layer's absence
         return _no_encrypted_connect
     return safe_connect
 

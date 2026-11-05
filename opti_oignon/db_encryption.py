@@ -272,7 +272,9 @@ def get_encrypted_connection(
         Connection timeout in seconds.
     enforce_encryption : bool or None
         If True, raises if SQLCipher not available.
-        If None, uses mode-based enforcement (Bulbe = required).
+        If None, uses mode-based enforcement (Bulbe = required): a tree with
+        no mode module has no Bulbe; a mode module there that does not
+        import (a circular import, a dependency missing) reads as Bulbe.
     read_only : bool
         If True, the file is opened read-only (``_read_only_uri``): the key
         and its PRAGMAs apply as usual, and nothing can be written through
@@ -295,8 +297,10 @@ def get_encrypted_connection(
         try:
             from opti_oignon.security_mode import is_bulbe
             enforce_encryption = is_bulbe()
-        except ImportError:
-            enforce_encryption = False
+        except ImportError as exc:
+            enforce_encryption = not (
+                isinstance(exc, ModuleNotFoundError) and exc.name == "opti_oignon.security_mode"
+            )
 
     if enforce_encryption and not SQLCIPHER_AVAILABLE:
         raise RuntimeError(

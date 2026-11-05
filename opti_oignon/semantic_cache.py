@@ -58,7 +58,9 @@ try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
 
     _DB_LAYER_AVAILABLE = True
-except ImportError:
+except ImportError as _exc:
+    if not (isinstance(_exc, ModuleNotFoundError) and _exc.name in ("opti_oignon", "opti_oignon.db_utils")):
+        raise  # a db_utils that is there and does not import is a failure, never the layer's absence
     _safe_connect = None
     _DB_LAYER_AVAILABLE = False
     logger.error(
@@ -362,16 +364,19 @@ def _make_query_hash(query_text: str) -> str:
 def _is_bulbe() -> bool:
     """True when the security mode is Bulbe.
 
-    Fail-safe to False when the mode is undeterminable: the per-conversation
-    default scope (TC-01) already prevents cross-conversation bleed, so the
-    Bulbe override only tightens an explicitly-global config.
+    A mode that cannot be read reads as Bulbe, and so does a mode module that
+    is there and does not import (a circular import, a dependency missing):
+    an explicitly-global config is then tightened to the conversation's scope
+    (TC-01). A tree with no mode module has no Bulbe.
     """
     try:
         from opti_oignon.security_mode import is_bulbe
-
+    except ImportError as exc:
+        return not (isinstance(exc, ModuleNotFoundError) and exc.name == "opti_oignon.security_mode")
+    try:
         return bool(is_bulbe())
-    except Exception:
-        return False
+    except Exception:  # noqa: BLE001 - an unreadable mode tightens the scope
+        return True
 
 
 def _resolve_backend(model: str) -> Any:

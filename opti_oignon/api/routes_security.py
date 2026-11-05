@@ -1392,7 +1392,9 @@ try:
         plaintext_stores,
     )
     DB_ENCRYPTION_AVAILABLE = True
-except ImportError:
+except ImportError as _exc:
+    if not (isinstance(_exc, ModuleNotFoundError) and _exc.name in ("opti_oignon", "opti_oignon.db_encryption")):
+        raise  # a db_encryption that is there and does not import is a failure, never the layer's absence
     DB_ENCRYPTION_AVAILABLE = False
 
 

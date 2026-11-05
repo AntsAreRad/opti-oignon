@@ -38,7 +38,9 @@ FEATURE_AVAILABLE = True
 # guarded fallback for standalone loading.
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
-except ImportError:  # pragma: no cover - standalone loading fallback
+except ImportError as _exc:  # pragma: no cover - standalone loading fallback
+    if not (isinstance(_exc, ModuleNotFoundError) and _exc.name in ("opti_oignon", "opti_oignon.db_utils")):
+        raise  # a db_utils that is there and does not import is a failure, never the layer's absence
     import sqlite3 as _sq3
 
     def _safe_connect(p, **kw):

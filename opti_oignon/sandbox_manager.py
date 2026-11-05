@@ -2582,13 +2582,14 @@ class SandboxManager:
         """Whether Bulbe pins the strict settings at this moment.
 
         The security mode is read at each use, so a switch to Bulbe pins
-        them without a restart. A mode that cannot be read pins them; without
-        the security-mode module there is no Bulbe to pin for.
+        them without a restart. A mode that cannot be read pins them, and so
+        does a mode module that is there and does not import; in a tree with
+        no security-mode module there is no Bulbe to pin for.
         """
         try:
             from opti_oignon.security_mode import is_bulbe
-        except ImportError:
-            return False
+        except ImportError as exc:
+            return not (isinstance(exc, ModuleNotFoundError) and exc.name == "opti_oignon.security_mode")
         try:
             return bool(is_bulbe())
         except Exception:  # noqa: BLE001 - an unreadable mode pins the strict settings

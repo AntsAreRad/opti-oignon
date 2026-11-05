@@ -83,7 +83,10 @@ try:
     from ..db_utils import safe_connect as _safe_connect
 
     _HAS_SAFE_CONNECT = True
-except Exception:  # ImportError, or relative-import-beyond-top-level
+except Exception as _exc:  # ImportError, or relative-import-beyond-top-level
+    if (__package__ or "").split(".")[0] == "opti_oignon" and not (
+            isinstance(_exc, ModuleNotFoundError) and _exc.name == "opti_oignon.db_utils"):
+        raise  # a db_utils that is there and does not import is a failure, never the layer's absence
     _HAS_SAFE_CONNECT = False
 
     def _safe_connect(  # type: ignore[misc]

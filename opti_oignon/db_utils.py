@@ -28,12 +28,18 @@ checkpoint_before_apply = True
 # process-global -- db_encryption is either importable or not).
 _plaintext_fallback_warned = False
 
+# A tree with no db_encryption module stores in plaintext (Bulbe refuses); a db_encryption module that is there and
+# does not import (a circular import, a dependency missing, a file half written) refuses every store: what failed,
+# else None.
+_ENCRYPTION_BROKEN: str | None = None
 try:
     from opti_oignon.db_encryption import get_encrypted_connection
     _ENCRYPTION_AVAILABLE = True
-except ImportError:
+except Exception as _exc:  # noqa: BLE001 - every failure but the module's absence refuses below
     _ENCRYPTION_AVAILABLE = False
     get_encrypted_connection = None  # type: ignore[assignment]
+    if not (isinstance(_exc, ModuleNotFoundError) and _exc.name in ("opti_oignon", "opti_oignon.db_encryption")):
+        _ENCRYPTION_BROKEN = f"{type(_exc).__name__}: {_exc}"
 
 
 def safe_connect(
@@ -80,15 +86,25 @@ def safe_connect(
         )
 
     # TC-02: db_encryption is unavailable. Do NOT fall back to plaintext
-    # silently. Fail closed in Bulbe (matching get_encrypted_connection), and
-    # warn loudly once in Daily so a degraded install is not silently writing
-    # plaintext while the rest of the code still assumes encryption.
+    # silently. A module there that does not import refuses in every mode;
+    # a tree without it fails closed in Bulbe (matching
+    # get_encrypted_connection, a mode that cannot be read or whose module
+    # does not import being Bulbe), and warns loudly once in Daily so a
+    # degraded install is not silently writing plaintext while the rest of
+    # the code still assumes encryption.
+    if _ENCRYPTION_BROKEN is not None:
+        raise RuntimeError(
+            f"Database encryption module does not import ({_ENCRYPTION_BROKEN}). "
+            f"Refusing to open {db_path} in plaintext."
+        )
     try:
         from opti_oignon.security_mode import is_bulbe
 
         bulbe = is_bulbe()
-    except Exception:
-        bulbe = False
+    except ImportError as exc:
+        bulbe = not (isinstance(exc, ModuleNotFoundError) and exc.name == "opti_oignon.security_mode")
+    except Exception:  # noqa: BLE001 - a mode that cannot be read is Bulbe
+        bulbe = True
     if bulbe:
         raise RuntimeError(
             f"Database encryption module unavailable; Bulbe mode requires "

@@ -23,9 +23,20 @@ default. Encrypted stores include:
 - RAG metadata (collections, documents, citations)
 
 When the encryption module or SQLCipher is missing, Bulbe mode refuses
-to open a database in plaintext. Daily mode opens it in plaintext and
-logs a warning once per process; the startup security checklist does
-not report it.
+to open a database in plaintext through the platform's connection layer
+(`safe_connect`); a store that opens its own connection when that layer
+is missing from the install altogether does not refuse yet. Daily mode
+opens it in plaintext and logs a warning once per process; the startup
+security checklist does not report it. An encryption module that is
+there and does not import (a circular import, a dependency of its own
+missing, a file half written) refuses every database, in either mode,
+and the server does not start; a module that opens a database does not
+import when its database layer is there and does not, but the knowledge
+base dashboard (`rag_dashboard.py`), which keeps its own plaintext path
+for now. A security mode that cannot be read, or whose module is there
+and does not import, counts as Bulbe here. Only a tree with no security
+mode module at all opens as Daily here (the HTTP gate reads it as
+Bulbe). A plugin's own databases are another matter (below).
 
 #### Turning database encryption on
 

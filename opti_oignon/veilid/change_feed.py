@@ -96,7 +96,9 @@ from opti_oignon.veilid.records import (
 # stored in a plain sqlite3 file.
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
-except ImportError:
+except ImportError as _exc:
+    if not (isinstance(_exc, ModuleNotFoundError) and _exc.name in ("opti_oignon", "opti_oignon.db_utils")):
+        raise  # a db_utils that is there and does not import is a failure, never the layer's absence
     logging.getLogger(__name__).warning(
         "db_utils unavailable: veilid change_feed falling back to PLAINTEXT "
         "sqlite3. Synced record payloads are NOT encrypted at rest."

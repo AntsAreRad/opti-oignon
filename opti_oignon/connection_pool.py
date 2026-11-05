@@ -45,7 +45,9 @@ _safe_connect_fn = None
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect_fn
     _SAFE_CONNECT_AVAILABLE = True
-except ImportError:
+except ImportError as _exc:
+    if not (isinstance(_exc, ModuleNotFoundError) and _exc.name in ("opti_oignon", "opti_oignon.db_utils")):
+        raise  # a db_utils that is there and does not import is a failure, never the layer's absence
     logger.warning(
         "db_utils unavailable: connection_pool falling back to PLAINTEXT "
         "sqlite3. Pooled database connections are NOT encrypted at rest."

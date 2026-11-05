@@ -501,6 +501,19 @@ class SearchKillSwitch:
         return {"success": True, "persisted": persisted, "message": message}
 
     @staticmethod
+    def _bulbe() -> bool:
+        """Whether search stays off for Bulbe: the mode says Bulbe, cannot be read, or its module is there and does
+        not import (a circular import, a dependency missing); a tree with no mode module has no Bulbe."""
+        try:
+            from opti_oignon.security_mode import is_bulbe
+        except ImportError as exc:
+            return not (isinstance(exc, ModuleNotFoundError) and exc.name == "opti_oignon.security_mode")
+        try:
+            return bool(is_bulbe())
+        except Exception:  # noqa: BLE001 - a mode that cannot be read keeps search off
+            return True
+
+    @staticmethod
     def _audit_cancelled(user_id: str, reason: str) -> None:
         try:
             from opti_oignon.security_mode import _audit_log
@@ -511,22 +524,18 @@ class SearchKillSwitch:
     def request_reenable(self, user_id: str) -> dict[str, Any]:
         """Start the re-enable ceremony.
 
-        In Bulbe mode, this always fails (search cannot be re-enabled).
+        In Bulbe mode, this always fails (search cannot be re-enabled), and
+        so it does where the mode module is there and does not import.
         """
-        # Check Bulbe mode
-        try:
-            from opti_oignon.security_mode import is_bulbe
-            if is_bulbe():
-                return {
-                    "success": False,
-                    "error": "bulbe_mode",
-                    "message": (
-                        "Web search cannot be re-enabled in Bulbe mode. "
-                        "Switch to Daily mode first."
-                    ),
-                }
-        except ImportError:
-            pass
+        if self._bulbe():
+            return {
+                "success": False,
+                "error": "bulbe_mode",
+                "message": (
+                    "Web search cannot be re-enabled in Bulbe mode. "
+                    "Switch to Daily mode first."
+                ),
+            }
 
         if self.is_enabled():
             return {
@@ -591,17 +600,13 @@ class SearchKillSwitch:
             }
 
         # Check Bulbe mode again (could have changed)
-        try:
-            from opti_oignon.security_mode import is_bulbe
-            if is_bulbe():
-                self._state.reenable_pending = False
-                return {
-                    "success": False,
-                    "error": "bulbe_mode",
-                    "message": "Cannot re-enable search in Bulbe mode",
-                }
-        except ImportError:
-            pass
+        if self._bulbe():
+            self._state.reenable_pending = False
+            return {
+                "success": False,
+                "error": "bulbe_mode",
+                "message": "Cannot re-enable search in Bulbe mode",
+            }
 
         # Verify request_id
         if not same(request_id, self._state.reenable_request_id):

@@ -70,12 +70,12 @@ try:
     from .routes_auth import _get_current_user
 
     _na_auth_dep = [Depends(_get_current_user)]
-except ImportError:  # pragma: no cover - auth optional
+except ImportError:
+    # No route here is served without the authentication it asks: refused (503), as in routes_security.
+    async def _get_current_user() -> dict:  # type: ignore[no-redef]
+        raise HTTPException(status_code=503, detail="Authentication unavailable: these endpoints are disabled.")
 
-    _na_auth_dep = []
-
-    def _get_current_user() -> dict:  # type: ignore[misc]
-        return {"sub": None}
+    _na_auth_dep = [Depends(_get_current_user)]
 
 
 note_actions_router = APIRouter(

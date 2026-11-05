@@ -148,7 +148,8 @@ class RateLimiter:
         """Check Bulbe mode with caching (re-check every 30s).
 
         Returns:
-            True if Bulbe mode is active.
+            True if Bulbe mode is active, or the mode module is there and
+            does not import; False in a tree with no mode module.
         """
         now = time.time()
         if self._bulbe_cached is not None and (now - self._bulbe_check_time) < 30.0:
@@ -156,8 +157,10 @@ class RateLimiter:
         try:
             from opti_oignon.security_mode import is_bulbe
             self._bulbe_cached = is_bulbe()
-        except ImportError:
-            self._bulbe_cached = False
+        except ImportError as exc:
+            self._bulbe_cached = not (
+                isinstance(exc, ModuleNotFoundError) and exc.name == "opti_oignon.security_mode"
+            )
         self._bulbe_check_time = now
         return self._bulbe_cached
 

@@ -501,7 +501,9 @@ class ConversationWipeManager:
     def on_bulbe_response(self, conversation_id: str) -> WipeResult | None:
         """Hook: called after every LLM response in Bulbe mode.
 
-        Wipes the conversation buffers so no history accumulates.
+        Wipes the conversation buffers so no history accumulates. A mode
+        module that is there and does not import wipes them too; a tree with
+        no mode module has no Bulbe.
         """
         if not self.bulbe_wipe_per_turn:
             return None
@@ -509,8 +511,9 @@ class ConversationWipeManager:
             from opti_oignon.security_mode import is_bulbe
             if not is_bulbe():
                 return None
-        except ImportError:
-            return None
+        except ImportError as exc:
+            if isinstance(exc, ModuleNotFoundError) and exc.name == "opti_oignon.security_mode":
+                return None
         return self.wipe(conversation_id)
 
     # -- Status ------------------------------------------------------------

@@ -86,7 +86,10 @@ checkpoint_before_apply = True
 # user, so its contracts run without the backend.
 try:
     from .db_encryption import get_encrypted_connection
-except Exception:  # loaded alone, or a backend without the encryption layer
+except Exception as _exc:  # loaded alone, or a backend without the encryption layer
+    if (__package__ or "").split(".")[0] == "opti_oignon" and not (
+            isinstance(_exc, ModuleNotFoundError) and _exc.name == "opti_oignon.db_encryption"):
+        raise  # a db_encryption that is there and does not import is a failure, never the layer's absence
 
     def get_encrypted_connection(  # type: ignore[misc]
         db_path: Any,

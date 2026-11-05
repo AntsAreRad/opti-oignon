@@ -45,7 +45,9 @@ logger = logging.getLogger(__name__)
 # -- Safe DB connection -----------------------------------------------------
 try:
     from opti_oignon.db_utils import safe_connect as _safe_connect
-except ImportError:
+except ImportError as _exc:
+    if not (isinstance(_exc, ModuleNotFoundError) and _exc.name in ("opti_oignon", "opti_oignon.db_utils")):
+        raise  # a db_utils that is there and does not import is a failure, never the layer's absence
     _safe_connect = lambda p, **kw: sqlite3.connect(str(p), **kw)  # type: ignore[assignment]
 
 

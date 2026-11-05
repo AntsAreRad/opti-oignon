@@ -509,15 +509,17 @@ def swap_startup_check() -> None:
     except Exception:
         require_encrypted = True
 
-    # Check security mode
+    # Check security mode: a mode module that is there and does not import
+    # reads as Bulbe; a tree with no mode module has no Bulbe.
     try:
         from opti_oignon.security_mode import is_bulbe
-        if is_bulbe() and require_encrypted:
-            raise RuntimeError(
-                "Bulbe mode requires encrypted swap. "
-                f"Unencrypted devices: {', '.join(unencrypted)}. "
-                "Either encrypt swap, use zram, or set "
-                "hardening.require_encrypted_swap: false in security.yaml."
-            )
-    except ImportError:
-        pass
+        bulbe = is_bulbe()
+    except ImportError as exc:
+        bulbe = not (isinstance(exc, ModuleNotFoundError) and exc.name == "opti_oignon.security_mode")
+    if bulbe and require_encrypted:
+        raise RuntimeError(
+            "Bulbe mode requires encrypted swap. "
+            f"Unencrypted devices: {', '.join(unencrypted)}. "
+            "Either encrypt swap, use zram, or set "
+            "hardening.require_encrypted_swap: false in security.yaml."
+        )

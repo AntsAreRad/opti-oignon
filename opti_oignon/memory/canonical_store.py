@@ -51,7 +51,10 @@ try:
     from ..db_encryption import SQLCIPHER_AVAILABLE, get_encrypted_connection
 
     _HAS_DB_ENCRYPTION = True
-except Exception:  # ImportError, or relative-import-beyond-top-level in isolation
+except Exception as _exc:  # ImportError, or relative-import-beyond-top-level in isolation
+    if (__package__ or "").split(".")[0] == "opti_oignon" and not (
+            isinstance(_exc, ModuleNotFoundError) and _exc.name == "opti_oignon.db_encryption"):
+        raise  # a db_encryption that is there and does not import is a failure, never the layer's absence
     _HAS_DB_ENCRYPTION = False
     SQLCIPHER_AVAILABLE = False
 

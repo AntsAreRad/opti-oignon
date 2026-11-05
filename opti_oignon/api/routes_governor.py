@@ -771,7 +771,11 @@ try:
 
         _auth_dep = [Depends(_get_current_user)]
     except ImportError:
-        _auth_dep = []
+        # No route here is served without the authentication it asks: refused (503), as in routes_security.
+        async def _get_current_user() -> dict:  # type: ignore[no-redef]
+            raise HTTPException(status_code=503, detail="Authentication unavailable: these endpoints are disabled.")
+
+        _auth_dep = [Depends(_get_current_user)]
 
     router = APIRouter(
         prefix="/api/governor", tags=["governor"], dependencies=_auth_dep

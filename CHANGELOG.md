@@ -3558,6 +3558,33 @@ package costs.
   on. Contracts dk1-dk10 in
   `tests/test_plugin_digest_and_closed_registration_contracts.py`; og2,
   en5, uc2 and a36 give way to them.
+- [SECURITY] A failed import of the security mode, the database layer
+  or the auth routes no longer opens a door, and the app no longer
+  starts without its security headers. A security mode module that did
+  not import read as Daily mode: the database encryption was not
+  enforced, the rate limits stayed Daily's, the sandbox's strict
+  settings were not pinned, search could be re-enabled and the semantic
+  cache served its shared bucket. Now a mode module that is part of the
+  tree and does not import (a circular import, a dependency of its own
+  missing) reads as Bulbe mode; a tree with no mode module has no Bulbe
+  there. A database encryption module that did not import opened the
+  databases in plaintext in Daily mode, and a mode that could not be
+  read there counted as Daily; thirty-seven modules that open a
+  database also kept a plaintext fallback of their own, some for any
+  error. Now an encryption or database module that is there and does
+  not import refuses: the server does not start, `safe_connect`
+  refuses every database, and a module with its own fallback does not
+  import (`rag_dashboard.py` aside, sealed by the write census until
+  its debt is paid); an unreadable mode counts as Bulbe.
+  Twenty-one routers dropped their authentication when the auth routes
+  did not import; twelve of them gave the routes an identity of no one,
+  and the marketplace's a synthetic admin. Now they refuse every request
+  (503), as the security routes did. The security headers and the
+  content security policy were skipped, logged, when they could not be
+  registered; now the app does not start without them. Contracts
+  fi1-fi11 in
+  `tests/test_failed_import_never_opens_a_door_contracts.py`; ft17,
+  ft19, tl41, tl70 and tl71 give way to them.
 - [SECURITY] Remote access now refuses a revoked device's certificate.
   The check of each request read the client certificate from a transport
   uvicorn never puts in a request's scope, so it ran only on a header a

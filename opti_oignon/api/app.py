@@ -308,28 +308,26 @@ app = FastAPI(
 # Security headers middleware (Phase 4)
 #
 # Registered BEFORE CORS so that security headers are added to every
-# response without overwriting CORS headers.
+# response without overwriting CORS headers. One that cannot be registered
+# stops the app here: it never serves a page without its headers.
 # ---------------------------------------------------------------------------
-try:
-    from .security_middleware import SecurityHeadersMiddleware
-    app.add_middleware(SecurityHeadersMiddleware)
-    logger.info("Security headers middleware registered")
-except Exception as _sec_exc:
-    logger.warning("Failed to register security headers middleware: %s", _sec_exc)
+from .security_middleware import SecurityHeadersMiddleware  # noqa: E402
+
+app.add_middleware(SecurityHeadersMiddleware)
+logger.info("Security headers middleware registered")
 
 # ---------------------------------------------------------------------------
 # Content Security Policy middleware
 #
 # Nonce-based strict CSP with report-only mode (default).
 # Generates a unique nonce per request, restricts connect-src to localhost.
-# CSP violation reporting via /api/csp-report endpoint.
+# CSP violation reporting via /api/csp-report endpoint. One that cannot be
+# registered stops the app here, as for the headers above.
 # ---------------------------------------------------------------------------
-try:
-    from opti_oignon.middleware.csp import CSPMiddleware as _CSPMiddleware
-    app.add_middleware(_CSPMiddleware)
-    logger.info("CSP middleware registered")
-except Exception as _csp_exc:
-    logger.warning("Failed to register CSP middleware: %s", _csp_exc)
+from opti_oignon.middleware.csp import CSPMiddleware as _CSPMiddleware  # noqa: E402
+
+app.add_middleware(_CSPMiddleware)
+logger.info("CSP middleware registered")
 
 # ---------------------------------------------------------------------------
 # Security mode middleware

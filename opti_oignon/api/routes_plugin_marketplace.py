@@ -26,19 +26,11 @@ try:
     from .routes_auth import _get_current_user
     _auth_dep = [Depends(_get_current_user)]
 except Exception:
-    def _get_current_user() -> dict:  # type: ignore[misc]
-        """Fallback identity when the auth router is unavailable.
+    # No route here is served without the authentication it asks: refused (503), as in routes_security.
+    async def _get_current_user() -> dict:  # type: ignore[no-redef]
+        raise HTTPException(status_code=503, detail="Authentication unavailable: these endpoints are disabled.")
 
-        REV-2: mirrors the routes_users fallback so the review
-        author binding below always has an identity to bind to.
-        """
-        return {
-            "sub": "local",
-            "username": "local",
-            "role": "admin",
-            "type": "access",
-        }
-    _auth_dep = []
+    _auth_dep = [Depends(_get_current_user)]
 
 router = APIRouter(
     prefix="/api/plugins",

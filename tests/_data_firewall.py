@@ -301,7 +301,9 @@ class _PackageHome:
             homes = {os.path.realpath(tree) for tree in self.data_firewall_homes}
             if places and all(_checkout(name, place) in homes for place in places):
                 return spec
-            raise ImportError(
+            # The covered tree does not have it: refused as a module that is absent, which a loader that stands in
+            # the package without a layer means it to be.
+            raise ModuleNotFoundError(
                 f"data firewall: {name} would load from {', '.join(places) or 'nowhere it names'}, found by an "
                 f"install and in no covered tree ({os.pathsep.join(self.data_firewall_homes)}); that checkout's "
                 "data places are not covered here, so the import is refused",
