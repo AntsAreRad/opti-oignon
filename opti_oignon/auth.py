@@ -18,6 +18,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import secrets
 import sqlite3
@@ -187,7 +188,9 @@ def jwt_encode(payload: dict[str, Any], secret: str, algorithm: str = "HS512") -
 
 
 def jwt_decode(token: str, secret: str, algorithm: str = "HS512") -> dict[str, Any] | None:
-    """Decode and verify a JWT token. Returns None if invalid or expired.
+    """Decode and verify a JWT token. Returns None if invalid or expired, and
+    a token whose ``exp`` is missing, not a finite number (NaN and Infinity
+    included) or a boolean is invalid: it would never expire.
 
     Audit fix: the algorithm is ALWAYS determined server-side.
     The JWT header's 'alg' field is validated but never trusted to
@@ -236,9 +239,11 @@ def jwt_decode(token: str, secret: str, algorithm: str = "HS512") -> dict[str, A
             return None
         # Decode payload
         payload = json.loads(_b64url_decode(payload_b64))
-        # Check expiry
+        # Check expiry: a token that does not say when it ends never does, so it is refused.
         exp = payload.get("exp")
-        if exp is not None and time.time() > exp:
+        if isinstance(exp, bool) or not isinstance(exp, (int, float)) or not math.isfinite(exp):
+            return None
+        if time.time() > exp:
             return None
         return payload
     except Exception:
@@ -903,7 +908,8 @@ class AuthManager:
         )
 
     def validate_token(self, token: str) -> dict[str, Any] | None:
-        """Validate a JWT access token. Returns payload or None."""
+        """Validate a JWT access token. Returns payload or None: None too for a
+        token whose end lies past the configured access lifetime from now."""
         jwt_cfg = self.config.get("jwt", {})
         secret = self._get_jwt_secret()  # SecureBytes-backed
         algorithm = jwt_cfg.get("algorithm", "HS512")
@@ -911,6 +917,14 @@ class AuthManager:
         if not payload:
             return None
         if payload.get("type") != "access":
+            return None
+        # A token ends no later than the lifetime the configuration gives one from now (a minute's grace for the
+        # clocks): one that says a later end was not signed here, or under a longer lifetime than the one in force.
+        try:
+            longest = float(jwt_cfg.get("access_token_expiry_minutes", 60)) * 60 + 60
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(longest) or payload["exp"] > time.time() + longest:
             return None
         return payload
 

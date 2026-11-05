@@ -353,38 +353,70 @@ def _encrypt_secret(plaintext: str) -> str:
     return "B64:" + base64.b64encode(plaintext.encode()).decode()
 
 
+# The prefixes of a sealed field, encryption's _ENCRYPTED_PREFIX_V2 and _V1 (a
+# contract holds them equal): a stored secret that carries neither, nor "B64:",
+# was stored before encryption.
+_SEALED_PREFIXES = ("ENC2:", "ENC:")
+
+
 def _decrypt_secret(ciphertext: str) -> str:
     """Decrypt a stored TOTP secret: with the key whenever one loads, also while
-    the manager refuses to seal (a security.yaml that cannot say)."""
+    the manager refuses to seal (a security.yaml that cannot say). A sealed
+    secret that does not decrypt (no key loads, or the cipher fails) raises
+    ``EncryptionUnavailable`` with the reason: it is never handed on as the
+    secret, which no code would match. A row stored before encryption, neither
+    sealed nor ``B64:``, is the secret itself."""
     if ciphertext.startswith("B64:"):
         return base64.b64decode(ciphertext[4:]).decode()
+    if not ciphertext.startswith(_SEALED_PREFIXES):
+        return ciphertext
+    from opti_oignon.encryption import EncryptionManager, get_encryption_key
     try:
-        from opti_oignon.encryption import EncryptionManager
         mgr = EncryptionManager()
-        if mgr.has_key:
-            return mgr.decrypt(ciphertext)
-    except Exception:
-        pass
-    return ciphertext
+        if not mgr.has_key:
+            # A manager built with the switch off loads no key; a key that loads still reads what it sealed.
+            key = get_encryption_key()
+            if key is not None:
+                mgr = EncryptionManager(key=key, enabled=False)
+        has_key = mgr.has_key
+        plain = mgr.decrypt(ciphertext) if has_key else ciphertext
+    except Exception as exc:  # noqa: BLE001 - said below as the reason no code can be checked
+        reason = f"the TOTP secret does not decrypt ({type(exc).__name__}): no TOTP code can be checked"
+    else:
+        if not has_key:
+            reason = "the TOTP secret is sealed and no key loads: no TOTP code can be checked until one does"
+        elif plain.startswith(_SEALED_PREFIXES):
+            # The manager hands a value it cannot open back as it is.
+            reason = "the TOTP secret does not decrypt with the key that loads: no TOTP code can be checked"
+        else:
+            return plain
+    from opti_oignon.encryption import EncryptionUnavailable
+    raise EncryptionUnavailable(reason)
 
 
 # AU-03: recovery codes and app passwords are HMAC'd under a subkey derived from
 # the master encryption key on its own HKDF domain (Kerckhoffs-clean: the master
-# key is the only secret), versioned with a "v2:" prefix. The pre-AU-03 scheme
-# (the public-constant or keyfile HMAC, or plain SHA-256) is retained only to
-# verify and migrate existing hashes. The domain string is distinct from the
-# SQLCipher subkey, the learned-router MAC, and the audit anchor.
+# key is the only secret), versioned with a "v2:" prefix. With no key that loads
+# they are hashed with scrypt under a salt of their own ("s1:"), which needs no
+# secret and makes a search of a 64-bit recovery code cost 2^64 scrypt runs. The
+# pre-AU-03 scheme (the public-constant or keyfile HMAC, or plain SHA-256) is
+# never written: it is retained only to verify and migrate existing hashes. The
+# domain string is distinct from the SQLCipher subkey, the learned-router MAC,
+# and the audit anchor.
 _CODE_HMAC_INFO = b"oo-2fa-code-hmac-v2"
 _V2_PREFIX = "v2:"
+_S1_PREFIX = "s1:"
+_S1_N, _S1_R, _S1_P = 2 ** 14, 8, 1
+_S1_SALT_BYTES = 16
+_S1_HASH_BYTES = 32
 
 
 def _derive_2fa_code_key() -> bytes | None:
     """Derive the 2FA code-hashing subkey off the master key (HMAC-SHA256).
 
     Domain-separated from the SQLCipher subkey, the learned-router MAC and the
-    audit anchor (distinct info string). Returns None when no master key is
-    configured, in which case hashing falls back to the legacy scheme and the
-    at-rest protection rests on SQLCipher.
+    audit anchor (distinct info string). Returns None when no master key loads,
+    in which case codes are hashed with scrypt under a salt of their own (s1).
     """
     try:
         from opti_oignon.encryption import get_encryption_key
@@ -407,6 +439,26 @@ def _hash_code_v2(code: str, subkey: bytes) -> str:
     ).hexdigest()
 
 
+def _scrypt_code(code: str, salt: bytes) -> bytes:
+    """The s1 digest of a code under a salt."""
+    return hashlib.scrypt(code.encode("utf-8"), salt=salt, n=_S1_N, r=_S1_R, p=_S1_P, dklen=_S1_HASH_BYTES)
+
+
+def _hash_code_s1(code: str) -> str:
+    """Hash a code with scrypt under a fresh salt (the scheme with no key): ``s1:<salt hex>:<digest hex>``."""
+    salt = secrets.token_bytes(_S1_SALT_BYTES)
+    return f"{_S1_PREFIX}{salt.hex()}:{_scrypt_code(code, salt).hex()}"
+
+
+def _verify_code_s1(code: str, stored: str) -> bool:
+    """Whether a code matches an s1 hash; one that is not well formed matches nothing."""
+    salt_hex, sep, digest_hex = stored[len(_S1_PREFIX):].partition(":")
+    if (not sep or len(salt_hex) != 2 * _S1_SALT_BYTES or len(digest_hex) != 2 * _S1_HASH_BYTES
+            or not all(c in string.hexdigits for c in salt_hex + digest_hex)):
+        return False
+    return _hmac.compare_digest(_scrypt_code(code, bytes.fromhex(salt_hex)), bytes.fromhex(digest_hex))
+
+
 def _hash_code_legacy(code: str) -> str:
     """Reproduce the pre-AU-03 hash of a code (for verifying / migrating).
 
@@ -420,18 +472,23 @@ def _hash_code_legacy(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
-def _hash_code(code: str) -> str:
-    """Hash a recovery code or app password for storage.
+def _code_hasher():
+    """The hash of the scheme in force, the key looked up once: a set of codes made with it is of one scheme.
 
     AU-03: prefers a v2 hash keyed off the master encryption key on its own HKDF
-    domain (the master key is the only secret, so it is Kerckhoffs-clean). Falls
-    back to the legacy scheme when no master key is configured, in which case the
-    at-rest protection rests on SQLCipher.
+    domain (the master key is the only secret, so it is Kerckhoffs-clean). With
+    no key that loads, an s1 hash: scrypt under a salt of its own, which needs
+    no secret. Never the legacy scheme.
     """
     subkey = _derive_2fa_code_key()
     if subkey is not None:
-        return _hash_code_v2(code, subkey)
-    return _hash_code_legacy(code)
+        return lambda code: _hash_code_v2(code, subkey)
+    return _hash_code_s1
+
+
+def _hash_code(code: str) -> str:
+    """Hash a recovery code or app password for storage, in the scheme in force (``_code_hasher``)."""
+    return _code_hasher()(code)
 
 
 def _verify_code(code: str, stored: str) -> tuple[bool, bool]:
@@ -446,6 +503,8 @@ def _verify_code(code: str, stored: str) -> tuple[bool, bool]:
         if subkey is None:
             return False, False  # v2 hash but no key: cannot verify (fail safe)
         return _hmac.compare_digest(_hash_code_v2(code, subkey), stored), False
+    if stored.startswith(_S1_PREFIX):
+        return _verify_code_s1(code, stored), False
     # Legacy: try the keyed HMAC and the plain SHA-256 fallback.
     server_key = _get_hash_server_key()
     if server_key and _hmac.compare_digest(
@@ -564,7 +623,7 @@ class TwoFactorAuthManager:
             ).fetchall()
             recovery_count = len(recovery_rows)
             recovery_reissue = any(
-                not r["code_hash"].startswith(_V2_PREFIX) for r in recovery_rows
+                not r["code_hash"].startswith((_V2_PREFIX, _S1_PREFIX)) for r in recovery_rows
             )
 
             # App passwords
@@ -993,7 +1052,12 @@ class TwoFactorAuthManager:
                 return {"success": False, "error": "not_configured",
                         "message": "TOTP not set up for this user"}
 
-            secret = _decrypt_secret(row["secret_encrypted"])
+            try:
+                secret = _decrypt_secret(row["secret_encrypted"])
+            except Exception:
+                # No code was checked: the try goes back to the account's window, and the refusal is said.
+                self._release_confirm_try(user_id, now)
+                raise
             totp = pyotp.TOTP(secret)
 
             if not totp.verify(code, valid_window=1):
@@ -1014,6 +1078,14 @@ class TwoFactorAuthManager:
             return {"success": True, "message": "TOTP verified and activated"}
         finally:
             conn.close()
+
+    def _give_back(self, lock: Any, windows: dict[str, list[float]], user_id: str, at: float) -> None:
+        """Give back a try reserved at ``at`` in an account's window: nothing was checked under it (a secret or
+        codes no key that loads can read), and a code that was not checked is never counted wrong."""
+        with lock:
+            held = windows.get(user_id, [])
+            if at in held:
+                held.remove(at)
 
     def _release_confirm_try(self, user_id: str, at: float) -> None:
         """Give back a try ``totp_verify`` reserved at ``at``: its code was right, or there was nothing to check."""
@@ -1081,7 +1153,12 @@ class TwoFactorAuthManager:
                     logger.warning("TOTP replay rejected for user %s", user_id)
                     return False
             return True
-        except Exception:
+        except Exception as exc:
+            # The field encryption's refusal (encryption.EncryptionUnavailable), asked by its class's name, is said:
+            # a secret that does not decrypt checked no code, and no code is called wrong for it -- its try goes back.
+            if type(exc).__name__ == "EncryptionUnavailable" and type(exc).__module__ == "opti_oignon.encryption":
+                self._give_back(self._attempts_lock, self._totp_attempts, user_id, now)
+                raise
             return False
         finally:
             conn.close()
@@ -1107,6 +1184,12 @@ class TwoFactorAuthManager:
         The plaintext codes are returned ONCE and never stored.
         Only hashes are persisted.
         """
+        # Hashed before the write opens: with no key each hash is a scrypt run, and the store's lock is not held
+        # through them.
+        codes = [secrets.token_hex(RECOVERY_CODE_LENGTH // 2) for _ in range(RECOVERY_CODE_COUNT)]
+        hasher = _code_hasher()
+        hashes = [hasher(code) for code in codes]
+        now = time.time()
         conn = _get_2fa_conn()
         try:
             # Delete existing codes
@@ -1114,18 +1197,12 @@ class TwoFactorAuthManager:
                 "DELETE FROM recovery_codes WHERE user_id = ?",
                 (user_id,),
             )
-
-            codes = []
-            now = time.time()
-            for _ in range(RECOVERY_CODE_COUNT):
-                code = secrets.token_hex(RECOVERY_CODE_LENGTH // 2)
-                code_hash = _hash_code(code)
+            for code_hash in hashes:
                 conn.execute(
                     """INSERT INTO recovery_codes
                        (user_id, code_hash, created_at) VALUES (?, ?, ?)""",
                     (user_id, code_hash, now),
                 )
-                codes.append(code)
 
             conn.commit()
             return codes
@@ -1136,10 +1213,13 @@ class TwoFactorAuthManager:
         """Validate and consume a recovery code.  One-time use.
 
         Rate limited: 3 attempts per hour, each counted before its code is
-        read, as TOTP codes are. AU-03: matches both the v2
-        (master-key-derived) and the legacy hash schemes; a match against a
+        read, as TOTP codes are. AU-03: matches the v2 (master-key-derived),
+        the s1 (scrypt, no key) and the legacy hash schemes; a match against a
         legacy hash is still accepted, and the user's remaining recovery codes
-        are reported as needing re-issue via recovery_reissue_required().
+        are reported as needing re-issue via recovery_reissue_required(). Keyed
+        (v2) codes no key that loads can check raise ``EncryptionUnavailable``
+        when no other code matches; when not one code could be checked, the try
+        goes back. A code read by two tries together is used by one.
         """
         now = time.time()
         with self._attempts_lock:
@@ -1161,19 +1241,35 @@ class TwoFactorAuthManager:
                 (user_id,),
             ).fetchall()
             matched_id = None
+            keyed = _derive_2fa_code_key() is not None
+            unchecked = 0
             for r in rows:
+                if r["code_hash"].startswith(_V2_PREFIX) and not keyed:
+                    unchecked += 1
+                    continue
                 ok, _ = _verify_code(code, r["code_hash"])
                 if ok:
                     matched_id = r["id"]
                     break
             if matched_id is None:
+                if unchecked:
+                    if unchecked == len(rows):
+                        # Not one code was checked: the try goes back to the account's window.
+                        self._give_back(self._attempts_lock, self._recovery_attempts, user_id, now)
+                    from opti_oignon.encryption import EncryptionUnavailable
+                    raise EncryptionUnavailable(
+                        f"{unchecked} recovery code(s) are keyed and no key loads: none of them can be checked "
+                        "until one does")
                 return False
 
-            conn.execute(
-                "UPDATE recovery_codes SET used = 1, used_at = ? WHERE id = ?",
+            # The write is the check: of two tries that read the same unused code, one uses it.
+            used = conn.execute(
+                "UPDATE recovery_codes SET used = 1, used_at = ? WHERE id = ? AND used = 0",
                 (now, matched_id),
-            )
+            ).rowcount
             conn.commit()
+            if used != 1:
+                return False
 
             # Audit
             try:
@@ -1195,9 +1291,9 @@ class TwoFactorAuthManager:
 
         AU-03: pre-AU-03 recovery codes were HMAC'd with a public constant and
         cannot be transparently re-hashed (the plaintext is not stored). This
-        returns True when any unused recovery code lacks the v2 scheme prefix, so
-        the user can be prompted to re-issue (regenerate). It becomes False once
-        regenerated, since new codes are keyed under the master-key scheme.
+        returns True when any unused recovery code is of neither the v2 nor the
+        s1 scheme, so the user can be prompted to re-issue (regenerate). It
+        becomes False once regenerated, since new codes are of one of the two.
         """
         conn = _get_2fa_conn()
         try:
@@ -1208,7 +1304,7 @@ class TwoFactorAuthManager:
             ).fetchall()
         finally:
             conn.close()
-        return any(not r["code_hash"].startswith(_V2_PREFIX) for r in rows)
+        return any(not r["code_hash"].startswith((_V2_PREFIX, _S1_PREFIX)) for r in rows)
 
     # -- App-specific passwords -----------------------------------------------
 
@@ -1245,10 +1341,11 @@ class TwoFactorAuthManager:
     def validate_app_password(self, user_id: str, password: str) -> bool:
         """Validate an app-specific password.
 
-        AU-03: matches both the v2 (master-key-derived) and the legacy hash
-        schemes. A legacy hash is transparently rehashed to v2 on a successful
-        match (the plaintext is available at validation time), so app passwords
-        upgrade in place as they are used.
+        AU-03: matches the v2 (master-key-derived), the s1 (scrypt, no key) and
+        the legacy hash schemes. A legacy hash is transparently rehashed to the
+        current scheme (v2, or s1 with no key) on a successful match (the
+        plaintext is available at validation time), so app passwords upgrade in
+        place as they are used.
         """
         conn = _get_2fa_conn()
         try:
@@ -1269,7 +1366,7 @@ class TwoFactorAuthManager:
                 return False
 
             if is_legacy:
-                # Rehash-on-use: upgrade the stored hash to the v2 scheme.
+                # Rehash-on-use: upgrade the stored hash to the current scheme (v2, or s1 with no key).
                 conn.execute(
                     "UPDATE app_passwords SET last_used = ?, password_hash = ? "
                     "WHERE password_id = ?",
@@ -1319,6 +1416,9 @@ class TwoFactorAuthManager:
         self, user_id: str, code: str, method: str = "auto"
     ) -> dict[str, Any]:
         """Validate a 2FA code using the appropriate method.
+
+        Raises ``EncryptionUnavailable`` when the code cannot be checked: a
+        TOTP secret that does not decrypt, recovery codes keyed with no key.
 
         method:
           - "auto": try TOTP, then recovery code

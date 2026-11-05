@@ -1808,9 +1808,16 @@ async def totp_setup(
 
 @router.post("/2fa/totp/verify")
 async def totp_verify(body: TOTPVerifyRequest, account: Any = Depends(_session_account)) -> dict[str, Any]:
-    """Verify a TOTP code to activate the method a setup began (the setup asked the password)."""
+    """Verify a TOTP code to activate the method a setup began (the setup asked the password). 503 with the reason
+    when the stored secret is sealed and does not decrypt: no code could be checked."""
     _two_fa_or_503()
-    result = two_factor_manager.totp_verify(account.account_id, body.code)
+    try:
+        result = two_factor_manager.totp_verify(account.account_id, body.code)
+    except Exception as exc:
+        # The field encryption's refusal (encryption.EncryptionUnavailable), asked by its class's name.
+        if type(exc).__name__ != "EncryptionUnavailable" or type(exc).__module__ != "opti_oignon.encryption":
+            raise
+        raise HTTPException(status_code=503, detail=f"TOTP code not checked: {exc}") from exc
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("message", ""))
     return result
@@ -1902,10 +1909,11 @@ async def generate_recovery_codes(
     current: dict = Depends(_get_current_user),
     account: Any = Depends(_session_account),
 ) -> dict[str, Any]:
-    """Generate new recovery codes for the session's own account, after its password. Shown ONCE."""
+    """Generate new recovery codes for the session's own account, after its password. Shown ONCE. Hashed off the
+    event loop: with no key, each is a scrypt run."""
     _two_fa_or_503()
     user_id = await run_in_threadpool(_account_password, "recovery_codes", current, body.password, request)
-    codes = two_factor_manager.generate_recovery_codes(user_id)
+    codes = await run_in_threadpool(lambda: two_factor_manager.generate_recovery_codes(user_id))
     return {"success": True, "codes": codes, "count": len(codes)}
 
 
@@ -1919,10 +1927,10 @@ async def create_app_password(
     account: Any = Depends(_session_account),
 ) -> dict[str, Any]:
     """Create an app-specific password for the session's own account, after its password. Shown ONCE. It is never
-    a second factor at login, and no client signs in with one yet."""
+    a second factor at login, and no client signs in with one yet. Hashed off the event loop, as recovery codes are."""
     _two_fa_or_503()
     user_id = await run_in_threadpool(_account_password, "app_password_create", current, body.password, request)
-    return two_factor_manager.create_app_password(user_id, body.name)
+    return await run_in_threadpool(lambda: two_factor_manager.create_app_password(user_id, body.name))
 
 
 @router.get("/2fa/app-passwords")

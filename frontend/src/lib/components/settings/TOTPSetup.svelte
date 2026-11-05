@@ -139,7 +139,8 @@
 				verifyCode = '';
 			}
 		} catch (e: any) {
-			verifyError = e.detail || 'Verification failed.';
+			// The server's reason: a secret that does not decrypt is said (503), not shown as an overload.
+			verifyError = httpRefusal(e)?.detail || e.detail || 'Verification failed.';
 			verifyCode = '';
 		} finally {
 			verifyLoading = false;

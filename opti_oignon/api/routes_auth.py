@@ -1116,7 +1116,10 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
     """Complete 2FA login (step 2).
 
     Validates the 2FA code/response against the challenge issued in step 1.
-    On success, returns JWT tokens.  On failure, returns 403.
+    On success, returns JWT tokens.  On failure, returns 403. A code that
+    cannot be checked -- a TOTP secret that is sealed and does not decrypt,
+    recovery codes keyed with no key that loads -- is 503 with the reason: none
+    is called wrong.
 
     Rate limited: 5 attempts per challenge, each counted before its answer is
     read, then the challenge is locked and the user must restart login from
@@ -1214,7 +1217,14 @@ def login_2fa(req: TwoFALoginRequest, request: Request, response: Response) -> d
         else:
             tried = [req.method]
         for method in tried:
-            result = tfa_mgr.validate_2fa(user_id, code.lower() if method == "recovery" else code, method)
+            try:
+                result = tfa_mgr.validate_2fa(user_id, code.lower() if method == "recovery" else code, method)
+            except Exception as exc:
+                # The field encryption's refusal (encryption.EncryptionUnavailable), asked by its class's name: a
+                # TOTP secret that does not decrypt, or keyed recovery codes with no key. The challenge's try is spent.
+                if type(exc).__name__ != "EncryptionUnavailable" or type(exc).__module__ != "opti_oignon.encryption":
+                    raise
+                raise HTTPException(status_code=503, detail=f"2FA code not checked: {exc}") from exc
             if result.get("success", False):
                 success = True
                 method_used = result.get("method", method)
@@ -1348,7 +1358,8 @@ def login_2fa_enrol_complete(req: EnrolCompleteRequest, request: Request, respon
     are made and shown this once, and the account's first session is given. A wrong code is a try, counted as the
     second step counts them, and counted for the account too, across its logins: past five in five minutes, 429 until
     the window ends. A right code for a secret another login set up again meanwhile activates nothing: the page is
-    sent back to log in. Of two right answers sent together, one signs in."""
+    sent back to log in. Of two right answers sent together, one signs in. A secret that is sealed and does not
+    decrypt is 503 with the reason, the try counted."""
     challenge, tfa_mgr = _live_enrolment(req.challenge_id)
     user_id = challenge["user_id"]
     code = "".join(unicodedata.normalize("NFKC", req.code or "").split())
@@ -1366,7 +1377,14 @@ def login_2fa_enrol_complete(req: EnrolCompleteRequest, request: Request, respon
             detail=("Invalid or expired enrolment. Please log in again." if taken is None
                     else "Too many 2FA attempts. Please log in again."),
         )
-    verified = tfa_mgr.totp_verify(user_id, code)
+    try:
+        verified = tfa_mgr.totp_verify(user_id, code)
+    except Exception as exc:
+        # The field encryption's refusal (encryption.EncryptionUnavailable), asked by its class's name: the secret is
+        # sealed and does not decrypt, so no code was checked. The try stays counted.
+        if type(exc).__name__ != "EncryptionUnavailable" or type(exc).__module__ != "opti_oignon.encryption":
+            raise
+        raise HTTPException(status_code=503, detail=f"TOTP code not checked: {exc}") from exc
     if verified.get("error") == "rate_limited":
         raise HTTPException(
             status_code=429,

@@ -158,14 +158,29 @@ A validated TOTP code is single-use within its validity window: the consumed
 time-step is recorded, so a code that was just used cannot be replayed during the
 30-second window in which it would otherwise still verify.
 
+A TOTP secret is sealed with the master key when encryption is on, and read with
+the key that loads even once encryption is switched off. A sealed secret that does
+not decrypt (no key loads, or another key does) is said: the login, the
+enrolment and the confirmation answer 503 with the reason, and no code is called
+wrong. The login's own try is spent; the account's tries are given back, since no
+code was checked.
+
 ### Recovery codes and app passwords
 
 Recovery codes (one-time, shown once at generation) and app-specific passwords
 (meant for clients that sign in with one; none does yet) are never stored in clear:
-only a keyed hash is persisted. The hash is an HMAC-SHA256 under a subkey derived
-from the master encryption key on its own domain, so the master key is the only
-secret (Kerckhoffs). Without a master key configured, the at-rest protection of
-these hashes rests on SQLCipher.
+only a hash is persisted. With a master key that loads, whether encryption is
+switched on or off, the hash is an HMAC-SHA256 under a subkey derived from the
+master encryption key on its own domain, so the master key is the only secret
+(Kerckhoffs). With no key that loads (none was set up, or the one set up does not
+load), it is scrypt under a salt of its own: it needs no secret, and a search for
+a recovery code (64 bits) costs a scrypt run for each guess. The hashes of the
+previous scheme (an HMAC under the key file's first characters, the same on every
+machine for a wrapped key file, or plain SHA-256) are never written. A recovery
+code keyed under the master key cannot be checked while no key loads: the login
+says so (503), and when no other code could be checked the account's try is given
+back. A code keyed under another master key than the one that loads (a key file
+replaced) reads as a wrong code: nothing in it tells the two apart.
 
 Migration. Recovery codes and app passwords created before this re-keying were
 hashed under the previous scheme, and every one of them was stored under the
@@ -174,7 +189,7 @@ store (see above), and none is left after it. Should a recovery code under the
 previous scheme still be met, it is accepted -- once, as any recovery code --
 and the 2FA status reports `recovery_reissue_required: true` while such codes
 remain unused; regenerating them from **Preferences > Account > Recovery codes**
-keys the new set under the new scheme.
+hashes the new set under the current scheme.
 
 
 ## Session management
@@ -188,6 +203,9 @@ properties:
   cookie sending
 - **Configurable expiry** -- default 24 hours, adjustable in security
   settings
+- **Every token ends** -- a signed token with no expiry, or one that is
+  not a finite number, is refused, and so is one whose end lies further
+  ahead than the configured access lifetime (a minute's grace)
 - **Session fingerprinting** -- sessions are bound to the client's
   user agent and IP range to detect hijacking
 

@@ -3585,6 +3585,35 @@ package costs.
   fi1-fi11 in
   `tests/test_failed_import_never_opens_a_door_contracts.py`; ft17,
   ft19, tl41, tl70 and tl71 give way to them.
+- [SECURITY] Recovery codes and app passwords are no longer hashed
+  under a public constant when no key loads, a TOTP secret that does
+  not decrypt is said, and a signed token that does not say when it
+  ends is refused. With no master key that loads, recovery codes and
+  app passwords were hashed with an HMAC under the key file's first
+  characters -- for a wrapped key file, the same on every machine -- or
+  with plain SHA-256: a read of the 2FA store let a recovery code be
+  searched offline at SHA-256's speed.
+  Now they are hashed with scrypt under a salt of their own, which needs
+  no secret, and before the store's write opens; the old hashes are
+  still read, a recovery code once and marked for reissue, an app
+  password rehashed on use. The two routes that make them hash off the
+  event loop, and the ten of a set in one scheme. A recovery code keyed
+  under the master key, met while no key loads, is said (503) rather
+  than called wrong, and of two tries that read the same recovery code
+  together, one uses it. A sealed
+  TOTP secret that did not decrypt was handed on as the secret, so
+  every code was invalid and the account lost its factor without a
+  word, and encryption switched off left the key that sealed it unread;
+  now the key that loads reads it, switched on or off, and a secret
+  that still does not decrypt makes the login, the enrolment and the
+  confirmation answer 503 with the reason: the login's try is spent,
+  the account's given back, no code having been checked. A token with
+  no `exp`, or one that is not a finite number (NaN and Infinity
+  parse), never expired; now it is refused, and so is a token whose end
+  lies further ahead than the configured access lifetime. Contracts
+  ck1-ck11 in
+  `tests/test_codes_secret_and_token_hold_without_their_key_contracts.py`;
+  a8, a9, a10 and tf22 give way to them.
 - [SECURITY] Remote access now refuses a revoked device's certificate.
   The check of each request read the client certificate from a transport
   uvicorn never puts in a request's scope, so it ran only on a header a
