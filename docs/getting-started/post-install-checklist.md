@@ -59,7 +59,9 @@ Security Guide).
 Switching modes is asymmetric by design:
 
 - **Escalation (Daily -> Bulbe)** is immediate and requires a single
-  authenticated request.
+  authenticated request, from this machine: Bulbe serves this machine's
+  clients only, so another address, or a request through a proxy, may not
+  enter it.
 - **Degradation (Bulbe -> Daily)** requires a multi-factor ceremony with a
   cooling period, so dropping out of maximum security is never accidental.
 

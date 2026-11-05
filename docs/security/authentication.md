@@ -56,8 +56,9 @@ platform's owner rather than a role: an admin's account or, while no
 account is an admin's, the first registered. With no account at all, no
 ceremony passes until one is registered.
 
-Leaving Bulbe mode and re-enabling search are the owner's to ask, and
-each shows a visual code on the settings page. The code is served
+Leaving Bulbe mode and re-enabling search are the owner's to ask, and to
+cancel (a session of an account that is not an owner's gets a 403, and
+the request stands), and each shows a visual code on the settings page. The code is served
 (`GET /api/security/mode/visual-code`,
 `GET /api/security/search-killswitch/reenable-code`) to the account that
 asked for the ceremony only, any of its sessions -- another account's
@@ -223,8 +224,10 @@ properties:
 
 - **Secure flag** -- cookies are only sent over HTTPS (when TLS is
   configured)
-- **SameSite=Strict** -- prevents CSRF by restricting cross-origin
-  cookie sending
+- **SameSite** -- Strict in Bulbe mode and for a client of another
+  machine, which keeps the cookies off a request another site starts;
+  for this machine's own browser outside Bulbe, the value
+  `jwt.cookie_samesite` of `security.yaml` gives (Lax as shipped)
 - **Configurable expiry** -- default 24 hours, adjustable in security
   settings
 - **Every token ends** -- a signed token with no expiry, or one that is

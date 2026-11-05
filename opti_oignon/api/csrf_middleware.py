@@ -10,7 +10,8 @@ ensures it runs globally via the Starlette middleware stack.
 Skip conditions (by design):
   - Non-state-changing methods (GET, HEAD, OPTIONS)
   - Requests using Bearer token (API/CLI clients, not browser)
-  - Login / register / health / OpenAPI endpoints
+  - Login / register / status / refresh / OpenAPI endpoints, and the health
+    check itself (not the routes below it)
   - When cookie_mode is disabled (pure API usage)
   - When csrf_enabled is set to false in security.yaml
 
@@ -36,18 +37,28 @@ checkpoint_before_apply = True
 
 _CSRF_COOKIE = "oo_csrf_token"
 
-# Paths exempt from CSRF (pre-auth or read-only endpoints)
+# Paths exempt from CSRF (pre-auth or read-only endpoints), each with every path below it, by whole segments. The
+# security mode's routes are not: asking, confirming and cancelling a change of mode are a signed-in session's,
+# checked as any other.
 _CSRF_EXEMPT_PREFIXES = (
     "/api/auth/login",
     "/api/auth/register",
     "/api/auth/status",
     "/api/auth/refresh",
-    "/api/health",
-    "/api/security/mode",
     "/docs",
     "/openapi.json",
     "/redoc",
 )
+
+# Paths exempt exactly, and nothing below them: the health check, not the benchmark routes that live under it.
+_CSRF_EXEMPT_EXACT = ("/api/health",)
+
+
+def _exempt(path: str) -> bool:
+    """Whether ``path`` is exempt: one of the exact paths, or a prefix or a path below it by whole segments."""
+    return path in _CSRF_EXEMPT_EXACT or any(
+        path == prefix or path.startswith(prefix + "/") for prefix in _CSRF_EXEMPT_PREFIXES
+    )
 
 # Methods that require CSRF validation
 _STATE_CHANGING_METHODS = frozenset({"POST", "PUT", "DELETE", "PATCH"})
@@ -142,9 +153,8 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         # Skip exempt paths
         path = request.url.path
-        for prefix in _CSRF_EXEMPT_PREFIXES:
-            if path.startswith(prefix):
-                return await call_next(request)
+        if _exempt(path):
+            return await call_next(request)
 
         # A WebSocket never reaches this middleware (it handles HTTP alone): a request that merely says
         # "Upgrade: websocket" is an HTTP request, checked as one.

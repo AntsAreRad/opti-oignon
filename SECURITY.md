@@ -60,9 +60,12 @@ read. The address is the socket's, or the one a proxy listed under
 `api.trusted_proxies` forwards (none as shipped): no route and not
 uvicorn reads X-Forwarded-For, the Host gate does, from a listed proxy
 only. CSRF double-submit cookie on the
-state-changing endpoints of a signed-in browser session (in single-user
-Daily mode, which has no session cookie, and for the few routes it exempts,
-the gate's origin check below is what refuses another site).
+state-changing endpoints of a signed-in browser session, the security
+mode's included (in single-user Daily mode, which has no session cookie,
+and for the few routes it exempts -- sign-in, registration, the session's
+status and refresh, the health check itself (not the routes below it),
+the schema -- the gate's origin check below is what refuses another
+site).
 
 The API answers only the names the machine is served as: a request, or a
 websocket handshake, whose Host header is not `localhost`, `127.0.0.1` or
@@ -147,8 +150,9 @@ loopback one; otherwise the client is `unlisted-proxy`. A request that
 carries a forwarded header from any other peer is handed on as that one
 client too: never the loopback, so the localhost-only routes (device
 certificates, remote access) refuse it, Bulbe's local-only check rejects
-it, its cookies are the remote ones, and the limiters count every such
-request as one. A front that adds no forwarded header at all (nginx's
+it (on every path but the health check, its sockets included), its
+cookies are the remote ones, and the limiters count every such request
+as one. A front that adds no forwarded header at all (nginx's
 `proxy_pass` with no such line, a TCP forwarder such as `ssh -L` or
 socat) is not seen: its clients are the front's own address, the
 loopback for one on this machine, as before. A listed address can name
@@ -392,6 +396,17 @@ binding at the OS level. The backend literally cannot accept connections
 from external hosts. Additionally:
 
 - Authentication is always enforced
+- This machine's clients only: on every path but the health check, the
+  sign-in and the security mode's own routes included, a client of
+  another address or a request a proxy forwarded is refused, and its
+  websocket closed before it is accepted (one it opened in Daily, at its
+  first message once Bulbe began). Such a client may not enter Bulbe
+  either -- the escalation answers 403, and the emergency stop stops
+  without its drop to Bulbe, each refusal audited --, so that Bulbe is
+  entered from where it can be left. A Bearer token is refused on every HTTP path but
+  the health check, the sign-in routes and the schema (a websocket may
+  still carry its token in its query); every cookie the API sets is
+  SameSite=Strict, the session's included
 - A second factor is asked at login of every account: a TOTP or a
   security key, a recovery code standing in for either; an account none
   of whose factors can be checked here is refused at login, and one that
@@ -440,6 +455,9 @@ optional. Docker introduces trade-offs:
 - Bubblewrap sandboxing is not available inside containers (falls back
   to tmpdir isolation)
 - Bulbe mode socket binding is replaced by Docker network isolation
+- Bulbe mode serves this machine's clients only, and a backend in a
+  container sees every client at the bridge's address: from a browser,
+  Bulbe can be neither entered nor used there
 
 If Docker is used, the following mitigations are in place:
 
@@ -534,7 +552,8 @@ Key remediations:
 
 - Dependency updates for pypdf, pyjwt, flask, requests, werkzeug
 - Remaining f-string SQL patterns in analytics.py parameterized
-- Cookie security flags enforced (HttpOnly, SameSite=Strict)
+- Cookie security flags enforced (HttpOnly; SameSite=Strict in Bulbe mode
+  and for another machine's client)
 - Path traversal guards on user-supplied file paths
 - SSRF protections on user-controlled URL inputs
 

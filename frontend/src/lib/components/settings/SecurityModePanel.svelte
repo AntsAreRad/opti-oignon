@@ -128,7 +128,8 @@
 				error = result.message || 'Escalation failed';
 			}
 		} catch (e: any) {
-			error = e.message || 'Escalation failed';
+			// The server's own reason: a client of another machine is refused Bulbe, which it could not leave.
+			error = httpRefusal(e)?.detail || e.message || 'Escalation failed';
 		} finally {
 			actionLoading = false;
 		}
@@ -181,9 +182,15 @@
 	}
 
 	async function handleCancelDowngrade() {
+		error = '';
 		try {
 			await cancelDowngrade();
-		} catch (_) { /* ignore */ }
+		} catch (e: any) {
+			// Refused -- a session that is no owner's, the CSRF check, an account store that cannot be read --:
+			// said, and the request stands.
+			error = httpRefusal(e)?.detail || e.message || 'Cancelling the downgrade failed';
+			return;
+		}
 		resetDowngradeState();
 		await loadStatus();
 	}

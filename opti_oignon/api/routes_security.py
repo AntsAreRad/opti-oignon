@@ -995,12 +995,43 @@ async def get_security_mode() -> dict[str, Any]:
     return status
 
 
+_BULBE_FROM_THIS_MACHINE = (
+    "Bulbe mode serves this machine's clients only: enter it from this machine, where it can be left too."
+)
+
+
+def _from_this_machine(request: Any) -> bool:
+    """Whether a request comes from a client Bulbe serves: the loopback addresses, or no client at all, as the
+    mode's middleware reads them (``security_mode_middleware._LOCAL_CLIENTS``); never another address, nor a request
+    a proxy forwarded (the Host gate hands it on as ``unlisted-proxy``). A client Bulbe would refuse may not enter
+    it: it could not leave it."""
+    client = getattr(request, "client", None)
+    host = client.host if client else None
+    return not host or host in ("127.0.0.1", "::1")
+
+
+def _audit_bulbe_refused(current: Any, request: Any, via: str) -> None:
+    """Log and audit an entry into Bulbe refused to a client it does not serve (``via``: the escalation, or the
+    emergency stop's drop), best effort, as the ceremonies' refusals are: the refusal stands either way."""
+    client = getattr(request, "client", None)
+    host = client.host if client else ""
+    logger.warning("Bulbe: refused entering it to %s, a client it does not serve (via %s)", host, via)
+    try:
+        from opti_oignon.security_mode import _audit_log
+        _audit_log("bulbe_entry_refused", severity="WARNING", via=via, client_host=host,
+                   user_id=_session_actor(current))
+    except Exception:  # noqa: BLE001 - the audit is best effort; the refusal stands
+        pass
+
+
 @router.post("/mode")
 async def set_security_mode(
     body: SecurityModeChangeRequest,
     current: dict = Depends(_get_current_user),
+    request: Request = None,
 ) -> dict[str, Any]:
-    """Escalate to Bulbe mode (immediate, no ceremony needed).
+    """Escalate to Bulbe mode (immediate, no ceremony needed), from a client Bulbe serves (403 for another:
+    ``_from_this_machine``).
 
     Only supports escalation (Daily -> Bulbe).  Degradation requires
     the multi-factor ceremony via /mode/request-downgrade.
@@ -1026,6 +1057,10 @@ async def set_security_mode(
                 "multi-factor degradation ceremony."
             ),
         )
+
+    if not _from_this_machine(request):
+        _audit_bulbe_refused(current, request, "escalation")
+        raise HTTPException(status_code=403, detail=_BULBE_FROM_THIS_MACHINE)
 
     # Escalation to Bulbe -- immediate, open to every session, recorded in the session's name.
     user_id = _session_actor(current)
@@ -1254,13 +1289,16 @@ async def confirm_mode_downgrade(
 
 
 @router.post("/mode/cancel-downgrade")
-async def cancel_mode_downgrade() -> dict[str, Any]:
-    """Cancel a pending downgrade request."""
+async def cancel_mode_downgrade(account: Any = Depends(_session_account)) -> dict[str, Any]:
+    """Cancel a pending downgrade request: the owner's, who alone may ask one (403 for another account's session,
+    and the request stands)."""
     if not SECURITY_MODE_AVAILABLE:
         raise HTTPException(
             status_code=503,
             detail="Security mode system not available",
         )
+    if not account.owner:
+        raise HTTPException(status_code=403, detail="Only the owner may cancel leaving Bulbe mode: the request stands.")
     return security_mode_manager.cancel_downgrade()
 
 
@@ -1637,20 +1675,28 @@ async def get_emergency_stop_status() -> dict[str, Any]:
 async def engage_emergency_stop(
     body: EmergencyStopRequest,
     current: dict = Depends(_get_current_user),
+    request: Request = None,
 ) -> dict[str, Any]:
     """Engage the emergency stop: the ordered fail-tolerant drain.
 
     The flag is set first (admission closes before the drain), then every
     step runs even if one fails; the 200 body reports per-step outcomes
-    honestly, including ``failed_steps``. Audit-chained.
+    honestly, including ``failed_steps``. Audit-chained. The stop is never
+    refused; its drop to Bulbe is, for a client Bulbe would not serve
+    (``_from_this_machine``), and ``bulbe_refused`` says why.
     """
     if not EMERGENCY_STOP_AVAILABLE:
         raise HTTPException(
             status_code=503, detail="Emergency stop not available"
         )
-    return _emergency_stop.stop(
-        user_id=_session_actor(current), drop_to_bulbe=body.drop_to_bulbe
+    drop = bool(body.drop_to_bulbe) and _from_this_machine(request)
+    result = _emergency_stop.stop(
+        user_id=_session_actor(current), drop_to_bulbe=drop
     )
+    if body.drop_to_bulbe and not drop:
+        _audit_bulbe_refused(current, request, "emergency_stop")
+        result = {**result, "bulbe_refused": _BULBE_FROM_THIS_MACHINE}
+    return result
 
 
 @router.post("/estop/resume")

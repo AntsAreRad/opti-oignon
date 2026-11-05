@@ -18,6 +18,13 @@ When Bulbe mode is active, the following constraints apply:
 
 - **Localhost-only binding** -- the FastAPI backend binds to
   `127.0.0.1` only; the network bind guard verifies this at startup
+- **This machine's clients only** -- on every path but `/api/health`,
+  the sign-in and the security mode's routes included, the API refuses
+  a client of another address or a request a proxy forwarded (403,
+  `non_local_rejected`), and closes such a client's websocket before it
+  is accepted, or, for one it opened in Daily, at its first message once
+  Bulbe began. A backend in a container sees every client at the
+  bridge's address: Bulbe cannot be used there from a browser
 - **Ollama bind guard** -- checks that Ollama is also bound to
   localhost (`127.0.0.1:11434`); blocks startup if Ollama is exposed
   externally
@@ -276,6 +283,10 @@ through a symbolic link at its place.
 1. Go to **Workshop > Security > Security mode**
 2. Click **Escalate to Bulbe**
 3. The backend restarts with all security layers enforced
+
+Only a client Bulbe serves may enter it, so that it is entered from where
+it can be left: from another address, or through a proxy, the escalation
+answers 403, and the emergency stop stops without its drop to Bulbe.
 
 ### From the configuration
 

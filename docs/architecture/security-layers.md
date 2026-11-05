@@ -59,7 +59,9 @@ flowchart TD
 The auth middleware intercepts every request and denies by default.
 Only explicitly public endpoints bypass authentication.
 
-- **JWT cookies** with Secure, HttpOnly, SameSite=Strict flags
+- **JWT cookies**, HttpOnly, Secure over TLS, SameSite=Strict in Bulbe
+  mode and for another machine's client (`jwt.cookie_samesite`, Lax as
+  shipped, for this machine's browser in Daily mode)
 - **Session fingerprinting** binds sessions to client characteristics
 - **RBAC** enforces per-user data isolation at the database level
 - **2FA** via WebAuthn/FIDO2 (hardware keys) and TOTP (authenticator

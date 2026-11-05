@@ -1081,8 +1081,9 @@ try:
     @router.websocket("/stream")
     async def agent_stream(websocket: WebSocket) -> None:
         """Forward the live AgentEvent stream over a WebSocket, to a session ``authenticate_websocket`` admits alone
-        -- its origin a local page's or none, never an opaque one --: no middleware sees a socket, so its handshake
-        is checked here, before anything is subscribed or sent."""
+        -- its origin a local page's or none, never an opaque one --: the HTTP middlewares never see a socket, so
+        its handshake is checked here, before anything is subscribed or sent (the Host gate checks its Host and
+        Origin before, and the mode's middleware, in Bulbe, its client)."""
         await websocket.accept()
         try:
             from .routes_auth import authenticate_websocket

@@ -97,7 +97,7 @@ export async function engageStop(dropToBulbe: boolean): Promise<boolean> {
 			busy: false,
 			stopped: !!result.stopped,
 			announce: 'Emergency stop engaged',
-			error: stepErrors('Stopped', result)
+			error: [stepErrors('Stopped', result), result.bulbe_refused ?? ''].filter(Boolean).join('. ')
 		}));
 		if (dropToBulbe) void refreshSecurityMode();
 		return true;

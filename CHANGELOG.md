@@ -3643,6 +3643,36 @@ package costs.
   seen, its clients this machine's own, as before. Contracts va1-va8 in
   `tests/test_code_to_whom_asked_and_the_sockets_address_contracts.py`;
   b2, tg4, op7 and ul14 give way to them.
+- [SECURITY] The security mode's routes pass both gates, and Bulbe mode
+  serves this machine's clients on every path but the health check, its
+  sockets included, and lets only them enter it. The routes under
+  `/api/security/mode` were exempt from the CSRF check and, in Bulbe,
+  from the mode's middleware; any signed-in session could cancel the
+  owner's request to leave Bulbe; the sign-in routes, also waved through
+  by that middleware before it read the mode, took a client of another
+  machine or a forwarded request in Bulbe, and set the session cookies
+  with the configured SameSite (Lax as shipped) rather than Bulbe's
+  Strict; a websocket never met the middleware at all; and the CSRF
+  check's exemption of `/api/health`, compared as a string, exempted the
+  benchmark routes below it. Now the mode's routes are checked as any
+  other (a forged request is refused by the CSRF check too, and in Bulbe
+  a Bearer token is), cancelling is an owner's (403 for a session of an
+  account that is not an owner's, and the request stands), and in Bulbe
+  the middleware refuses a client that is not this machine's, or a
+  forwarded request, on every path but `/api/health`, the sign-in and
+  the schema included, closes such a client's websocket before it is
+  accepted (one it opened in Daily, at its first message once Bulbe
+  began), and makes every cookie it answers with Strict, the session's
+  included. Such a client may not enter Bulbe either, which it could not
+  leave: the escalation answers 403, and the emergency stop stops
+  without its drop to Bulbe and says so, each refusal audited
+  (`bulbe_entry_refused`). The CSRF exemptions are
+  compared by whole segments, the health check exactly. The settings
+  page says a refused cancel or escalation, and a refused status no
+  longer makes the page a signed-in single-user session. The sign-in
+  routes and the schema still take a Bearer token in Bulbe. Contracts
+  mb1-mb10 in
+  `tests/test_mode_routes_under_both_gates_contracts.py`.
 - [SECURITY] Remote access now refuses a revoked device's certificate.
   The check of each request read the client certificate from a transport
   uvicorn never puts in a request's scope, so it ran only on a header a

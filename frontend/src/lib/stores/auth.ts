@@ -16,6 +16,7 @@
 import { writable, derived, get } from 'svelte/store';
 import { setAccessToken } from '$lib/api/client';
 import * as authApi from '$lib/api/auth';
+import { httpRefusal } from '$lib/switches/serverSwitch';
 import type {
 	AuthUser,
 	AuthTokens,
@@ -160,7 +161,23 @@ export async function initAuth(): Promise<void> {
 	authLoading.set(true);
 	try {
 		// Fetch system status
-		const status = await authApi.getAuthStatus();
+		let status: AuthStatus;
+		try {
+			status = await authApi.getAuthStatus();
+		} catch (err) {
+			if (httpRefusal(err)?.status !== 403) throw err;
+			// The backend answered and refused (403: Bulbe serves this machine's clients only): no synthetic user,
+			// no single-user mode assumed -- the sign-in page is shown, and says the refusal when it meets it.
+			// Any other failure -- a proxy's 500 or 502 while the API starts, a network error -- is the fallback's.
+			authStatus.set({
+				available: true,
+				single_user_mode: false,
+				registration_enabled: false,
+				user_count: 0,
+			});
+			currentUser.set(null);
+			return;
+		}
 		authStatus.set(status);
 
 		// Detect cookie mode from backend status

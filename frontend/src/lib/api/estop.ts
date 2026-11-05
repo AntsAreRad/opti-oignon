@@ -25,6 +25,8 @@ export interface EmergencyActionResult {
 	was_stopped?: boolean;
 	since?: number | null;
 	drop_to_bulbe?: boolean;
+	/** Why the drop to Bulbe asked with the stop was not made: a client Bulbe would not serve may not enter it. */
+	bulbe_refused?: string;
 	steps: EmergencyStepOutcome[];
 	failed_steps: string[];
 }

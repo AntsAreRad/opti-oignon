@@ -7,13 +7,22 @@ the current Daily/Bulbe mode.  Sits in the middleware stack alongside
 the SecurityHeadersMiddleware.
 
 In **Bulbe** mode:
+  - Refuse a client that is not this machine's, or a request a proxy
+    forwarded, on every path but the health check; close such a client's
+    websocket handshake before it is accepted (``__call__``: an HTTP
+    middleware never sees a websocket), and its socket opened in Daily at
+    its first message once Bulbe began
   - Refuse the routes that only reach the web (the marketplace install, the
     GGUF download, the model pull) before their handler
   - Block search endpoints if kill switch is engaged
   - Enforce cookie-only auth (reject Bearer tokens)
   - Apply stricter rate limits via response headers
-  - Set SameSite=Strict on response cookies
+  - Set SameSite=Strict on response cookies, the sign-in's included
   - Block plugin install without allowlist verification
+
+The sign-in flow and the schema (``_ALWAYS_ALLOWED_PREFIXES``) are spared
+the Bearer refusal alone: the local-only check and the cookie rule hold for
+them too.
 
 In **Daily** mode:
   - All restrictions relaxed (standard security baseline)
@@ -30,6 +39,7 @@ from starlette._utils import get_route_path
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.websockets import WebSocketDisconnect
 
 logger = logging.getLogger(__name__)
 
@@ -38,20 +48,26 @@ logger = logging.getLogger(__name__)
 # two).
 _FORWARDED_CLIENT = "unlisted-proxy"
 
-# Paths that are always allowed (auth flow, mode management, the schema),
-# each with every path below it.
+# The clients Bulbe serves, by the socket's address: this machine's own. ``routes_security._from_this_machine``
+# reads the same rule for entering Bulbe, and a contract ties the two.
+_LOCAL_CLIENTS = ("127.0.0.1", "::1")
+
+# Paths Bulbe takes a Bearer token on (the sign-in flow, the schema: a client holding a token reaches them to learn
+# how to sign in), each with every path below it. In Bulbe they are still refused to a client that is not this
+# machine's, and their cookies are still made Strict. The security mode's own routes are not among them: in Bulbe
+# they are checked as any route.
 _ALWAYS_ALLOWED_PREFIXES = (
     "/api/auth/login",
     "/api/auth/register",
     "/api/auth/status",
     "/api/auth/refresh",
-    "/api/security/mode",
     "/docs",
     "/openapi.json",
 )
 
 # Paths that are always allowed exactly, and nothing below them: the health
-# check, not the benchmark routes that live under it.
+# check, not the benchmark routes that live under it. It sets nothing, and it
+# answers in every mode whoever reaches it, but a revoked certificate.
 _ALWAYS_ALLOWED_EXACT = ("/api/health",)
 
 # Search-related path prefixes (blocked in Bulbe when kill switch engaged)
@@ -202,6 +218,24 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
         super().__init__(app)
         logger.info("Security mode middleware registered")
 
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        """Close, before it is accepted, a websocket handshake from a client Bulbe does not serve, in Bulbe or when
+        the mode cannot be read, as its HTTP requests are refused: ``dispatch`` never sees a websocket (an HTTP
+        middleware hands every other scope straight on). Such a client's socket accepted in Daily is checked again
+        at each message it sends or is sent (``_closing_in_bulbe``), and closed at the first one after Bulbe began.
+        Every other scope goes on as before."""
+        if scope["type"] == "websocket":
+            client = scope.get("client")
+            client_host = client[0] if client else None
+            if client_host and client_host not in _LOCAL_CLIENTS:
+                path = get_route_path(scope)
+                mode, _policy = _get_security_mode()
+                if mode != "daily" and _refused_in_bulbe(client_host, path):
+                    await send({"type": "websocket.close", "code": 1008})
+                    return
+                receive, send = _closing_in_bulbe(client_host, path, receive, send)
+        await super().__call__(scope, receive, send)
+
     async def dispatch(self, request: Request, call_next: Any) -> Response:
         """Process request through mode-specific security checks.
 
@@ -217,12 +251,11 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
         if revoked_response is not None:
             return revoked_response
 
-        # Always allow certain paths (auth, health, mode management)
+        # The health check passes in every mode, whoever asks; every other path
+        # is checked below, the sign-in flow's and the security mode's included.
         if path in _ALWAYS_ALLOWED_EXACT:
             return await call_next(request)
-        for prefix in _ALWAYS_ALLOWED_PREFIXES:
-            if _matches(path, prefix):
-                return await call_next(request)
+        spared = any(_matches(path, prefix) for prefix in _ALWAYS_ALLOWED_PREFIXES)
 
         # Load current mode and policy
         mode, policy = _get_security_mode()
@@ -251,22 +284,7 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
         #    A request a proxy forwarded, which the Host gate hands on as
         #    _FORWARDED_CLIENT, is no local one either: said as what it is.
         client_host = request.client.host if request.client else None
-        if client_host == _FORWARDED_CLIENT:
-            logger.warning(
-                "Bulbe: REJECTED a request a proxy forwarded to %s: Bulbe "
-                "serves this machine's own clients only.",
-                path,
-            )
-            _audit_non_local_request(client_host, path, forwarded=True)
-        elif client_host and client_host not in ("127.0.0.1", "::1"):
-            logger.critical(
-                "Bulbe: REJECTED request from non-local IP %s to %s. "
-                "This should be impossible if bind guard is working.",
-                client_host,
-                path,
-            )
-            _audit_non_local_request(client_host, path)
-        if client_host and client_host not in ("127.0.0.1", "::1"):
+        if _refused_in_bulbe(client_host, path):
             return JSONResponse(
                 status_code=403,
                 content={
@@ -308,8 +326,10 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
                         },
                     )
 
-        # 2. Enforce cookie-only auth (reject Bearer tokens)
-        if not getattr(policy, "bearer_auth_allowed", False):
+        # 2. Enforce cookie-only auth (reject Bearer tokens), but on the sign-in
+        #    flow and the schema, which a client holding a token reaches to
+        #    learn how to sign in.
+        if not spared and not getattr(policy, "bearer_auth_allowed", False):
             auth_header = request.headers.get("authorization", "")
             if auth_header.lower().startswith("bearer "):
                 # App passwords make no exception: no client signs in
@@ -403,6 +423,65 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
 
 # Module-level availability flag
 SECURITY_MODE_MIDDLEWARE_AVAILABLE = True
+
+
+def _closing_in_bulbe(client_host: str, path: str, receive: Any, send: Any) -> "tuple[Any, Any]":
+    """The ``receive`` and ``send`` of a socket a client Bulbe does not serve opened in Daily, each message it is sent
+    or sends checked again: once the mode reads Bulbe, or cannot be read, the socket is closed (1008) and the refusal
+    audited, its endpoint told the client went (``WebSocketDisconnect``) at its next send and handed a disconnect at
+    its next receive. Its own close after that is dropped: the socket is closed once."""
+    closed: list[bool] = []
+
+    def in_bulbe() -> bool:
+        mode, _policy = _get_security_mode()
+        return mode != "daily"
+
+    async def close() -> None:
+        if not closed:
+            closed.append(True)
+            _refused_in_bulbe(client_host, path)
+            await send({"type": "websocket.close", "code": 1008})
+
+    async def checked_receive() -> Any:
+        message = await receive()
+        if closed or (message.get("type") == "websocket.receive" and in_bulbe()):
+            await close()
+            return {"type": "websocket.disconnect", "code": 1008}
+        return message
+
+    async def checked_send(message: Any) -> None:
+        kind = message.get("type")
+        if closed and kind == "websocket.close":
+            return
+        if closed or (kind == "websocket.send" and in_bulbe()):
+            await close()
+            raise WebSocketDisconnect(code=1008)
+        await send(message)
+
+    return checked_receive, checked_send
+
+
+def _refused_in_bulbe(client_host: "str | None", path: str) -> bool:
+    """Whether Bulbe refuses a client at ``client_host`` (another address, or a request a proxy forwarded), the
+    refusal logged and audited as what it is; this machine's own clients, and a request with no client, are served."""
+    if not client_host or client_host in _LOCAL_CLIENTS:
+        return False
+    if client_host == _FORWARDED_CLIENT:
+        logger.warning(
+            "Bulbe: REJECTED a request a proxy forwarded to %s: Bulbe "
+            "serves this machine's own clients only.",
+            path,
+        )
+        _audit_non_local_request(client_host, path, forwarded=True)
+    else:
+        logger.critical(
+            "Bulbe: REJECTED request from non-local IP %s to %s. "
+            "This should be impossible if bind guard is working.",
+            client_host,
+            path,
+        )
+        _audit_non_local_request(client_host, path)
+    return True
 
 
 def _audit_non_local_request(client_host: str, path: str, *, forwarded: bool = False) -> None:
