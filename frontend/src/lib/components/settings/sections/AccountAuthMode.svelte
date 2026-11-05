@@ -7,11 +7,18 @@
   earlier. Now editable from its resolved settings location (spec 5.7:
   onboarding choices appear in their settings location, editable). Applies
   immediately with a toast.
+
+  Below it, the platform's owner adds an account: registration is closed past
+  the first account, so this is where the others come from. The server asks
+  the owner's own password and shows its reason when it refuses.
 -->
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import SettingsGroup from '$lib/components/settings/SettingsGroup.svelte';
 	import Switch from '$lib/ds/Switch.svelte';
+	import Input from '$lib/ds/Input.svelte';
+	import Button from '$lib/ds/Button.svelte';
+	import { createUser } from '$lib/api/auth';
 	import { toastSuccess, toastError } from '$lib/stores/notifications';
 	import { apiGet, apiPut } from '$lib/api/client';
 	import { httpRefusal } from '$lib/switches/serverSwitch';
@@ -19,6 +26,11 @@
 	let singleUserMode = true;
 	let authAvailable = false;
 	let togglingAuth = false;
+
+	let newUsername = '';
+	let newPassword = '';
+	let ownerPassword = '';
+	let adding = false;
 
 	onMount(async () => {
 		try {
@@ -50,6 +62,26 @@
 			togglingAuth = false;
 		}
 	}
+
+	async function addAccount() {
+		if (!newUsername.trim() || !newPassword || !ownerPassword) return;
+		adding = true;
+		try {
+			const made = await createUser({
+				username: newUsername.trim(),
+				password: newPassword,
+				owner_password: ownerPassword
+			});
+			toastSuccess(`Account ${made.username} added`);
+			newUsername = '';
+			newPassword = '';
+		} catch (e) {
+			toastError(httpRefusal(e)?.detail || 'Failed to add the account');
+		} finally {
+			ownerPassword = '';
+			adding = false;
+		}
+	}
 </script>
 
 <SettingsGroup
@@ -65,6 +97,37 @@
 			disabled={togglingAuth}
 			on:change={toggleAuthMode}
 		/>
+		<div class="oo-add-account">
+			<p class="oo-add-account-title">Add an account</p>
+			<p class="oo-add-account-hint">
+				Registration is closed past the first account. The platform's owner adds the others here, with
+				their own password. A second account turns sign-in on for everyone; in Bulbe mode each account sets
+				up its second factor at its first sign-in.
+			</p>
+			<Input label="Username" bind:value={newUsername} autocomplete="off" disabled={adding} />
+			<Input
+				type="password"
+				label="Password"
+				bind:value={newPassword}
+				autocomplete="new-password"
+				disabled={adding}
+			/>
+			<Input
+				type="password"
+				label="Your password"
+				bind:value={ownerPassword}
+				autocomplete="current-password"
+				disabled={adding}
+			/>
+			<Button
+				variant="secondary"
+				loading={adding}
+				disabled={!newUsername.trim() || !newPassword || !ownerPassword}
+				on:click={addAccount}
+			>
+				Add account
+			</Button>
+		</div>
 	{:else}
 		<p class="oo-auth-unavailable">
 			The authentication module is not installed. Install the optional
@@ -74,6 +137,27 @@
 </SettingsGroup>
 
 <style>
+	.oo-add-account {
+		display: flex;
+		flex-direction: column;
+		gap: var(--oo-space-2);
+		margin-top: var(--oo-space-4);
+	}
+
+	.oo-add-account-title {
+		font-size: var(--oo-text-sm);
+		font-weight: 600;
+		color: var(--oo-fg-primary);
+		margin: 0;
+	}
+
+	.oo-add-account-hint {
+		font-size: var(--oo-text-sm);
+		color: var(--oo-fg-muted);
+		line-height: var(--oo-leading-snug);
+		margin: 0;
+	}
+
 	.oo-auth-unavailable {
 		font-size: var(--oo-text-sm);
 		color: var(--oo-fg-muted);

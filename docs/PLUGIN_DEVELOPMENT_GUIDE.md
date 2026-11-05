@@ -343,8 +343,19 @@ To share your plugin with other Opti-Oignon users:
 
 1. Host your plugin in a public GitHub repository
 2. Include `manifest.yaml`, `entry_point.py`, and `README.md` at the root
-3. Add your plugin to the community index (submit a PR to the index
-   repository adding your plugin entry to `index.json`)
+3. Publish a release archive (`.zip` or `.tar.gz`) and take its SHA-256
+   (`sha256sum plugin.zip`)
+4. Add your plugin to the community index (submit a PR to the index
+   repository adding your plugin entry to `index.json`), its `url` the
+   release archive and its `sha256` that digest
+
+An install from a URL asks the archive's SHA-256 as shipped
+(`install.require_hash` in `plugin_marketplace.yaml`): an entry without
+one does not install. A repository URL installs the archive of its main
+branch, which changes with every push, so its digest stops matching;
+a release archive keeps its digest. The digest proves the archive is the
+one the index named, and no more: an index you do not trust names any
+archive it likes.
 
 ### Index Entry Format
 
@@ -354,11 +365,11 @@ To share your plugin with other Opti-Oignon users:
   "version": "1.0.0",
   "description": "Counts words in model responses.",
   "author": "Example Author",
-  "url": "https://github.com/example/word-counter",
+  "url": "https://github.com/example/word-counter/releases/download/v1.0.0/word-counter.zip",
   "tags": ["utility", "text-analysis"],
   "hooks": ["post_inference"],
   "permissions": ["conversation_read"],
-  "sha256": "",
+  "sha256": "<the SHA-256 of the release archive>",
   "stars": 0,
   "downloads": 0
 }
@@ -376,8 +387,10 @@ To share your plugin with other Opti-Oignon users:
 
 1. Go to **Workshop > Extensions > Marketplace**
 2. Click **Install from URL**
-3. Paste the GitHub repository URL or direct archive link
-4. Optionally provide a SHA-256 hash for verification
+3. Paste the archive's URL (or a GitHub repository URL, for its main
+   branch)
+4. Paste the archive's SHA-256: an install without one is refused
+   unless `install.require_hash` is false
 5. Click **Install**
 
 ### From a Local Directory

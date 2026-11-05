@@ -14,7 +14,9 @@ external services -- all while running in sandboxed subprocesses.
 1. Open **Workshop > Extensions > Marketplace**
 2. Browse available plugins or search by name
 3. Click **Install** on a plugin
-4. The plugin is downloaded, verified against the allowlist, and loaded
+4. The plugin is downloaded, checked against the SHA-256 the index gives
+   for its archive, and installed; an entry without one does not install
+   (`install.require_hash` in `plugin_marketplace.yaml`, true as shipped)
 
 ### Manual installation
 
@@ -27,10 +29,13 @@ a `manifest.yaml` and an entry point file.
 ```
 POST /api/plugins/marketplace/install
 {
-  "name": "my-plugin",
-  "version": "1.0.0"
+  "url": "https://example.org/releases/my-plugin-1.0.0.zip",
+  "expected_sha256": "<the 64 hexadecimal characters of the archive's SHA-256>"
 }
 ```
+
+The digest is required unless `install.require_hash` is false; one that
+is not 64 hexadecimal characters is refused before anything is fetched.
 
 
 ## Managing plugins

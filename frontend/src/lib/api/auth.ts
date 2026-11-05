@@ -17,6 +17,7 @@ import type {
 	EnrolledTokens,
 	UserSettings,
 	RegisterRequest,
+	CreateUserRequest,
 	LoginRequest,
 	ProfileUpdateRequest,
 	PasswordChangeRequest,
@@ -106,6 +107,11 @@ export async function listUsers(limit = 100, offset = 0): Promise<AuthUser[]> {
 		limit: String(limit),
 		offset: String(offset),
 	});
+}
+
+/** Add an account (the platform's owner, with the owner's own password). */
+export async function createUser(req: CreateUserRequest): Promise<AuthUser> {
+	return apiPost<AuthUser>(`${BASE}/users`, req);
 }
 
 /** Delete a user (admin only). */

@@ -322,7 +322,7 @@
 				<input
 					type="text"
 					bind:value={installHash}
-					placeholder="SHA-256 hash (optional)"
+					placeholder="SHA-256 of the archive"
 					class="flex-1 px-3 py-1.5 rounded-lg text-xs font-mono"
 					style="background-color: var(--oo-input-bg); border: 1px solid var(--oo-input-bd); color: var(--oo-fg-primary);"
 				/>

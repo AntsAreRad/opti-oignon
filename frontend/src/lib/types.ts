@@ -2868,6 +2868,15 @@ export interface RegisterRequest {
 	email?: string;
 }
 
+/** An account the platform's owner adds, with the owner's own password. */
+export interface CreateUserRequest {
+	username: string;
+	password: string;
+	email?: string;
+	role?: 'admin' | 'user' | 'viewer';
+	owner_password: string;
+}
+
 export interface LoginRequest {
 	username: string;
 	password: string;

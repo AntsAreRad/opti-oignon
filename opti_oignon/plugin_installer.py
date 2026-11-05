@@ -24,7 +24,7 @@ _CONFIG_PATH = Path(__file__).resolve().parent / "config" / "plugin_marketplace.
 _INSTALL_DEFAULTS: dict[str, Any] = {
     "allow_remote_install": True,
     "max_download_size_mb": 50,
-    "require_hash": False,
+    "require_hash": True,
     "timeout_s": 120,
 }
 
@@ -120,7 +120,9 @@ class RemotePluginInstaller:
         url : str
             URL to the plugin archive or GitHub repository.
         expected_sha256 : str
-            Expected SHA-256 hash of the archive (optional).
+            Expected SHA-256 digest of the archive: 64 hexadecimal
+            characters, any case, spaces around ignored. Required unless
+            ``install.require_hash`` is false.
         auto_enable : bool
             Automatically enable the plugin after install.
 
@@ -142,9 +144,10 @@ class RemotePluginInstaller:
             archive_path = self._download(download_url, tmp_dir)
 
             # Hash verification
+            expected_sha256 = expected_sha256.strip().lower()
             if expected_sha256:
                 actual_hash = self._compute_sha256(archive_path)
-                if actual_hash != expected_sha256.lower():
+                if actual_hash != expected_sha256:
                     raise PluginInstallError(
                         f"Hash mismatch: expected {expected_sha256}, "
                         f"got {actual_hash}"
@@ -280,20 +283,27 @@ class RemotePluginInstaller:
     # -----------------------------------------------------------------
 
     def _admit(self, expected_sha256: str) -> None:
-        """Refuse an install before any request: turned off, a digest missing, the web gate.
+        """Refuse an install before any request: turned off, a digest missing
+        or not of a digest's shape, the web gate.
 
-        Raises PluginInstallError carrying the refusal's text. The web gate
-        is asked through the front door; a front door that cannot be imported
-        refuses as well.
+        Raises PluginInstallError carrying the refusal's text. A digest given
+        is 64 hexadecimal characters once the spaces around it are taken off,
+        whether or not one is required. The web gate is asked through the
+        front door; a front door that cannot be imported refuses as well.
         """
         if not self._config["allow_remote_install"]:
             raise PluginInstallError(
                 "Remote plugin install is turned off: install.allow_remote_install is false."
             )
-        if self._config["require_hash"] and not expected_sha256:
+        digest = expected_sha256.strip()
+        if self._config["require_hash"] and not digest:
             raise PluginInstallError(
                 "A sha256 digest is required to install a plugin from a URL: "
                 "install.require_hash is true."
+            )
+        if digest and (len(digest) != 64 or any(c not in "0123456789abcdefABCDEF" for c in digest)):
+            raise PluginInstallError(
+                "The sha256 digest must be 64 hexadecimal characters; nothing was fetched."
             )
         from opti_oignon.egress import EgressRefused, require_web
 

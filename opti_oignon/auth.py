@@ -25,6 +25,7 @@ import stat
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -316,7 +317,9 @@ def _read_auth_yaml(path: Path) -> tuple[str | None, dict[str, Any]]:
 def _closed_where_unsaid(cfg: dict[str, Any], path: Path) -> dict[str, Any]:
     """A loaded auth configuration whose ``single_user_mode`` or ``users.allow_registration`` is missing or no
     boolean (a cut file, a misspelt ``false``): that setting reads closed -- authentication required, registration
-    closed -- and a warning says so; every other setting the file gives stands."""
+    closed -- and a warning says so; every other setting the file gives stands. A ``users.max_users`` that is there
+    and no whole number (``2.0``, ``true``, ``"2"``) reads 1 -- no account past the first -- with a warning, so that
+    the registration route and the store read the same cap."""
     if not isinstance(cfg.get("single_user_mode"), bool):
         logger.warning("The auth configuration %s gives no single_user_mode as true or false: authentication is "
                        "required", path)
@@ -326,6 +329,11 @@ def _closed_where_unsaid(cfg: dict[str, Any], path: Path) -> dict[str, Any]:
         logger.warning("The auth configuration %s gives no users.allow_registration as true or false: registration "
                        "is closed", path)
         users["allow_registration"] = False
+    cap = users.get("max_users", 0)
+    if isinstance(cap, bool) or not isinstance(cap, int):
+        logger.warning("The auth configuration %s gives users.max_users as no whole number: no account is added past "
+                       "the first until it does", path)
+        users["max_users"] = 1
     return cfg
 
 
@@ -362,18 +370,18 @@ class AuthManager:
     def _load_config(self, config_path: str | Path | None) -> dict[str, Any]:
         """Load auth configuration from YAML.
 
-        No file: the built-in defaults (single-user, registration open). A
-        file that loads whole: it. A file that is there and does not load
-        whole closes the door -- the defaults with single-user off and
-        registration closed, an error that says why, and the reason kept in
-        ``config_unread``: one that cannot be looked at or read (its folder
-        unsearchable, its rights), that is not a regular file, that does not
-        parse, that is not a mapping, or whose sections are not mappings. A
-        file that loads but gives ``single_user_mode`` or
+        No file: the built-in defaults (single-user, registration closed past
+        the first account). A file that loads whole: it. A file that is there
+        and does not load whole closes the door -- the defaults with
+        single-user off and registration closed, an error that says why, and
+        the reason kept in ``config_unread``: one that cannot be looked at or
+        read (its folder unsearchable, its rights), that is not a regular
+        file, that does not parse, that is not a mapping, or whose sections
+        are not mappings. A file that loads but gives ``single_user_mode`` or
         ``users.allow_registration`` as anything but a boolean, or not at all
         (an empty or cut file: a missing key used to read open), has that
-        setting closed (``_closed_where_unsaid``). An operator who closed
-        them is never opened by a file the reader cannot take whole.
+        setting closed (``_closed_where_unsaid``). An operator who closed them
+        is never opened by a file the reader cannot take whole.
         """
         path = Path(config_path) if config_path else DEFAULT_CONFIG_PATH
         self.config_unread: str | None = None
@@ -411,7 +419,7 @@ class AuthManager:
                 "bcrypt_rounds": 12,
             },
             "users": {
-                "allow_registration": True,
+                "allow_registration": False,
                 "default_role": "user",
                 "max_users": 0,
                 "require_email": False,
@@ -572,17 +580,32 @@ class AuthManager:
         email: str = "",
         role: str | None = None,
         metadata: dict[str, Any] | None = None,
+        first_only: bool | Callable[[], bool] = False,
     ) -> User | None:
         """Create a new user account.
 
         Returns the created User or None on failure (duplicate username,
-        max users reached, or invalid password).
+        max users reached, invalid password -- more than 72 bytes among them,
+        which bcrypt does not read --, or with ``first_only`` a store that
+        holds an account already). The accounts are counted and the new one
+        written in one write transaction, so that accounts sent together meet
+        ``users.max_users`` and ``first_only`` one after the other.
+        ``first_only`` may be a callable that answers it: it is asked under
+        the write lock, after the count, so that what can change while the
+        password is hashed (the security mode) is read when the account is
+        written. Whether registration is open is the caller's to decide (the
+        registration route); a store that cannot be read raises.
         """
         # Validate password
         pwd_cfg = self.config.get("password", {})
         min_len = pwd_cfg.get("min_length", 8)
         if len(password) < min_len:
             logger.warning("Password too short (min %d)", min_len)
+            return None
+
+        # bcrypt reads 72 bytes and no more (bcrypt 5 refuses a longer one)
+        if len(password.encode("utf-8")) > 72:
+            logger.warning("Password longer than 72 bytes")
             return None
 
         if pwd_cfg.get("require_uppercase") and not any(c.isupper() for c in password):
@@ -602,23 +625,8 @@ class AuthManager:
             logger.warning("Invalid username length")
             return None
 
-        # Check registration allowed
         users_cfg = self.config.get("users", {})
-        if not users_cfg.get("allow_registration", True):
-            # Only admins can create users when registration is disabled
-            pass  # Caller (route) must enforce this
-
-        # Check max users
         max_users = users_cfg.get("max_users", 0)
-        if max_users > 0:
-            conn = self._get_conn()
-            try:
-                count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-                if count >= max_users:
-                    logger.warning("Max users reached (%d)", max_users)
-                    return None
-            finally:
-                conn.close()
 
         # Check email requirement
         if users_cfg.get("require_email") and not email:
@@ -641,8 +649,20 @@ class AuthManager:
             metadata=metadata or {},
         )
 
+        # The count and the insert in one write transaction (the hash above,
+        # slow, outside it): a second writer waits for this one to commit.
         conn = self._get_conn()
         try:
+            conn.execute("BEGIN IMMEDIATE")
+            count = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+            if count > 0 and (first_only() if callable(first_only) else first_only):
+                conn.rollback()
+                logger.warning("Registration closed: the store holds an account already")
+                return None
+            if max_users > 0 and count >= max_users:
+                conn.rollback()
+                logger.warning("Max users reached (%d)", max_users)
+                return None
             conn.execute(
                 """INSERT INTO users (user_id, username, email, password_hash, role,
                    created_at, updated_at, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
@@ -654,6 +674,7 @@ class AuthManager:
             logger.info("User created: %s (%s)", user.username, user.user_id)
             return user
         except sqlite3.IntegrityError:
+            conn.rollback()
             logger.warning("Duplicate username: %s", username)
             return None
         finally:
@@ -744,6 +765,9 @@ class AuthManager:
         pwd_cfg = self.config.get("password", {})
         min_len = pwd_cfg.get("min_length", 8)
         if len(new_password) < min_len:
+            return False
+        # bcrypt reads 72 bytes and no more (bcrypt 5 refuses a longer one), as create_user
+        if len(new_password.encode("utf-8")) > 72:
             return False
 
         rounds = pwd_cfg.get("bcrypt_rounds", 12)

@@ -22,7 +22,9 @@ When Bulbe mode is active, the following constraints apply:
   localhost (`127.0.0.1:11434`); blocks startup if Ollama is exposed
   externally
 - **Mandatory authentication** -- all API endpoints require a valid
-  JWT session cookie; no anonymous access
+  JWT session cookie; no anonymous access. Registration makes the first
+  account of an install with none and no other, whatever
+  `users.allow_registration` says: the owner adds the others
 - **Mandatory second factor** -- a session needs a second factor: an
   account with no second factor enrols a TOTP at its next login, or at
   its registration, before its first session. Whoever completes that
@@ -191,7 +193,10 @@ import is a refusal. What asks the web gate today:
   comes through the page fetch, so from a public address only, as bytes,
   named after the URL asked for. `install.allow_remote_install`,
   `install.max_download_size_mb`, `install.require_hash` and
-  `install.timeout_s` in `plugin_marketplace.yaml` are read.
+  `install.timeout_s` in `plugin_marketplace.yaml` are read;
+  `install.require_hash` is true as shipped, so an install given no
+  SHA-256 of the archive, or one that is not 64 hexadecimal characters,
+  is refused before anything is fetched.
 - **The marketplace's index refresh** -- the same gate and the same fetch;
   a refusal keeps the cached listing and serves it. The listing refreshes a
   stale index on its own only when `index.auto_refresh` is true.

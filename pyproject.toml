@@ -1346,6 +1346,18 @@ fail_under = 0
 # site's socket at the gate and lets the same origin, a listed one and a client with no Origin through. It stays in
 # the tree word for word.
 #
+# A plugin installed from a URL asks its digest, and registration closes past the first account (block 229). og2 of
+# tests/test_outbound_gate_contracts.py read a configuration that does not give install.require_hash as "no digest
+# asked"; en5 of tests/test_bulbe_login_enrols_a_factor_contracts.py registered a third account in Bulbe; uc2 of
+# tests/test_auth_config_unread_closes_the_door_contracts.py read an install with no auth.yaml as registration open;
+# a36 of tests/test_auth_core_contracts.py counted the SQL sites of auth.py without the write transaction an account
+# is now made in. They give way to dk3, dk4, dk8 and dk10 of
+# tests/test_plugin_digest_and_closed_registration_contracts.py: dk3 runs og2 whole, its two clauses on a partial
+# configuration given the archive's digest; dk4 keeps en5's cases on an install with no account (the first account
+# enrols in Bulbe; tokens at once in Daily with registration open; 503 and no account where no factor can be set
+# up); dk8 runs uc2 whole, no file reading registration closed; dk10 walks a36's census word for word with that
+# transaction's site. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1810,4 +1822,8 @@ addopts = """
     --deselect=tests/test_auth_2fa_verification_bounds_contracts.py::test_vb1_totp_code_is_single_use_within_its_window
     --deselect=tests/test_auth_2fa_verification_bounds_contracts.py::test_vb3_unverified_or_unknown_enrollment_is_refused
     --deselect=tests/test_api_changes_nothing_for_another_site_contracts.py::test_xs2_the_machines_own_pages_and_the_cli_are_answered
+    --deselect=tests/test_outbound_gate_contracts.py::test_og2_the_marketplace_install_is_gated_destination_checked_and_configured
+    --deselect=tests/test_bulbe_login_enrols_a_factor_contracts.py::test_en5_the_registration_in_bulbe_enrols_before_its_first_session
+    --deselect=tests/test_auth_config_unread_closes_the_door_contracts.py::test_uc2_a_file_that_loads_or_none
+    --deselect=tests/test_auth_core_contracts.py::test_a36_sql_is_parameterised_never_f_string_the_owners_read_among_it
 """

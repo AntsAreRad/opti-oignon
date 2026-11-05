@@ -2,7 +2,7 @@
 """
 Authentication API routes.
 
-POST   /api/auth/register           -- Create account
+POST   /api/auth/register           -- Create account (the first, or where registration is open)
 POST   /api/auth/login              -- Get JWT token (or 2FA challenge)
 POST   /api/auth/login/2fa          -- Complete 2FA challenge
 POST   /api/auth/login/2fa/enrol/begin    -- Begin the TOTP of an enrolment challenge (Bulbe, no factor yet)
@@ -12,14 +12,15 @@ POST   /api/auth/refresh            -- Refresh token pair
 GET    /api/auth/me                 -- Get current user profile
 PUT    /api/auth/me                 -- Update profile
 PUT    /api/auth/me/password        -- Change password
-GET    /api/auth/users              -- List users (admin only)
-DELETE /api/auth/users/{user_id}    -- Delete user (admin only)
+GET    /api/auth/users              -- List users (the owner)
+POST   /api/auth/users              -- Add an account (the owner, with the owner's password)
+DELETE /api/auth/users/{user_id}    -- Delete user (the owner)
 GET    /api/auth/settings           -- Get per-user settings
 PUT    /api/auth/settings           -- Update per-user settings
 POST   /api/auth/projects/share     -- Share a project
 GET    /api/auth/projects/{id}/members -- List project members
 DELETE /api/auth/projects/{project_id}/members/{user_id} -- Remove access
-GET    /api/auth/audit              -- Get audit log (admin)
+GET    /api/auth/audit              -- Get audit log (the owner)
 GET    /api/auth/status             -- Auth system status (public)
 """
 
@@ -48,6 +49,15 @@ class RegisterRequest(BaseModel):
     username: str = Field(min_length=2, max_length=64, description="Username")
     password: str = Field(min_length=8, description="Password")
     email: str = Field(default="", description="Email address (optional)")
+
+
+class CreateUserRequest(BaseModel):
+    """Request body for an account the platform's owner adds."""
+    username: str = Field(min_length=2, max_length=64, description="Username")
+    password: str = Field(min_length=8, description="The new account's password")
+    email: str = Field(default="", description="Email address (optional)")
+    role: str | None = Field(default=None, description="admin, user or viewer; users.default_role when not given")
+    owner_password: str = Field(description="The owner's own password")
 
 
 class LoginRequest(BaseModel):
@@ -282,6 +292,85 @@ def _get_2fa_manager():
 
 
 _NO_FACTOR_SET_UP = "A second factor cannot be set up here: login refused."
+
+_REGISTRATION_CLOSED = ("Registration is closed: the platform's owner adds accounts (Workshop > Security > "
+                        "Authentication mode).")
+_REGISTRATION_UNREAD = ("Registration is closed while the auth configuration does not load; fix auth.yaml and restart "
+                        "the server.")
+_REGISTRATION_FULL = "Registration is closed: the platform holds its users.max_users accounts."
+
+# The roles an account may hold (``auth.VALID_ROLES``).
+_ROLES = ("admin", "user", "viewer")
+
+
+def _registration_open(mgr: Any) -> bool:
+    """Whether registration is open past the first account: ``users.allow_registration`` true and the mode Daily. In
+    Bulbe, and in a mode that cannot be read, it never is."""
+    if mgr.config.get("users", {}).get("allow_registration") is not True:
+        return False
+    try:
+        from opti_oignon.security_mode import is_bulbe
+        return not is_bulbe()
+    except Exception:  # noqa: BLE001 - a mode that cannot be read opens nothing
+        return False
+
+
+def _registration_closed(mgr: Any) -> str | None:
+    """Why ``/register`` refuses now, or None when it would make an account: shut while the auth configuration does
+    not load whole; open to the first account of a store that holds none; past it, open only where
+    ``_registration_open`` says so and below ``users.max_users``. Raises when the store cannot be read."""
+    if getattr(mgr, "config_unread", None):
+        return _REGISTRATION_UNREAD
+    count = mgr.count_users()
+    if count == 0:
+        return None
+    if not _registration_open(mgr):
+        return _REGISTRATION_CLOSED
+    cap = mgr.config.get("users", {}).get("max_users", 0)
+    if isinstance(cap, int) and not isinstance(cap, bool) and 0 < cap <= count:
+        return _REGISTRATION_FULL
+    return None
+
+
+def _acting_account(current_user: dict) -> str:
+    """The account a session stands for, as the store says now (``ceremony_factors.session_account``: for the
+    single-user session, the owner's when there is one), or the session's own ``sub`` when the store cannot say."""
+    sub = current_user.get("sub") or ""
+    try:
+        from opti_oignon.ceremony_factors import session_account
+        account = session_account(current_user)
+    except Exception:  # noqa: BLE001 - the record and the check keep the session's name
+        return sub
+    return account.account_id if account is not None else sub
+
+
+def _owner_password(act: str, current_user: dict, password: str, request: Request) -> str:
+    """The owner's password, asked through the owner's own session as the security ceremonies ask it
+    (``ceremony_factors.check_password``): the owner's account id, or a refusal raised with the verdict's status --
+    403 for no account, another account's session or a wrong password, 429 for a password being checked or an account
+    the login limiter holds back, 503 for one that cannot be checked -- and audited as ``ceremony_password_refused``
+    by name, with no secret, where the audit can write."""
+    from opti_oignon.ceremony_factors import check_password
+
+    verdict = check_password(current_user, password, client_ip=_extract_client_ip(request))
+    if verdict.passed:
+        return verdict.account_id
+    logger.warning("ceremony_password_refused: %s", verdict.error)
+    try:
+        from opti_oignon.security_mode import _audit_log
+        _audit_log("ceremony_password_refused", severity="WARNING", ceremony=act, error=verdict.error,
+                   user_id=current_user.get("sub") or "")
+    except Exception:  # noqa: BLE001 - the audit is best effort; the refusal stands
+        pass
+    raise HTTPException(status_code=verdict.status, detail=verdict.message)
+
+
+def _registration_enabled(mgr: Any) -> bool:
+    """What ``/register`` answers now (``_registration_closed``); a store that cannot be read registers no one."""
+    try:
+        return _registration_closed(mgr) is None
+    except Exception:  # noqa: BLE001 - a store that cannot be read registers no one
+        return False
 
 
 def _enrolment_challenge(tfa_mgr: Any, user: Any) -> JSONResponse:
@@ -623,16 +712,6 @@ def _require_owner(current_user: dict = Depends(_get_current_user)):
     return current_user
 
 
-def _require_admin(current_user: dict = Depends(_get_current_user)):
-    """Require the current user to be an admin."""
-    if current_user.get("role") != "admin":
-        raise HTTPException(
-            status_code=403,
-            detail="Admin access required.",
-        )
-    return current_user
-
-
 async def authenticate_websocket(websocket) -> dict | None:
     """Authenticate a WebSocket connection (audit-hardened).
 
@@ -715,7 +794,7 @@ def auth_status() -> dict:
         return {
             "available": True,
             "single_user_mode": mgr.single_user_mode,
-            "registration_enabled": mgr.config.get("users", {}).get("allow_registration", True),
+            "registration_enabled": _registration_enabled(mgr),
             "user_count": mgr.count_users(),
             "cookie_mode": _is_cookie_mode(),
             # The auth configuration does not load whole: sign-in is asked and registration closed until it does
@@ -809,16 +888,24 @@ def register(req: RegisterRequest, request: Request, response: Response) -> dict
     """Register a new user account and return tokens -- in Bulbe, the challenge of its second factor's enrolment
     instead (``login``): its first session comes with its first factor.
 
+    Registration makes the first account of a store that holds none, in any mode; past it, an account only where
+    ``users.allow_registration`` is true and the mode is Daily (``_registration_open``), below ``users.max_users`` --
+    otherwise the owner adds it (``POST /users``). The store counts and writes in one transaction and reads the mode
+    again there (``first_only``), so that two registrations sent together on an empty store make one account, and a
+    switch to Bulbe while the password is hashed makes none past the first. Refused 403 while the auth configuration
+    does not load whole, the first account included, and 503 when the store cannot be read.
+
     Also sets httpOnly cookies when cookie_mode is enabled.
     """
     mgr = _get_auth_manager()
 
-    # Check if registration is allowed
-    if not mgr.config.get("users", {}).get("allow_registration", True):
-        raise HTTPException(
-            status_code=403,
-            detail="Registration is disabled. Contact an administrator.",
-        )
+    # Who may register, told before the password is hashed
+    try:
+        closed = _registration_closed(mgr)
+    except Exception:  # noqa: BLE001 - a store that cannot be read registers no one
+        raise HTTPException(status_code=503, detail="The account store cannot be read: registration refused.")
+    if closed:
+        raise HTTPException(status_code=403, detail=closed)
 
     # Whether the new account enrols a second factor first, told before it is made: a two-factor module that cannot
     # be reached, or a factor that cannot be set up where one is asked, refuses with no account left behind.
@@ -835,15 +922,27 @@ def register(req: RegisterRequest, request: Request, response: Response) -> dict
             detail="A second factor cannot be set up here: registration refused.",
         )
 
-    user = mgr.create_user(
-        username=req.username,
-        password=req.password,
-        email=req.email,
-    )
+    try:
+        user = mgr.create_user(
+            username=req.username,
+            password=req.password,
+            email=req.email,
+            first_only=lambda: not _registration_open(mgr),
+        )
+    except Exception:  # noqa: BLE001 - a store that cannot be written registers no one
+        raise HTTPException(status_code=503, detail="The account store cannot be written: registration refused.")
     if not user:
+        # Closed meanwhile -- the first account made, the mode raised to Bulbe, users.max_users reached -- as it would
+        # have been told; else the name or the password
+        try:
+            closed = _registration_closed(mgr)
+        except Exception:  # noqa: BLE001 - the refusal stands, in its general words
+            closed = None
+        if closed:
+            raise HTTPException(status_code=403, detail=closed)
         raise HTTPException(
             status_code=400,
-            detail="Registration failed. Username may already be taken or password too short.",
+            detail="Registration failed: the name may be taken, or the password refused by the rules.",
         )
 
     # Log audit
@@ -1466,7 +1565,7 @@ def change_password(
 
     ok = mgr.change_password(current_user["sub"], req.new_password)
     if not ok:
-        raise HTTPException(status_code=400, detail="Password change failed (too short?)")
+        raise HTTPException(status_code=400, detail="Password change failed: too short, or more than 72 bytes.")
 
     mgr._log_audit(current_user["sub"], "change_password", "user", current_user["sub"])
     return {"changed": True}
@@ -1514,23 +1613,64 @@ def update_user_settings(
 def list_users(
     limit: int = Query(default=100, le=500),
     offset: int = Query(default=0, ge=0),
-    admin: dict = Depends(_require_admin),
+    admin: dict = Depends(_require_owner),
 ) -> list:
-    """List all users (admin only)."""
+    """List all users (the platform's owner, as the store names it now: the one who adds accounts)."""
     mgr = _get_auth_manager()
     users = mgr.list_users(limit=limit, offset=offset)
     return [UserResponse(**u.to_dict()) for u in users]
 
 
+@router.post("/users", response_model=UserResponse)
+def create_account(
+    req: CreateUserRequest,
+    request: Request,
+    current_user: dict = Depends(_get_current_user),
+) -> UserResponse:
+    """Add an account: the platform's owner's, through the owner's own session, with the owner's password checked as
+    the security ceremonies check it (403, 429, 503, audited by name), so that a session alone makes no account.
+    Registration's settings do not apply; ``users.max_users`` does. The account gets no session here: it signs in
+    itself, and in Bulbe enrols its second factor at its first login -- refused 503, before the account is made,
+    where no TOTP can be set up. 400 for a role other than admin, user and viewer, a name taken, or a password the
+    rules refuse. An admin's account made here is an owner from then on, and the first registered, while no account
+    was an admin's, is no longer one (``AuthManager.owners``)."""
+    mgr = _get_auth_manager()
+    role = req.role if req.role is not None else mgr.config.get("users", {}).get("default_role", "user")
+    if role not in _ROLES:
+        raise HTTPException(status_code=400, detail="The role must be admin, user or viewer.")
+    owner_id = _owner_password("create_user", current_user, req.owner_password, request)
+
+    tfa_mgr = _get_2fa_manager()
+    if tfa_mgr is None:
+        raise HTTPException(status_code=503, detail="The second factor cannot be checked here: account not made.")
+    if tfa_mgr.required_by_mode() and not tfa_mgr.totp_checkable():
+        raise HTTPException(status_code=503, detail="A second factor cannot be set up here: account not made.")
+
+    try:
+        user = mgr.create_user(username=req.username, password=req.password, email=req.email, role=role)
+    except Exception:  # noqa: BLE001 - a store that cannot be written makes no account
+        raise HTTPException(status_code=503, detail="The account store cannot be written: account not made.")
+    if not user:
+        raise HTTPException(
+            status_code=400,
+            detail="The account was not made: the name may be taken, the password refused by the rules, or the "
+                   "accounts at users.max_users.",
+        )
+    mgr._log_audit(owner_id, "create_user", "user", user.user_id)
+    return UserResponse(**user.to_dict())
+
+
 @router.delete("/users/{user_id}")
 def delete_user(
     user_id: str,
-    admin: dict = Depends(_require_admin),
+    admin: dict = Depends(_require_owner),
 ) -> dict:
-    """Delete a user account (admin only)."""
+    """Delete a user account (the platform's owner, as the store names it now: the one who adds accounts). Not the
+    owner's own, under its token or the single-user session; audited under the owner's account."""
     mgr = _get_auth_manager()
 
-    if user_id == admin["sub"]:
+    actor = _acting_account(admin)
+    if user_id in (admin["sub"], actor):
         raise HTTPException(status_code=400, detail="Cannot delete your own account")
 
     ok = mgr.delete_user(user_id)
@@ -1545,7 +1685,7 @@ def delete_user(
         except Exception as exc:  # noqa: BLE001 - the account is gone; its factors are inert under its id
             logger.warning("Second factors of deleted user=%s not purged (%s)", user_id, type(exc).__name__)
 
-    mgr._log_audit(admin["sub"], "delete_user", "user", user_id)
+    mgr._log_audit(actor, "delete_user", "user", user_id)
     return {"deleted": True, "user_id": user_id}
 
 
@@ -1618,9 +1758,9 @@ def get_audit_log(
     user_id: str | None = Query(default=None),
     project_id: str | None = Query(default=None),
     limit: int = Query(default=50, le=200),
-    admin: dict = Depends(_require_admin),
+    admin: dict = Depends(_require_owner),
 ) -> dict:
-    """Get audit log entries (admin only)."""
+    """Get audit log entries (the platform's owner, as the store names it now)."""
     mgr = _get_auth_manager()
     entries = mgr.get_audit_log(user_id=user_id, project_id=project_id, limit=limit)
     return {"entries": entries, "count": len(entries)}

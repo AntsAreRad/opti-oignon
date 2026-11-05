@@ -16,7 +16,7 @@ session:
   max_sessions: 5
 single_user_mode: true
 users:
-  allow_registration: true
+  allow_registration: false
   default_role: user
   max_users: 0
   require_email: false

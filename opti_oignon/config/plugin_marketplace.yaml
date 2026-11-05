@@ -34,8 +34,10 @@ install:
   # Not read: each install request's own auto_enable decides.
   auto_enable: false
 
-  # Require SHA-256 hash verification for remote installs
-  require_hash: false
+  # Require the archive's SHA-256 digest for every install from a URL: an
+  # install given none is refused before anything is fetched. Set to false to
+  # let an install with no digest run the code whatever the URL serves.
+  require_hash: true
 
 # Reviews settings
 reviews:

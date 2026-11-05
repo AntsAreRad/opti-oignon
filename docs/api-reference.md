@@ -17,7 +17,7 @@ the backend is running.
 | Prefix | Description | Auth |
 |--------|-------------|------|
 | `/api/health` | Health check and version info | Public |
-| `/api/auth/*` | Login, logout, registration, 2FA | Mixed |
+| `/api/auth/*` | Login, logout, registration (the first account, or where it is opened), 2FA, accounts -- the owner adds, lists and removes them | Mixed |
 | `/api/chat/*` | Conversations, messages, branches | User |
 | `/api/models/*` | Model listing, profiles, health | User |
 | `/api/rag/*` | Ingest, query, collections, streaming | User |

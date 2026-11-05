@@ -77,7 +77,10 @@ class MarketplaceListResponse(BaseModel):
 
 class RemoteInstallRequest(BaseModel):
     url: str = Field(..., description="URL to plugin archive or GitHub repo")
-    expected_sha256: str = Field("", description="Expected SHA-256 hash (optional)")
+    expected_sha256: str = Field(
+        "", description="SHA-256 digest of the archive (64 hex characters); required unless install.require_hash "
+        "is false"
+    )
     auto_enable: bool = Field(False, description="Auto-enable after install")
 
 

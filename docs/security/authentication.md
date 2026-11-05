@@ -34,12 +34,9 @@ a 429, and a password that cannot be checked with a 503 -- with bcrypt
 5, one of more than 72 bytes among them; bcrypt 4 checks its first 72
 bytes instead --, and nothing is approved, confirmed or re-enabled. A
 remote-session guard that cannot be read gives the hardened cookies. Not
-yet: the login limiter, when it cannot be loaded, limits nothing, and
-the login itself checks tries sent together before it counts the first;
-registration is open by default, so that on an install with no account
-the first to register is the owner; and a configuration that gives every
-new account the admin role (`users.default_role: admin`) makes each one
-an owner.
+yet: the login limiter, when it cannot be loaded, limits nothing; and a
+configuration that gives every new account the admin role
+(`users.default_role: admin`) makes each one an owner.
 
 
 ## User accounts
@@ -58,6 +55,28 @@ re-enabling search -- and switching authentication on or off take the
 platform's owner rather than a role: an admin's account or, while no
 account is an admin's, the first registered. With no account at all, no
 ceremony passes until one is registered.
+
+Registration makes the first account of an install that has none, in
+any mode: that account is the owner. Past it, registration is closed as
+shipped (`users.allow_registration: false` in `config/auth.yaml`; a key
+missing or not true or false reads closed), and the owner adds the
+other accounts under **Workshop > Security > Authentication mode**
+(`POST /api/auth/users`), which asks the owner's own password as the
+ceremonies do: a session alone makes no account. The owner also lists
+and removes accounts (`GET` and `DELETE /api/auth/users`) and reads the
+account audit (`GET /api/auth/audit`), never by a token's role alone; an
+admin's account the owner adds is an owner from then on, and the first
+registered, if it is no admin's, is no longer one. Registration opens
+past the first account only where the configuration says `true`, only
+in Daily mode, and below `users.max_users`; in Bulbe mode, or a mode
+that cannot be read, it never does, and the mode is read again when the
+account is written. Two registrations sent together on an install with
+no account make one account. A new password of more than 72 bytes is
+refused -- at registration, when the owner adds an account and when a
+password is changed --, as bcrypt reads no further; a `users.max_users`
+that is no whole number reads 1, with a warning. A configuration that
+does not load whole keeps registration shut, the first account included,
+until it is fixed.
 
 
 ## Two-factor authentication (2FA)

@@ -1,6 +1,9 @@
 <!--
   Register page (refactored onto ds primitives).
-  Shown when multi-user mode is active and registration is enabled.
+  Shown when multi-user mode is active and registration is enabled: the
+  first account of an install with none, or any where the configuration
+  opens registration in Daily mode. Past it, the owner adds accounts in the
+  Workshop (Security > Authentication mode).
   Redirects to /chat after a successful registration.
 
   Theme parity (spec 12.3): like login, this page renders outside AppShell
@@ -96,7 +99,7 @@
 				<EnrolSecondFactor {enrolment} on:done={() => goto('/chat')} on:restart={() => goto('/login')} />
 			{:else if registrationDisabled}
 				<div class="oo-auth-error" role="alert">
-					Registration is currently disabled. Contact an administrator.
+					Registration is closed: the platform's owner adds accounts, in Workshop > Security > Authentication mode.
 				</div>
 			{:else}
 				{#if errorMsg}

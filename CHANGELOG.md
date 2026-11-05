@@ -3533,6 +3533,31 @@ package costs.
   reads, a downgrade and a plugin approval: every request waited. A
   wrapped key file is now unwrapped once per process for each text and
   the passphrase the backend was started with.
+- [SECURITY] A plugin installed from a URL asks the archive's SHA-256,
+  and registration closes past the first account. As shipped, an install
+  from a URL took no digest: whoever served the URL, or a URL it
+  redirected to, chose the code; and a digest of the wrong shape was
+  only found wrong after the download. `install.require_hash` is now
+  true in `plugin_marketplace.yaml` and in the installer's defaults: an
+  install given no digest, or one that is not 64 hexadecimal characters,
+  is refused before anything is fetched. Registration was open as
+  shipped, and allowed in Bulbe mode: anyone who reached the server made
+  an account, and a second account turned single-user mode off for good.
+  `users.allow_registration` is now false: registration makes the first
+  account of an install with none, in any mode, and past it only where
+  the configuration opens it in Daily mode; in Bulbe mode, or a mode
+  that cannot be read, never. The owner adds the other accounts (`POST
+  /api/auth/users`, and a form under Workshop > Security >
+  Authentication mode), with the owner's own password. The accounts are
+  counted and the new one written in one transaction, so two
+  registrations sent together on an empty install make one account, and
+  `users.max_users` holds accounts sent together; the security mode is
+  read again when the account is written. The owner also lists and
+  removes accounts and reads their audit, which took an admin's token; a
+  new password of more than 72 bytes is refused, which bcrypt 5 raised
+  on. Contracts dk1-dk10 in
+  `tests/test_plugin_digest_and_closed_registration_contracts.py`; og2,
+  en5, uc2 and a36 give way to them.
 - [SECURITY] Remote access now refuses a revoked device's certificate.
   The check of each request read the client certificate from a transport
   uvicorn never puts in a request's scope, so it ran only on a header a

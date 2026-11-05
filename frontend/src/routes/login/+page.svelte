@@ -16,7 +16,7 @@
 -->
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { doLogin, doLoginSecondStep } from '$lib/stores/auth';
+	import { doLogin, doLoginSecondStep, authStatus } from '$lib/stores/auth';
 	import { requestOptions, serializeAssertion } from '$lib/webauthn';
 	import { httpRefusal } from '$lib/switches/serverSwitch';
 	import type { TwoFactorChallenge, TwoFactorEnrolment } from '$lib/types';
@@ -229,10 +229,15 @@
 			</div>
 			{/if}
 
-			<p class="oo-auth-footer">
-				Don't have an account?
-				<a href="/register" class="oo-auth-link">Create one</a>
-			</p>
+			<!-- Registration is open to the first account, or where the configuration opens it: the server says which. -->
+			{#if $authStatus?.registration_enabled}
+				<p class="oo-auth-footer">
+					Don't have an account?
+					<a href="/register" class="oo-auth-link">Create one</a>
+				</p>
+			{:else if $authStatus}
+				<p class="oo-auth-footer">Accounts are added by the platform's owner.</p>
+			{/if}
 		</Card>
 	</div>
 </main>
