@@ -1035,74 +1035,6 @@ async def set_security_mode(
     return result
 
 
-@router.post("/mode/request-downgrade")
-async def request_mode_downgrade(
-    current: dict = Depends(_get_current_user),
-) -> dict[str, Any]:
-    """Start the Bulbe -> Daily downgrade ceremony.
-
-    Returns a pending state with cooldown timer.
-    The visual confirmation code is NOT in this JSON response --
-    it is injected into the DOM by the frontend for human-only access.
-    """
-    if not SECURITY_MODE_AVAILABLE:
-        raise HTTPException(
-            status_code=503,
-            detail="Security mode system not available",
-        )
-
-    # Bind the ceremony to the authenticated user so that confirmation by the
-    # same session matches (the manager enforces requester == confirmer).
-    user_id = (
-        (current.get("sub") or current.get("user_id") or "local")
-        if isinstance(current, dict)
-        else "local"
-    )
-    result = security_mode_manager.request_downgrade(user_id)
-    if not result.get("success"):
-        status_code = 429 if result.get("error") == "rate_limited" else 400
-        raise HTTPException(status_code=status_code, detail=result.get("message", ""))
-    return result
-
-
-@router.get("/mode/downgrade-status")
-async def get_downgrade_status() -> dict[str, Any]:
-    """Check the status of a pending downgrade request."""
-    if not SECURITY_MODE_AVAILABLE:
-        return {"pending": False, "available": False}
-
-    pending = security_mode_manager.get_pending_downgrade()
-    if pending:
-        return pending
-    return {"pending": False}
-
-
-@router.get("/mode/visual-code")
-async def get_visual_code() -> dict[str, Any]:
-    """Return the visual code for DOM injection.
-
-    This endpoint is called by the frontend template renderer
-    to inject the code into the DOM.  The code should be displayed
-    in a CAPTCHA-like style, NOT as plain text in the chat/API.
-
-    In a production deployment, this endpoint would be protected
-    by session-only access (no Bearer) and would return the code
-    as an HTML fragment, not JSON.  For the current single-user
-    architecture, we return it in JSON but the frontend must render
-    it in the DOM only.
-    """
-    if not SECURITY_MODE_AVAILABLE:
-        raise HTTPException(status_code=503, detail="Not available")
-
-    code = security_mode_manager.get_pending_visual_code()
-    if not code:
-        raise HTTPException(
-            status_code=404,
-            detail="No pending downgrade request",
-        )
-    return {"visual_code": code}
-
-
 def _session_account(current: dict = Depends(_get_current_user)) -> Any:
     """The account the session stands for (``ceremony_factors.session_account``), for the routes that act on an
     account's own second factors: 401 when the session names no account or one that no longer exists, 403 when the
@@ -1127,6 +1059,77 @@ def _session_account(current: dict = Depends(_get_current_user)) -> Any:
             )
         raise HTTPException(status_code=401, detail="The account of this session no longer exists.")
     return account
+
+
+def _ceremony_user_id(current: Any) -> str:
+    """The identity the downgrade ceremony binds its request to, and reads again for its visual code and its
+    confirmation: the session's ``sub`` (or ``user_id``), ``"local"`` when it names none. In single-user mode
+    every session is the one synthetic session, so it is one identity."""
+    if not isinstance(current, dict):
+        return "local"
+    return current.get("sub") or current.get("user_id") or "local"
+
+
+@router.post("/mode/request-downgrade")
+async def request_mode_downgrade(
+    current: dict = Depends(_get_current_user),
+    account: Any = Depends(_session_account),
+) -> dict[str, Any]:
+    """Start the Bulbe -> Daily downgrade ceremony: the owner's to ask (403 for another account's session, whose
+    request no confirmation could pass, and which would replace the owner's), bound to the session's identity
+    (``_ceremony_user_id``).
+
+    Returns a pending state with cooldown timer. The visual code is not in this reply: ``GET /mode/visual-code``
+    serves it to the account that asked only, for the page to show it.
+    """
+    if not SECURITY_MODE_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Security mode system not available",
+        )
+    if not account.owner:
+        raise HTTPException(status_code=403, detail="Only the owner may ask to leave Bulbe mode: nothing is pending.")
+
+    # Bind the ceremony to the authenticated user so that confirmation by the
+    # same session matches (the manager enforces requester == confirmer).
+    user_id = _ceremony_user_id(current)
+    result = security_mode_manager.request_downgrade(user_id)
+    if not result.get("success"):
+        status_code = 429 if result.get("error") == "rate_limited" else 400
+        raise HTTPException(status_code=status_code, detail=result.get("message", ""))
+    return result
+
+
+@router.get("/mode/downgrade-status")
+async def get_downgrade_status() -> dict[str, Any]:
+    """Check the status of a pending downgrade request."""
+    if not SECURITY_MODE_AVAILABLE:
+        return {"pending": False, "available": False}
+
+    pending = security_mode_manager.get_pending_downgrade()
+    if pending:
+        return pending
+    return {"pending": False}
+
+
+@router.get("/mode/visual-code")
+async def get_visual_code(current: dict = Depends(_get_current_user)) -> dict[str, Any]:
+    """The pending downgrade's visual code, in JSON, to the account that asked for it only, any of its sessions
+    (the identity ``_ceremony_user_id`` reads, as the request and the confirmation read it): another account's
+    session gets 403, and none is served once the request is confirmed or past its end (404). The page shows it on
+    screen; the reply of the request does not hold it."""
+    if not SECURITY_MODE_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Not available")
+
+    found, code = security_mode_manager.visual_code_for(_ceremony_user_id(current))
+    if found == "other":
+        raise HTTPException(status_code=403, detail="The code is shown to the account that asked for it.")
+    if found != "ok" or not code:
+        raise HTTPException(
+            status_code=404,
+            detail="No pending downgrade request",
+        )
+    return {"visual_code": code}
 
 
 def _session_actor(current: Any) -> str:
@@ -1219,14 +1222,10 @@ async def confirm_mode_downgrade(
             detail="Security mode system not available",
         )
 
-    # The session user_id is the same expression used by request-downgrade, so the manager's requester ==
+    # The session user_id is read as request-downgrade reads it (_ceremony_user_id), so the manager's requester ==
     # confirmer check passes. The password is that of the session's account: no account found refuses, as a wrong
     # password or one that cannot be checked does.
-    session_user_id = (
-        (current.get("sub") or current.get("user_id") or "local")
-        if isinstance(current, dict)
-        else "local"
-    )
+    session_user_id = _ceremony_user_id(current)
     await run_in_threadpool(_ceremony_password, "downgrade", current, body.password, request)
 
     result = security_mode_manager.confirm_downgrade(
@@ -1245,6 +1244,8 @@ async def confirm_mode_downgrade(
             status_code = 403
         elif error == "cooldown_active":
             status_code = 425  # Too Early
+        elif error == "expired":
+            status_code = 410  # Gone, as the re-enable's
         else:
             status_code = 400
         raise HTTPException(status_code=status_code, detail=result.get("message", ""))
@@ -1500,12 +1501,17 @@ async def request_search_reenable(account: Any = Depends(_session_account)) -> d
 
 
 @router.get("/search-killswitch/reenable-code")
-async def get_search_reenable_code() -> dict[str, Any]:
-    """Return the visual code for DOM injection."""
+async def get_search_reenable_code(account: Any = Depends(_session_account)) -> dict[str, Any]:
+    """The pending re-enable's visual code, in JSON, to the owner's account that asked for it only, any of its
+    sessions: another account's session gets 403, and none is served past the request's end (404)."""
     if not SEARCH_KILLSWITCH_AVAILABLE:
         raise HTTPException(status_code=503, detail="Not available")
-    code = search_killswitch.get_reenable_visual_code()
-    if not code:
+    if not account.owner:
+        raise HTTPException(status_code=403, detail="The code is shown to the account that asked for it.")
+    found, code = search_killswitch.reenable_visual_code_for(account.account_id)
+    if found == "other":
+        raise HTTPException(status_code=403, detail="The code is shown to the account that asked for it.")
+    if found != "ok" or not code:
         raise HTTPException(status_code=404, detail="No pending re-enable request")
     return {"visual_code": code}
 
@@ -1535,6 +1541,8 @@ async def confirm_search_reenable(
             code = 403
         elif error == "cooldown_active":
             code = 425
+        elif error == "expired":
+            code = 410
         elif error in ("invalid_code", "invalid_request", "user_mismatch"):
             code = 403
         elif error == "not_recorded":

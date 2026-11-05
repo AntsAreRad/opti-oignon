@@ -72,7 +72,7 @@ if [ "$NO_START" = false ]; then
     step "Starting FastAPI backend on port ${PORT}..."
 
     python3 -m uvicorn opti_oignon.api.app:app \
-        --host 127.0.0.1 --port "$PORT" --log-level warning &
+        --host 127.0.0.1 --port "$PORT" --log-level warning --no-proxy-headers &
     SERVER_PID=$!
 
     RETRIES=30

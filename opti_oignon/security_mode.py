@@ -1040,9 +1040,10 @@ class SecurityModeManager:
         """Start the downgrade ceremony.  Returns pending state.
 
         Step 1 of the multi-factor ceremony:
-        - Generates a 6-digit visual code
+        - Generates a 6-digit visual code, bound to ``user_id``
         - Starts the 5-minute cooldown
-        - Code must be displayed in DOM only (not in API JSON)
+        - The code is not in this reply: the API serves it to the account that asked only
+          (``visual_code_for``), for the page to show it
         """
         current = self.get_current_mode()
         if current == MODE_DAILY:
@@ -1105,23 +1106,28 @@ class SecurityModeManager:
             "requested_at": now,
             "cooldown_seconds": DOWNGRADE_COOLDOWN_SECONDS,
             "expires_at": expires_at,
-            # NOTE: visual_code is NOT included here.
-            # It is injected into the DOM by the frontend route handler,
-            # invisible to the LLM token stream.
-            # The _visual_code field is available via get_pending_visual_code()
-            # for the template renderer only.
+            # The visual code is not in this reply: GET /mode/visual-code serves it
+            # to the account that asked only, while the request lives (visual_code_for).
         }
 
     def get_pending_visual_code(self) -> str | None:
-        """Return the pending visual code for DOM injection.
-
-        This is called by the HTML template renderer, NOT the JSON API.
-        The code appears in the DOM where a human can read it but the
-        LLM (which only sees the JSON response) cannot.
-        """
-        if self._pending_downgrade and not self._pending_downgrade.confirmed:
-            return self._pending_downgrade.visual_code
+        """The pending request's visual code, while the request lives: None once it is confirmed or past its
+        ``expires_at``. ``visual_code_for`` is the API's reading: it hands the code to the one who asked only."""
+        req = self._pending_downgrade
+        if req and not req.confirmed and time.time() <= req.expires_at:
+            return req.visual_code
         return None
+
+    def visual_code_for(self, user_id: str) -> tuple[str, str | None]:
+        """The visual code for ``user_id``, read with the request it belongs to: ``("ok", code)`` when that
+        identity asked for the request that lives; ``("other", None)`` when another one did; ``("none", None)``
+        when no request lives (none, confirmed, or past its ``expires_at``)."""
+        req = self._pending_downgrade
+        if not req or req.confirmed or time.time() > req.expires_at:
+            return "none", None
+        if user_id != req.user_id:
+            return "other", None
+        return "ok", req.visual_code
 
     def get_pending_downgrade(self) -> dict[str, Any] | None:
         """Return pending downgrade state (without the visual code)."""

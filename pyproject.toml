@@ -1378,6 +1378,20 @@ fail_under = 0
 # second place. It gives way to ck11, which runs it whole with TOTPSetup's count at two and witnesses one failing.
 # They stay in the tree word for word.
 #
+# The socket's address (block 232). b2 of tests/test_auth_2fa_routes_seam_contracts.py says a loopback peer's
+# X-Forwarded-For is the client's address; no route reads that header now, since every local client connects from
+# the loopback and could pick its address per request (T2e): its first and third findings still hold, its second is
+# the opposite of the rule. tg4 of tests/test_revoked_device_never_reaches_the_api_contracts.py says a loopback start
+# hands uvicorn its host and port alone; the launcher now also says how uvicorn reads forwarded headers
+# (proxy_headers off: uvicorn reads none, the Host gate reads them from the proxies api.trusted_proxies lists). op7 of
+# tests/test_another_port_is_another_site_contracts.py asks SECURITY.md to say a TLS proxy passes the scheme on "from
+# an address uvicorn trusts"; uvicorn trusts none now, the sentence names the list. They give way to va3, va4 and va7
+# of tests/test_code_to_whom_asked_and_the_sockets_address_contracts.py: va3 says b2's first and third again and
+# refuses the forwarded address from a loopback peer; va4 runs tg4 whole, its two key sets holding proxy_headers;
+# va7 runs op7 whole with the sentence that names the list. ul14 of tests/test_launcher_unlock_contracts.py pins the
+# backend script's server argv; the script now turns uvicorn's proxy headers off too: va6 runs ul14 whole with the
+# flag in that argv. They stay in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1855,4 +1869,8 @@ addopts = """
     --deselect=tests/test_auth_core_contracts.py::test_a9_jwt_decode_fails_secure
     --deselect=tests/test_auth_core_contracts.py::test_a10_jwt_expiry_enforced
     --deselect=tests/test_two_factor_login_frontend_contracts.py::test_tf22_the_page_answers_the_second_step_and_sends_the_step_up
+    --deselect=tests/test_auth_2fa_routes_seam_contracts.py::test_b2_forwarded_header_trusted_only_from_localhost_peer
+    --deselect=tests/test_revoked_device_never_reaches_the_api_contracts.py::test_tg4_a_network_address_is_served_with_the_whole_mtls_or_not_at_all
+    --deselect=tests/test_another_port_is_another_site_contracts.py::test_op7_the_texts_say_the_rule
+    --deselect=tests/test_launcher_unlock_contracts.py::test_ul14_the_backend_script_runs_no_program_but_the_server
 """

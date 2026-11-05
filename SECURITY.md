@@ -56,7 +56,10 @@ timing oracle prevention (dummy bcrypt on invalid usernames). Rate
 limiting with exponential lockout: a login checks one password at a time
 for an address and for an account, so that tries sent together are each
 counted, and a code sent at the second step is counted before it is
-read. CSRF double-submit cookie on the
+read. The address is the socket's, or the one a proxy listed under
+`api.trusted_proxies` forwards (none as shipped): no route and not
+uvicorn reads X-Forwarded-For, the Host gate does, from a listed proxy
+only. CSRF double-submit cookie on the
 state-changing endpoints of a signed-in browser session (in single-user
 Daily mode, which has no session cookie, and for the few routes it exempts,
 the gate's origin check below is what refuses another site).
@@ -83,9 +86,10 @@ name over plain `http` changes nothing, serve remote access over TLS), or
 when it is one of the origins listed under `cors.origins`. A page of
 another port of this machine (a dev server, a local app) or of another
 scheme is another site. A proxy that ends TLS in front of the API passes
-the scheme on (`X-Forwarded-Proto`, from an address uvicorn trusts), or
-lists its pages' origin. The routes' own socket check takes what the gate
-let through, and holds a socket the gate did not see to a loopback name.
+the scheme on (`X-Forwarded-Proto`, from an address `api.trusted_proxies`
+lists, below), or lists its pages' origin. The routes' own socket check
+takes what the gate let through, and holds a socket the gate did not see
+to a loopback name.
 With no `Origin`, a request whose `Sec-Fetch-Site` is not `same-origin` or
 `none` is another site's. A client that sends neither header is no current
 browser (the CLI, curl) and is answered. A GET is not asked where it comes
@@ -122,6 +126,40 @@ nothing); one that rewrites it to a loopback name (nginx's default with
 `proxy_pass http://127.0.0.1:8001`) turns the name check off (a rebound
 page reads the answers) and refuses every change and every socket of the
 proxy's own pages, whose origin is not the Host it forwards.
+
+A proxy whose `X-Forwarded-For` and `X-Forwarded-Proto` the API is to
+read writes them itself (nginx: `proxy_set_header X-Forwarded-For
+$proxy_add_x_forwarded_for;` and `proxy_set_header X-Forwarded-Proto
+$scheme;`) and is listed by its address or network:
+
+```yaml
+api:
+  trusted_proxies: ["127.0.0.1"]
+```
+
+The Host gate alone reads those headers, from a listed proxy only:
+uvicorn reads none (every launcher of the tree starts it with
+`--no-proxy-headers`, the backend image included). The scheme is the one
+the proxy's single `X-Forwarded-Proto` says, and the client the last
+address its `X-Forwarded-For` names that is no listed proxy -- read only
+when it is an IP address written alone (no port, no name) and no
+loopback one; otherwise the client is `unlisted-proxy`. A request that
+carries a forwarded header from any other peer is handed on as that one
+client too: never the loopback, so the localhost-only routes (device
+certificates, remote access) refuse it, Bulbe's local-only check rejects
+it, its cookies are the remote ones, and the limiters count every such
+request as one. A front that adds no forwarded header at all (nginx's
+`proxy_pass` with no such line, a TCP forwarder such as `ssh -L` or
+socat) is not seen: its clients are the front's own address, the
+loopback for one on this machine, as before. A listed address can name
+any client: list a network only when each of its hosts is a proxy, a
+proxy only when it writes the header (one that relays the client's own
+lets every client name its address), and `127.0.0.1` only when every
+client of this machine may be taken at its word. An entry that is not an
+address or a network as written (host bits set, an IPv4 address written
+as IPv6, a scoped one), or a list that holds every address, lists none.
+The list is read when the server starts: a newly listed proxy needs a
+restart.
 
 Remote access (Daily mode, `remote_access.enabled`) is served over mutual
 TLS: each device holds a client certificate made on this machine. The

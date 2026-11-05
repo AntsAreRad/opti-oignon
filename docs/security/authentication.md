@@ -56,6 +56,30 @@ platform's owner rather than a role: an admin's account or, while no
 account is an admin's, the first registered. With no account at all, no
 ceremony passes until one is registered.
 
+Leaving Bulbe mode and re-enabling search are the owner's to ask, and
+each shows a visual code on the settings page. The code is served
+(`GET /api/security/mode/visual-code`,
+`GET /api/security/search-killswitch/reenable-code`) to the account that
+asked for the ceremony only, any of its sessions -- another account's
+gets a 403 -- and only while the request lives: ten minutes past its
+cooldown, after which its confirmation is refused (410) and nothing is
+pending. The code is read off the screen; it is no factor of its own, the
+owner's password is.
+
+The limiters count a client under the address the Host gate hands on:
+the socket's, or, from a proxy `api.trusted_proxies` of `security.yaml`
+lists (IP addresses or networks; none as shipped, and a list that cannot
+be read lists none), the one it forwards. No route reads X-Forwarded-For,
+and uvicorn reads none: every launcher starts it with
+`--no-proxy-headers`. A request that carries a forwarded header from a
+proxy that is not listed is one client, `unlisted-proxy`, never a local
+one: the localhost-only routes refuse it and its cookies are the remote
+ones. A front that adds no forwarded header (nginx's bare `proxy_pass`,
+a TCP forwarder) is not seen: its clients are this machine's own. A
+reverse proxy writes X-Forwarded-For itself and is listed by its address
+(SECURITY.md shows how); listing `127.0.0.1` takes the header of every
+client of this machine, the proxy's or not.
+
 Registration makes the first account of an install that has none, in
 any mode: that account is the owner. Past it, registration is closed as
 shipped (`users.allow_registration: false` in `config/auth.yaml`; a key

@@ -635,6 +635,8 @@ def launch(port: int = 8000, share: bool = False, debug: bool = False) -> None:
                 "--port", str(backend_port),
                 "--log-level", "warning",
                 "--timeout-graceful-shutdown", "10",
+                # No forwarded header read by uvicorn: the Host gate reads them from a listed proxy only.
+                "--no-proxy-headers",
             ],
             cwd=str(project_root),
             env=_child_env({_PASSPHRASE_VAR: passphrase, _KEY_VAR: key_given}),

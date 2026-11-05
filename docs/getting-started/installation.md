@@ -47,7 +47,7 @@ Start the backend and frontend in separate terminals:
 
 ```bash
 # Terminal 1: Backend
-uvicorn opti_oignon.api.app:app --port 8001 --reload
+uvicorn opti_oignon.api.app:app --port 8001 --reload --no-proxy-headers
 
 # Terminal 2: Frontend
 cd frontend && npm run dev

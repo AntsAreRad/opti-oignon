@@ -94,7 +94,15 @@ def cmd_api(args):
     if shown not in ("localhost", "127.0.0.1", "::1"):
         print("  (answered only if listed under api.hosts in security.yaml)")
 
-    uvicorn.run(app, host=actual_host, port=args.port, **ssl_kwargs)
+    uvicorn.run(app, host=actual_host, port=args.port, **ssl_kwargs, **_proxy_kwargs())
+
+
+def _proxy_kwargs() -> dict:
+    """uvicorn reads no forwarded header (``proxy_headers=False``): its own default trusts 127.0.0.1, where every
+    local client connects from, and would let each pick its address and scheme before the app sees the socket's.
+    The Host gate reads them, from the proxies ``api.trusted_proxies`` of ``security.yaml`` lists only
+    (``api/host_gate.py``, ``through_proxy``); every launcher of the tree starts uvicorn so."""
+    return {"proxy_headers": False}
 
 
 _LOOPBACK_HOSTS = ("127.0.0.1", "::1", "localhost")

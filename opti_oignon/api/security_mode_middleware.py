@@ -33,6 +33,11 @@ from starlette.responses import JSONResponse, Response
 
 logger = logging.getLogger(__name__)
 
+# The client the Host gate hands on for a request a proxy the configuration does not list forwarded
+# (``host_gate.UNLISTED_PROXY``; this module is loaded alone too, so the word is held here, and a contract ties the
+# two).
+_FORWARDED_CLIENT = "unlisted-proxy"
+
 # Paths that are always allowed (auth flow, mode management, the schema),
 # each with every path below it.
 _ALWAYS_ALLOWED_PREFIXES = (
@@ -243,8 +248,17 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
         # 0. Defense layer 3: Reject non-localhost requests in Bulbe.
         #    Even if binding somehow leaked to a non-local interface,
         #    this middleware blocks any request not from 127.0.0.1 or ::1.
+        #    A request a proxy forwarded, which the Host gate hands on as
+        #    _FORWARDED_CLIENT, is no local one either: said as what it is.
         client_host = request.client.host if request.client else None
-        if client_host and client_host not in ("127.0.0.1", "::1"):
+        if client_host == _FORWARDED_CLIENT:
+            logger.warning(
+                "Bulbe: REJECTED a request a proxy forwarded to %s: Bulbe "
+                "serves this machine's own clients only.",
+                path,
+            )
+            _audit_non_local_request(client_host, path, forwarded=True)
+        elif client_host and client_host not in ("127.0.0.1", "::1"):
             logger.critical(
                 "Bulbe: REJECTED request from non-local IP %s to %s. "
                 "This should be impossible if bind guard is working.",
@@ -252,6 +266,7 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
                 path,
             )
             _audit_non_local_request(client_host, path)
+        if client_host and client_host not in ("127.0.0.1", "::1"):
             return JSONResponse(
                 status_code=403,
                 content={
@@ -390,15 +405,16 @@ class SecurityModeMiddleware(BaseHTTPMiddleware):
 SECURITY_MODE_MIDDLEWARE_AVAILABLE = True
 
 
-def _audit_non_local_request(client_host: str, path: str) -> None:
-    """Log a critical audit event for non-local request in Bulbe mode."""
+def _audit_non_local_request(client_host: str, path: str, *, forwarded: bool = False) -> None:
+    """Log an audit event for a non-local request in Bulbe mode: critical for a non-local address (the bind guard
+    should have made it impossible), a warning for a request a proxy forwarded (any local client may send one)."""
     try:
         from opti_oignon.signed_audit_log import chain_log
         chain_log(
-            event_type="non_local_request_rejected",
+            event_type="forwarded_request_rejected" if forwarded else "non_local_request_rejected",
             source="security_mode_middleware",
             action="reject_non_local",
-            severity="CRITICAL",
+            severity="WARNING" if forwarded else "CRITICAL",
             client_host=client_host,
             path=path,
         )

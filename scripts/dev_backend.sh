@@ -41,8 +41,10 @@ echo
 
 # Told to stop, the server waits 10 s at most for the connections still open (a browser tab's
 # stream) before it closes them and runs its own shutdown: scripts/launch.sh waits 15 s for it.
+# No forwarded header read by uvicorn: the Host gate reads them from a proxy security.yaml lists only.
 exec python3 -m uvicorn opti_oignon.api.app:app \
     --host "${HOST}" \
     --port "${PORT}" \
     --timeout-graceful-shutdown 10 \
+    --no-proxy-headers \
     ${RELOAD}

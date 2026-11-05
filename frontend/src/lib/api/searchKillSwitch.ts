@@ -26,6 +26,9 @@ export interface KillSwitchStatus {
   circuit_breaker_tripped?: boolean;
   injection_count?: number;
   reenable_pending?: boolean;
+  // The living re-enable request, as the downgrade's status names its own: a page reloaded mid-ceremony confirms it.
+  reenable_request_id?: string | null;
+  reenable_expires_at?: number | null;
   domain_allowlist?: DomainAllowlistStatus;
 }
 

@@ -26,8 +26,10 @@ page served under a listed name over plain ``http`` changes nothing,
 remote access is to be served over TLS), or when it is exactly one of the
 origins ``cors.origins`` of ``security.yaml`` lists (``listed_origins``).
 A proxy that ends TLS before the API passes the scheme on
-(``X-Forwarded-Proto``, from an address uvicorn trusts), or its pages'
-origin is listed.
+(``X-Forwarded-Proto``, from an address ``api.trusted_proxies`` of
+``security.yaml`` lists: ``trusted_proxies``, ``through_proxy``), or its
+pages' origin is listed. Uvicorn reads no forwarded header: every launcher
+of the tree starts it with ``--no-proxy-headers``.
 A page of another port, of another name or of another scheme of this very
 machine -- a dev server, a local app -- is another site, and so is
 ``Origin: null``; with no Origin, a ``Sec-Fetch-Site`` other than
@@ -45,6 +47,15 @@ The grammar and the loopback names are the garden's routes'
 ``X-Forwarded-Host``; a bracketed IPv6 literal or dot-separated labels with
 no trailing dot, matched lowercase; a port from 1 to 65535, compared here
 with the Origin's (the garden compares names only).
+
+The address a client is counted under by the limiters is the client the
+gate hands on (``request.client``): the socket's peer, the one a listed
+proxy forwards, or ``UNLISTED_PROXY`` for a request any other peer
+forwarded, or one a listed proxy names no client for -- never the loopback,
+so no local-only check passes it. A client chooses its address only where
+the configuration lets it: when its own address is listed, or through a
+listed proxy that relays the client's header instead of writing its own.
+No other module reads ``X-Forwarded-For``.
 """
 from __future__ import annotations
 
@@ -85,6 +96,12 @@ _PAGE_SCHEME = {"http": "http", "ws": "http", "https": "https", "wss": "https"}
 ORIGIN_CHECKED = "opti_oignon.origin_checked"
 # The variable that lists the origins when security.yaml lists none.
 ORIGINS_ENV = "OPTI_CORS_ORIGINS"
+# The headers a proxy says a client's address or scheme in: a request that carries any of them came through one.
+# The gate reads them (``through_proxy``); no other module of the package names one.
+FORWARDED_HEADERS = frozenset({b"x-forwarded-for", b"x-forwarded-proto", b"x-forwarded-host", b"x-real-ip",
+                               b"forwarded"})
+# The client the app is handed for a request that came through a proxy ``api.trusted_proxies`` does not list.
+UNLISTED_PROXY = "unlisted-proxy"
 # The refusals' bodies: fixed words, never the name or the origin refused.
 REFUSED = b'{"detail":"This server does not answer that host name."}'
 REFUSED_SITE = b'{"detail":"This server takes no change from that page."}'
@@ -147,6 +164,126 @@ def listed_hosts(path: Path = SECURITY_YAML) -> tuple[str, ...]:
         return tuple(raw)
     logger.warning("api.hosts of security.yaml is not a list of names: the API answers the loopback names only")
     return ()
+
+
+def trusted_proxies(path: Path = SECURITY_YAML) -> tuple[str, ...]:
+    """The proxies ``api.trusted_proxies`` of ``security.yaml`` lists, read once when the app starts: the
+    addresses (or networks) whose ``X-Forwarded-For`` and ``X-Forwarded-Proto`` the gate takes (``through_proxy``).
+
+    ``()`` when the file or the key is absent: no proxy is trusted, and a
+    request that comes forwarded is handed on as ``UNLISTED_PROXY``. ``()``
+    and a warning when the file cannot be read whole, or when the value is
+    not a list of IP addresses or networks each written as it is meant -- a
+    network with host bits (``10.0.0.5/24``), an IPv4 address written as IPv6
+    (``::ffff:127.0.0.1``), a scoped one -- or when the list holds every IPv4
+    or every IPv6 address (``*``, ``0.0.0.0/0``, or halves that add up to
+    it): not every address is a proxy, and no proxy is trusted, never one more
+    than was meant.
+    """
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = yaml.safe_load(fh)
+    except FileNotFoundError:
+        return ()
+    except Exception:  # noqa: BLE001 -- any file the parser cannot read whole lists no proxy
+        logger.warning("security.yaml cannot be read: no proxy is trusted, a forwarded request is no client's")
+        return ()
+    section = data.get("api") if isinstance(data, dict) else None
+    if not isinstance(section, dict) or "trusted_proxies" not in section:
+        return ()
+    raw = section["trusted_proxies"]
+    networks = [_network(entry) for entry in raw] if isinstance(raw, list) else [None]
+    if None not in networks and not _every_address(networks):
+        return tuple(dict.fromkeys(raw))
+    logger.warning("api.trusted_proxies of security.yaml is not a list of IP addresses or networks, or lists "
+                   "every address: no proxy is trusted, a forwarded request is no client's")
+    return ()
+
+
+def _network(entry):
+    """The network ``entry`` names, written as it is meant (``10.0.0.5``, ``10.0.0.0/8``, ``::1``); None for any
+    other value: not text, spaces around it, host bits set, an IPv4-mapped or scoped IPv6 address."""
+    if not isinstance(entry, str) or entry != entry.strip() or "%" in entry:
+        return None
+    try:
+        network = ipaddress.ip_network(entry)
+    except ValueError:
+        return None
+    if network.version == 6 and network.network_address.ipv4_mapped is not None:
+        return None
+    return network
+
+
+def _every_address(networks) -> bool:
+    """Whether the networks together hold every IPv4 or every IPv6 address."""
+    for version in (4, 6):
+        same = [network for network in networks if network.version == version]
+        if any(network.prefixlen == 0 for network in ipaddress.collapse_addresses(same)):
+            return True
+    return False
+
+
+def through_proxy(scope, networks):
+    """The scope the app is handed for a request that came through a proxy: one that carries any of
+    ``FORWARDED_HEADERS``.
+
+    From a listed proxy -- the socket's peer in one of ``networks``, a real
+    socket's (a port of 0 is a server in front rewriting the client) -- the
+    scheme is the one its single ``X-Forwarded-Proto`` says (``http``,
+    ``https``, ``ws`` or ``wss``, made the scope's kind), and the client the
+    last address its ``X-Forwarded-For`` lines name that is no listed proxy;
+    that hop is taken only when it is an IP address written alone (no port,
+    no name) and no loopback one (no client of this machine reaches it
+    through another's word). Stricter than uvicorn, which reads the last line
+    only, hands on a hop that is no address, and the first hop of a chain of
+    listed ones. From any other peer, or when no such hop is named, the
+    client is ``UNLISTED_PROXY``: not the loopback, so no local-only check
+    passes it, and the limiters count every such request as one. A request
+    with none of those headers is handed on as it came: a proxy that adds
+    none is not seen, its clients are the proxy's own address.
+    """
+    headers = scope.get("headers") or ()
+    if not any(name.lower() in FORWARDED_HEADERS for name, _value in headers):
+        return scope
+    client = scope.get("client")
+    if not (client and client[1] != 0 and _listed(client[0], networks)):
+        return {**scope, "client": (UNLISTED_PROXY, 0)}
+    found = UNLISTED_PROXY
+    hops = [hop.strip() for name, value in headers if name.lower() == b"x-forwarded-for"
+            for hop in value.decode("latin-1").split(",")]
+    for hop in reversed(hops):
+        if _listed(hop, networks):
+            continue
+        address = _address(hop)
+        if address is not None and not address.is_loopback:
+            found = hop
+        break
+    return {**scope, "client": (found, 0), "scheme": _forwarded_scheme(scope, headers)}
+
+
+def _forwarded_scheme(scope, headers):
+    """A listed proxy's scheme: its one ``X-Forwarded-Proto`` among http, https, ws and wss, made the scope's kind
+    (``ws``/``wss`` for a websocket, ``http``/``https`` otherwise); the socket's when it sends none, several, or
+    another word."""
+    said = [value.decode("latin-1").strip().lower() for name, value in headers if name.lower() == b"x-forwarded-proto"]
+    if len(said) != 1 or said[0] not in ("http", "https", "ws", "wss"):
+        return scope.get("scheme")
+    secure = said[0] in ("https", "wss")
+    if scope["type"] == "websocket":
+        return "wss" if secure else "ws"
+    return "https" if secure else "http"
+
+
+def _address(text):
+    try:
+        return ipaddress.ip_address(text)
+    except ValueError:
+        return None
+
+
+def _listed(host, networks) -> bool:
+    address = _address(host)
+    return address is not None and any(address in network for network in networks)
 
 
 def _origin(text: str):
@@ -335,13 +472,18 @@ class HostGateMiddleware:
     """Refuse an HTTP request (403) or a websocket handshake (closed before it is accepted) addressed to a name
     this machine is not served as, and a state-changing request (403) or a websocket handshake (closed) a page of
     another site sent; everything else, the lifespan included, passes untouched. A handshake it lets through
-    reaches the app with ``ORIGIN_CHECKED`` set in its scope."""
+    reaches the app with ``ORIGIN_CHECKED`` set in its scope. First of all, a request that came through a proxy is
+    handed on with the client and the scheme ``through_proxy`` reads for it, from the proxies ``proxies`` (by
+    default ``api.trusted_proxies``) lists."""
 
-    def __init__(self, app, hosts: tuple[str, ...] | None = None, origins: tuple[str, ...] | None = None) -> None:
+    def __init__(self, app, hosts: tuple[str, ...] | None = None, origins: tuple[str, ...] | None = None,
+                 proxies: tuple[str, ...] | None = None) -> None:
         self.app = app
         self.allowed = frozenset(LOOPBACK + (listed_hosts() if hosts is None else tuple(hosts)))
         self.origins = frozenset(origin for origin in (listed_origins() if origins is None else tuple(origins))
                                  if origin != "*")
+        self.proxies = tuple(trusted_proxies() if proxies is None else proxies)
+        self.networks = tuple(network for network in map(_network, self.proxies) if network is not None)
         self._logged: set[str] = set()
         self._site_logged = False
         self._socket_logged = False
@@ -351,6 +493,7 @@ class HostGateMiddleware:
         if scope["type"] not in ("http", "websocket"):
             await self.app(scope, receive, send)
             return
+        scope = through_proxy(scope, self.networks)
         headers = scope.get("headers") or ()
         name = host_name(headers)
         if name not in self.allowed:

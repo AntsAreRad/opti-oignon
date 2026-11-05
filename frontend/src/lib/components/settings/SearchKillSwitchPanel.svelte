@@ -69,6 +69,8 @@
         domainList = [...status.domain_allowlist.domains];
       }
       if (status.reenable_pending) {
+        // A page reloaded during the ceremony takes the living request from the status.
+        pendingRequestId = status.reenable_request_id || pendingRequestId;
         reenableStep = 'pending';
         await fetchVisualCode();
       }

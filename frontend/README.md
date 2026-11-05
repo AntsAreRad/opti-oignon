@@ -20,7 +20,8 @@ Backend (FastAPI :8000) <-- REST/SSE --> Frontend (SvelteKit :5173)
 
 - Node.js >= 18
 - npm >= 9
-- Running Opti-Oignon API backend (`opti-oignon api` or `uvicorn opti_oignon.api.app:app`)
+- Running Opti-Oignon API backend (`opti-oignon api` or
+  `uvicorn opti_oignon.api.app:app --no-proxy-headers`)
 
 
 ## Development Setup

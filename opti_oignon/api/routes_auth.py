@@ -421,28 +421,11 @@ def _get_rate_limiter():
 
 
 def _extract_client_ip(request: Request) -> str:
-    """Extract client IP from request (audit-hardened).
-
-    Audit fix: X-Forwarded-For is NOT trusted by default because
-    it is attacker-controlled.  An attacker can send a different value
-    per request to bypass rate limiting entirely.
-
-    X-Forwarded-For is only trusted when:
-    1. The direct connection comes from localhost (127.0.0.1 / ::1),
-       indicating a local reverse proxy (nginx, caddy, etc.)
-    2. The request has a valid X-Forwarded-For header.
-
-    Otherwise, the actual TCP socket peer address is used.
-    """
-    direct_ip = request.client.host if request.client else "unknown"
-
-    # Only trust X-Forwarded-For from localhost (reverse proxy)
-    if direct_ip in ("127.0.0.1", "::1"):
-        forwarded = request.headers.get("X-Forwarded-For")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-
-    return direct_ip
+    """The address the login, ceremony and second-factor limiters count a request under: the client the Host
+    gate hands on -- the socket's peer, the client a proxy ``api.trusted_proxies`` lists forwards, or
+    ``UNLISTED_PROXY`` for any other forwarded request (``host_gate.through_proxy``). X-Forwarded-For is never read
+    here: any local client could send one per request and pick its own address."""
+    return request.client.host if request.client else "unknown"
 
 
 def _get_security_jwt_config() -> dict:
@@ -480,20 +463,17 @@ _CSRF_COOKIE = "oo_csrf_token"
 def _detect_secure_context(request: Request) -> bool:
     """Auto-detect whether we are in an HTTPS context.
 
-    Checks X-Forwarded-Proto (behind reverse proxy), the URL scheme,
-    and falls back to the cookie_secure config value.
-    Localhost connections are allowed to use HTTP (development).
+    Checks the URL scheme -- the Host gate's: behind a proxy
+    ``api.trusted_proxies`` lists, the one it forwards; no forwarded header is
+    read here, a client sends what it likes --, and falls back to the
+    cookie_secure config value. Localhost connections are allowed to use HTTP
+    (development); a request a proxy forwarded is no localhost one.
     """
     # Explicit config override
     jwt_cfg = _get_security_jwt_config()
     cfg_secure = jwt_cfg.get("cookie_secure", True)
 
-    # Behind reverse proxy
-    proto = request.headers.get("X-Forwarded-Proto", "")
-    if proto.lower() == "https":
-        return True
-
-    # Direct HTTPS
+    # HTTPS, direct or from a listed proxy
     if hasattr(request, "url") and str(request.url).startswith("https"):
         return True
 

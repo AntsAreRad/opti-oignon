@@ -72,6 +72,10 @@ DEFAULT_INJECTION_WINDOW = 600  # 10 minutes
 
 # Re-enable ceremony cooldown
 REENABLE_COOLDOWN_SECONDS = 300  # 5 minutes
+# A request ends ten minutes after its cooldown, as its reply says (expires_at), as the downgrade's does: the page's
+# countdown is a browser timer, slowed in a background tab. Past it, its code is no longer served, its confirmation
+# is refused, and the status says nothing is pending.
+REENABLE_GRACE_SECONDS = 600
 
 # The recorded state, beside the security mode's lockfile. Read at call time,
 # never at import: loading this module touches nothing under data/.
@@ -562,15 +566,31 @@ class SearchKillSwitch:
             "pending": True,
             "request_id": request_id,
             "cooldown_seconds": REENABLE_COOLDOWN_SECONDS,
-            "expires_at": now + REENABLE_COOLDOWN_SECONDS + 60,
-            # visual_code NOT in this response (DOM only)
+            "expires_at": now + REENABLE_COOLDOWN_SECONDS + REENABLE_GRACE_SECONDS,
+            # The visual code is not in this reply: GET /search-killswitch/reenable-code serves it to the account
+            # that asked only, while the request lives (reenable_visual_code_for).
         }
 
+    def _reenable_lives(self) -> bool:
+        """Whether a re-enable request is pending and not past its end (``expires_at`` of its reply)."""
+        ends = self._state.reenable_requested_at + REENABLE_COOLDOWN_SECONDS + REENABLE_GRACE_SECONDS
+        return self._state.reenable_pending and time.time() <= ends
+
     def get_reenable_visual_code(self) -> str | None:
-        """Return the visual code for DOM injection (not API)."""
-        if self._state.reenable_pending:
+        """The pending request's visual code, while the request lives: None past its end.
+        ``reenable_visual_code_for`` is the API's reading: it hands the code to the account that asked only."""
+        if self._reenable_lives():
             return self._state.reenable_visual_code
         return None
+
+    def reenable_visual_code_for(self, user_id: str) -> tuple[str, str | None]:
+        """The visual code for ``user_id``: ``("ok", code)`` when that account asked for the request that lives;
+        ``("other", None)`` when another one did; ``("none", None)`` when no request lives."""
+        if not self._reenable_lives():
+            return "none", None
+        if user_id != self._state.reenable_requested_by:
+            return "other", None
+        return "ok", self._state.reenable_visual_code
 
     def confirm_reenable(
         self,
@@ -622,6 +642,15 @@ class SearchKillSwitch:
                 "success": False,
                 "error": "user_mismatch",
                 "message": "The re-enable must be confirmed by the account that asked for it.",
+            }
+
+        # A request past its end is closed: its code no longer confirms anything.
+        if not self._reenable_lives():
+            self.cancel_reenable()
+            return {
+                "success": False,
+                "error": "expired",
+                "message": "The re-enable request has expired: ask again.",
             }
 
         # Verify cooldown
@@ -829,7 +858,12 @@ class SearchKillSwitch:
             "kill_reason": kill_reason,
             "circuit_breaker_tripped": tripped,
             "injection_count": self._state.injection_count,
-            "reenable_pending": self._state.reenable_pending,
+            # A request past its end is not pending: nothing it holds confirms. The living one is named, as the
+            # downgrade's status names its own, for a page reloaded during the ceremony (its code is the asker's).
+            "reenable_pending": self._reenable_lives(),
+            "reenable_request_id": self._state.reenable_request_id if self._reenable_lives() else None,
+            "reenable_expires_at": (self._state.reenable_requested_at + REENABLE_COOLDOWN_SECONDS
+                                    + REENABLE_GRACE_SECONDS) if self._reenable_lives() else None,
             "domain_allowlist": {
                 "enabled": allowlist.enabled,
                 "domain_count": len(allowlist.domains),

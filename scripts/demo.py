@@ -9,7 +9,7 @@ Runs against the FastAPI backend (API-only, no frontend needed).
 
 Usage:
     # Start the backend first:
-    uvicorn opti_oignon.api.app:app --port 8000
+    uvicorn opti_oignon.api.app:app --port 8000 --no-proxy-headers
 
     # Then run the demo:
     python scripts/demo.py
@@ -502,7 +502,7 @@ def main():
     if not client.alive():
         print(f"\n  {RED}Backend not reachable at {args.base_url}{RESET}")
         print(f"  {YELLOW}Start it with:{RESET}")
-        print(f"    uvicorn opti_oignon.api.app:app --port 8000\n")
+        print(f"    uvicorn opti_oignon.api.app:app --port 8000 --no-proxy-headers\n")
         sys.exit(1)
 
     # Run sections

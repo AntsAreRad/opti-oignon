@@ -32,13 +32,9 @@ router = APIRouter(tags=["users"])
 # ---------------------------------------------------------------------------
 
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP from request, considering proxy headers."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client:
-        return request.client.host
-    return "unknown"
+    """The address the user management limiter counts a request under: the client the Host gate hands on
+    (``host_gate.through_proxy``), never an X-Forwarded-For the client sent."""
+    return request.client.host if request.client else "unknown"
 
 
 def _check_user_mgmt_rate(request: Request) -> None:

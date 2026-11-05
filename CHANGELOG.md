@@ -3614,6 +3614,35 @@ package costs.
   ck1-ck11 in
   `tests/test_codes_secret_and_token_hold_without_their_key_contracts.py`;
   a8, a9, a10 and tf22 give way to them.
+- [SECURITY] A ceremony's visual code is served to the account that asked
+  for it only, and a limiter counts a client under an address it cannot
+  choose. The codes of leaving Bulbe mode and of re-enabling search were
+  served to any session, whoever asked, and any session could ask to
+  leave Bulbe, replacing the owner's request; now the owner alone asks,
+  another account's session gets 403 for the code, and no code is served
+  once its request has ended. A re-enable request ended in its reply
+  only: now it ends ten minutes after its cooldown, as the downgrade's
+  does, its confirmation refused past it (410, for both) and the status
+  no longer pending. The login, ceremony and second-factor limiters took
+  X-Forwarded-For from a loopback peer, the upload and account limiters
+  from anyone, and uvicorn, started with its defaults, already took it
+  from 127.0.0.1, where every local client connects from: each could pick
+  the address it was counted under, and the scheme the Host gate and the
+  cookies read. Now no route reads a forwarded header and uvicorn reads
+  none (every launcher, the image included, starts it with
+  `--no-proxy-headers`): the Host gate takes the forwarded address and
+  scheme from the proxies `api.trusted_proxies` of `security.yaml` lists
+  only, none as shipped. A request that carries a forwarded header from
+  any other peer is one client, `unlisted-proxy`, never a local one:
+  behind a reverse proxy on this machine that adds X-Forwarded-For and is
+  not listed, the localhost-only routes (device certificates, remote
+  access) refuse its clients, Bulbe's local-only check rejects them, and
+  the limiters count them as one. List such a proxy (listing `127.0.0.1`
+  takes the header of every client of this machine). A front that adds
+  no forwarded header (nginx's bare `proxy_pass`, a TCP forwarder) is not
+  seen, its clients this machine's own, as before. Contracts va1-va8 in
+  `tests/test_code_to_whom_asked_and_the_sockets_address_contracts.py`;
+  b2, tg4, op7 and ul14 give way to them.
 - [SECURITY] Remote access now refuses a revoked device's certificate.
   The check of each request read the client certificate from a transport
   uvicorn never puts in a request's scope, so it ran only on a header a
