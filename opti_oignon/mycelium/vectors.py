@@ -252,6 +252,17 @@ def unreachable(exc):
         word in type(exc).__name__ for word in ("Timeout", "Connect"))
 
 
+def engine_name(backend, model):
+    """The name the engine serving ``model`` knows it by, and the governor sees it loaded under: Ollama resolves a
+    name with no tag to its ``:latest`` and shows every model it holds with its tag (the tag follows the last colon
+    after the last slash, so a registry's port is no tag); another engine's names are its own. Asked under the
+    settings' name, an encoder Ollama holds was no resident to the governor, its cost unknown, and the pass refused
+    for good as background work."""
+    if str(getattr(backend, "name", "")) != "ollama" or ":" in model.rsplit("/", 1)[-1]:
+        return model
+    return model + ":latest"
+
+
 class Embedder:
     def __init__(self, encoder, timeout_s=120.0):
         self.encoder = encoder
@@ -266,12 +277,12 @@ class Embedder:
             raise EncoderMissing(f"no backend serves {self.encoder.model}")
         return backend
 
-    def _admit(self, caller):
+    def _admit(self, caller, name, engine):
         governor = _governor()
         if governor is None:
             return None
         try:
-            decision = governor.admit(self.encoder.model, caller=caller)
+            decision = governor.admit(name, caller=caller, engine=engine)
         except Exception as exc:  # noqa: BLE001 - an admission that fails sends nothing, as the warm-up's
             raise Held(f"the admission of {self.encoder.model} failed: {exc}") from exc
         if decision is not None and not getattr(decision, "admitted", True):
@@ -282,9 +293,13 @@ class Embedder:
         return decision
 
     def _ask(self, backend, texts, caller):
-        decision = self._admit(caller)
+        # The governor and the engine are asked under one name, the engine's: the call is made under the very
+        # ticket the admission gave, which the engine's gate matches by name. The governor is told the engine: its
+        # cache of the registry's routes holds the settings' name, resolved by ``_backend``, not the engine's.
+        name = engine_name(backend, self.encoder.model)
+        decision = self._admit(caller, name, str(getattr(backend, "name", "")) or None)
         with _holding(decision):
-            found = backend.embed_many(self.encoder.model, list(texts), timeout=self.timeout_s)
+            found = backend.embed_many(name, list(texts), timeout=self.timeout_s)
         if found is None:
             raise EncoderMissing(f"the backend of {self.encoder.model} has no embedding endpoint")
         return found

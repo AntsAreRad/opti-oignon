@@ -38,6 +38,12 @@ MV20 an encoder that covers nothing is never made the one read, nor one that lac
 MV21 a text refused, then gone while the engine answered, never stands for a text added meanwhile
 MV22 a question's vector of any finite size is scored as a unit vector
 MV23 a busy engine, or a refusal of the engine's own gate that a wait lifts, holds the pass; a final one stops it
+MV24 the governor and the engine are asked under the name the engine serving the encoder knows it by: Ollama's
+    for a name with no tag is its :latest (the tag after the last colon that follows the last slash); another
+    engine's names are its own; the governor is told which engine serves it; the store keeps the encoder as the
+    settings name it
+MV25 on the real governor, the background pass of an encoder the settings name without its tag, loaded in Ollama,
+    is admitted and loads nothing (it was refused for good as of unknown cost: BACKLOG 239 f)
 """
 
 import hashlib
@@ -79,6 +85,8 @@ BUDGET_S = {
     "test_mv21_a_refused_text_gone_meanwhile_never_stands_for_a_text_added": 3.0,
     "test_mv22_a_question_vector_of_any_finite_size_is_scored_as_a_unit_vector": 1.5,
     "test_mv23_a_busy_engine_holds_the_pass_and_a_final_refusal_of_its_gate_stops_it": 1.5,
+    "test_mv24_the_governor_and_the_engine_are_asked_under_the_engines_name_for_the_encoder": 1.5,
+    "test_mv25_the_real_governor_admits_the_pass_of_an_encoder_named_without_its_tag": 1.5,
 }
 
 DIM = 16
@@ -958,3 +966,82 @@ def test_mv23_a_busy_engine_holds_the_pass_and_a_final_refusal_of_its_gate_stops
         assert len(engine.calls) == 1 and counts[verdict] is True, failure
         assert counts["held" if verdict == "missing" else "missing"] is False and str(failure) in indexer.last_stop
     assert store.active_encoder() is None
+
+
+class Ollama(Engine):
+    """An engine stand-in that names itself as the registry's Ollama backend does."""
+
+    name = "ollama"
+
+
+class LlamaServer(Engine):
+    name = "llama_server"
+
+
+class Told(Governor):
+    """The admitting stand-in, recording the engine each admission is told."""
+
+    def __init__(self):
+        super().__init__()
+        self.engines = []
+
+    def admit(self, model, requested_ctx=None, caller="chat", **kw):
+        self.engines.append(kw.get("engine"))
+        return super().admit(model, requested_ctx, caller, **kw)
+
+
+def test_mv24_the_governor_and_the_engine_are_asked_under_the_engines_name_for_the_encoder(tmp_path, seams):
+    """MV24 -- Ollama shows every loaded model with its tag and resolves a name with no tag to its ``:latest``: an
+    encoder the settings name ``enc`` is admitted and asked as ``enc:latest`` when Ollama serves it, for a pass and
+    for a question alike; ``enc:q8`` and a registry's ``reg.local:5000/enc`` (a port is no tag) are resolved by the
+    same rule; another engine is asked under the name as given. The governor is told the engine, which its own
+    cache of the registry's routes, kept under the settings' name, no longer answers for the engine's name. The
+    store keeps the encoder as the settings name it. The settings' name sent to Ollama's governor, a tag added for
+    another engine, or no engine told -> RED."""
+    for engine, model, asked in ((Ollama(), "enc", "enc:latest"), (Ollama(), "enc:q8", "enc:q8"),
+                                 (Ollama(), "reg.local:5000/enc", "reg.local:5000/enc:latest"),
+                                 (LlamaServer(), "enc", "enc")):
+        root = folder(tmp_path, f"src{len(asked)}{engine.name}", {"gate.py": GATE})
+        store = Store(tmp_path / f"{len(asked)}{engine.name}.myc", sqlite3.connect)
+        try:
+            Indexer(store).index("oo", root)
+            governor = Told()
+            seams(Registry({model: engine}), governor)
+            encoder = Encoder(model, DIM, "query: ", "text: ")
+            counts = Indexer(store).embed(Embedder(encoder), batch=8)
+            Searcher(store).search("probe summary sources", stages=("dense",))
+            assert counts["embedded"] > 0 and counts["missing"] is False, (model, counts)
+            assert {name for name, _c in governor.asked} == {asked}, (model, governor.asked)
+            assert {name for name, _t in engine.calls} == {asked}, (model, engine.calls)
+            assert [c for _n, c in governor.asked][-1] == "chat"
+            assert governor.engines and set(governor.engines) == {engine.name}, (model, governor.engines)
+            assert store.active_encoder()["key"] == encoder.key
+        finally:
+            store.close()
+
+
+def test_mv25_the_real_governor_admits_the_pass_of_an_encoder_named_without_its_tag(corpus, seams, tmp_path,
+                                                                                    monkeypatch):
+    """MV25 -- the real resource governor, its view of the engine set by hand and its store a plain SQLite file:
+    Ollama holds ``enc:latest`` at the context it was loaded with, on a card with room. The pass of the encoder the
+    settings name ``enc`` asks as the background and is admitted under a ticket that loads nothing, every text
+    embedded. Asking under ``enc``: the governor sees no resident and refuses the background a load of unknown cost,
+    for good -> RED."""
+    from opti_oignon import resource_governor as rg
+
+    monkeypatch.setattr(rg, "_safe_connect", lambda path, **kw: sqlite3.connect(
+        str(path), check_same_thread=kw.get("check_same_thread", False)))
+    gov = rg.ResourceGovernor(config_path=str(tmp_path / "no-governor.yaml"), db_path=str(tmp_path / "governor.db"),
+                              warmup=None, registry=None, meminfo_path=str(tmp_path / "no-meminfo"), hardware=None)
+    gov._config = rg.GovernorConfig(total_vram_gb=10.0, safety_margin_gb=1.5, kv_coefficient=0.5)
+    held = rg.LoadedModelView(name="enc:latest", size_vram_bytes=512 * 1024 ** 2, context_length=2048)
+    gov._snapshot = rg.ResourceSnapshot(taken_at=gov._clock(), ttl_s=9999.0, loaded=[held], capacity_gb=10.0,
+                                        vram_in_use_gb=0.5, ram_available_mb=64000.0)
+    engine = Ollama()
+    seams(Registry({"enc": engine}), gov)
+    store = corpus["store"]
+    counts = Indexer(store).embed(Embedder(Encoder("enc", DIM, "query: ", "text: ")), batch=8)
+    assert counts["embedded"] == distinct_texts(store) and counts["missing"] is False and counts["held"] is False, \
+        counts
+    assert engine.tickets and all(t.admitted and t.load_expected is False for t in engine.tickets)
+    assert {t.model for t in engine.tickets} == {"enc:latest"}

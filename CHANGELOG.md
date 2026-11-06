@@ -3838,6 +3838,23 @@ package costs.
   (`remote_bind_refused` audited). Contracts tg1-tg7 in
   `tests/test_revoked_device_never_reaches_the_api_contracts.py`.
 
+- The Mycelium's vectors are asked under the name the engine knows the
+  encoder by. Ollama resolves a model named without a tag to its
+  `:latest` and shows every model it holds with its tag; the Mycelium
+  asked the resource governor, and Ollama, under the name its settings
+  give (`embeddinggemma-2`). The governor, which compares names as
+  written, saw no resident: the encoder's cost was unknown, and the pass
+  of vectors, asked as background work, was refused for good
+  (`background_cost_unknown`, seen on 6 November with the encoder
+  loaded). Now, when Ollama serves the encoder, the governor and the
+  engine are both asked under its `:latest` (the tag read after the last
+  colon that follows the last slash, so a registry's port is no tag), the
+  call made under the admission's own ticket and the governor told which
+  engine serves it; another engine is asked under the name as given, and
+  the store keeps the encoder as the settings name it. The bridge and the
+  reranker still ask under their settings' names, tagged as shipped.
+  MV24-MV25 in `tests/test_mycelium_vector_contracts.py`.
+
 - [SECURITY] In Bulbe mode a session now needs a second factor.
   The login asked a second factor only of an account that had one, so
   in Bulbe an account with none signed in with its password, and the
