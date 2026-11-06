@@ -11,6 +11,30 @@ package costs.
 
 ### Added
 
+- The first layer of the Mycelium, the coming search of a project's code
+  and documents (`opti_oignon/mycelium/`). Nothing reaches it yet: no
+  route, no tool and no stage of the chat's search calls it. A folder, a
+  git repository -- its files read from git's own index file, without
+  running git -- or a set of documents is cut into parts a search can name
+  (Python by its syntax tree, Markdown by heading, YAML by key with the
+  comment above it) and indexed in one SQLite file per corpus, opened
+  through `safe_connect`. The full-text index keeps no text: a part is read
+  again from its source by path and lines, and a citation says fresh,
+  modified or gone by the sha256 of its own lines. What the store keeps of
+  a source is named: a file's first sentence, a heading's path, the names a
+  part defines and the tokens with their positions; freed pages are zeroed,
+  and the index is merged after a pass that removes a file, so its words
+  leave the store's bytes. A pass cuts again only what changed, reads a
+  file as a citation does (never through a link, never a FIFO, within a
+  size bound), and trusts a file's size and time only when the time is
+  older than the pass before. A root or a folder that cannot be listed, or
+  a root that lists nothing where its source held files, never empties the
+  source; one pass at a time writes a store. A walk skips dotfiles and the
+  files of secrets (keys, credentials, Terraform states and variables, key
+  folders), and so do the paths a caller names. A source keeps its
+  sensitivity until another is named, and a search filters each source's
+  sensitivity inside each stage's query, before its limit. A store of a
+  newer schema, or a database of another program, is refused untouched.
 - [SECURITY] A conversation's automatic title may be refined by the local
   model, off as shipped (`refine` in `opti_oignon/config/titles.yaml`; a
   machine turns it on, or names its model, in `local.yaml`, never

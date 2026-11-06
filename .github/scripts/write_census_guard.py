@@ -458,6 +458,17 @@ STORES = {
         reason="the onion's cellar: the evicted spans, verbatim, whose anchors enter the memory block when the "
                "onion is enabled",
     ),
+    "mycelium": _store(
+        "opti_oignon/mycelium/store.py", classes=("Store",),
+        writes=("source", "drop_parts", "episode", "meta", "purge"), quiet=("drop_parts", "episode", "meta", "purge"),
+        reason="the Mycelium's index of a corpus: the tokens, symbols and references of its files' parts, whose "
+               "cited spans a search lays before a model",
+    ),
+    "mycelium_index": _store(
+        "opti_oignon/mycelium/index.py", classes=("Indexer",), writes=("index", "index_documents"),
+        backs=("mycelium",), content=("documents",),
+        reason="the indexer, which writes the Mycelium's store from a corpus's files or documents",
+    ),
     "flesh": _store(
         "opti_oignon/memory/receipts.py", classes=("Flesh",),
         writes=("append", "take_back", "evict_oldest", "evict_span", "evict_until_fits"),

@@ -233,6 +233,8 @@ NOT_STORES: dict[str, tuple[str, tuple[str, ...]]] = {
     "rag": ("the knowledge base's folder: its stores are listed by name",
             ("rag_store.py", "project_context.py", "rag/batch_ingest.py", "rag/config.py", "rag_dashboard.py",
              "user_data_manager.py")),
-    ".db": ("a suffix: the garden's beings' files end in it, and the encryption tool finds every database by it",
-            ("allium/store.py", "db_encryption.py")),
+    ".db": ("a suffix: the garden's beings' files end in it, the encryption tool finds every database by it, and "
+            "the Mycelium's indexer skips the files that end in it", ("allium/store.py", "db_encryption.py",
+                                                                      "mycelium/index.py")),
+    ".sqlite": ("a suffix the Mycelium's indexer skips: a database is never indexed as text", ("mycelium/index.py",)),
 }
