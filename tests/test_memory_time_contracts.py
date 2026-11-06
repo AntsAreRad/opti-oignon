@@ -259,7 +259,7 @@ def test_mt7_a_window_that_cuts_further_leaves_out_the_last_chosen():
     lib = loaded[oj.LIBRARIAN]
     try:
         cfg = oj.config(lib)
-        old = "Alice lives in Berlin, in the flat on the long canal street near the old harbour market."
+        old = "Alice had a flat in Berlin, on the long canal street near the old harbour market."
         new = "Alice lives in Oslo now, in the flat on the long fjord street near the new harbour market."
         filler = [f"Alice met Bob on day {n}." for n in range(1, 13)]
         _state, messages = _held_facts(lib, "c1", [old] + filler + [new], cfg, after=12)

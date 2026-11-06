@@ -2215,6 +2215,31 @@ package costs.
 
 ### Changed
 
+- The anchors of the onion's held receipts are ranked by BM25 over their
+  own words as shown rather than by the share of the question's terms they
+  hold (`memory/peels.py`, `anchor_bm25`): BM25 is asked the question's
+  terms that reach -- never its function words, a two-letter name among
+  them -- and weighs each by how few of the places reached hold it, so an
+  anchor holding a rare term of the question ranks before anchors holding
+  more of its common ones. Each distinct text is one row, folded as the
+  question is, of an SQLite FTS5 table held in memory for one call and
+  closed after it: nothing is written, no question is kept, no setting is
+  added. Only the outermost items of a receipt are rows, so a fact kept
+  alone and within its segment is counted once, and takes its segment's
+  score. Anchors holding the same terms of the question (stemmed: "lives"
+  holds "live") are equals and take the best score among them, so the share
+  and the receipt's age order them: a fact's update worded like the stale
+  fact still ranks before it, and an anchor holding only a common term
+  never takes another's score. A term held by half the places or more gets
+  FTS5's floor for a weight: an anchor holding none but such terms is
+  ranked by how many terms of the question it holds, then by the share and
+  the age, never by its length. What a question reaches, the cap, the order
+  of what is shown, an order kept as one item, a withdrawal and a unit that
+  only asks ranking after those that state are unchanged. Where SQLite
+  cannot build the table, or the ranking fails, the share of the terms
+  ranks, said once by name in the log. One published contract's fixture
+  (MT7) changes one sentence: its stale fact, worded like the question, now
+  rightly ranks before anchors that only name the person.
 - Seven of the ladder's time budgets are raised, each to at least 1.15 times
   the longest time a ladder run measured for it (the new budget, then the
   old one and that longest time): wi1 8.0 s (5.0; 6.83), wi2 7.0 s (5.0;

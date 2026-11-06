@@ -1976,8 +1976,125 @@ def advance(*, flesh, cellar, ledger, tree, gate, ladder, summarize=None, reask=
                   reason="held: no peel answers for the span within the compression floor; its anchors stay")
 
 
+# The anchors a question reaches were ranked by the share of its terms they
+# hold: an anchor holding one rare word of the question ranked below one
+# holding two common ones, and the evidence of a question about a long
+# conversation fell out of the cap more often than not. BM25 weighs each of
+# the question's terms -- the ones that reach (``_terms``), never its
+# function or question words -- by how few of the texts ranked hold it
+# (SQLite's FTS5 ``bm25``, its own k1 and b; no setting), each distinct text
+# one row, its words folded as the question's are, in a table held in memory
+# for one call and closed after it: nothing is written, no question is kept.
+# Texts holding the same terms of the question (stemmed: "lives" holds
+# "live") are equals: they take the best score among them, whatever their
+# lengths, so the share and the receipt's age order them (a fact's update
+# before the stale fact). An anchor is scored by its own words: a text
+# holding only a common term of the question never takes another's score.
+# FTS5 gives a term held by half the rows or more almost no weight (its
+# floor), and its length then decides: a text holding none but such terms
+# is scored by how many terms of the question it holds (stemmed), and the
+# share and the age order those that hold as many.
+ANCHOR_FLOOR_STEP = 1e-9
+ANCHOR_TOKENIZE = "porter unicode61 remove_diacritics 2"
+_FTS5 = []
+_FTS5_LOCK = __import__("threading").Lock()
+
+
+def anchor_bm25(query, texts, contexts=None):
+    """BM25 of each text for ``query``'s terms among ``texts`` alone (each distinct text counted once, texts holding
+    the same terms taking the best score among them, a text holding none but floored terms scored by how many it
+    holds): higher ranks first, ``-inf`` where no term matches.
+
+    ``contexts``, when given, are scored in place of the texts (a bench's
+    variant); the onion gives none: an anchor is scored by its own words.
+    """
+    import sqlite3
+
+    from .probes import folded_words
+
+    if contexts is not None:
+        texts = contexts
+    scores = [-math.inf] * len(texts)
+    words = sorted(_terms(query))
+    if not words or not texts:
+        return scores
+    rows = list(dict.fromkeys(texts))
+    phrase = {w: '"' + w.replace('"', '""') + '"' for w in words}
+    found, held = {}, {}
+    db = sqlite3.connect(":memory:")
+    try:
+        db.execute(f"CREATE VIRTUAL TABLE anchor USING fts5(body, tokenize = '{ANCHOR_TOKENIZE}')")
+        db.executemany("INSERT INTO anchor(rowid, body) VALUES (?, ?)",
+                       [(n + 1, " ".join(folded_words(t))) for n, t in enumerate(rows)])
+        for rowid, rank in db.execute("SELECT rowid, rank FROM anchor WHERE anchor MATCH ?",
+                                      (" OR ".join(phrase.values()),)):
+            found[rowid] = -rank
+        for word in words:
+            for (rowid,) in db.execute("SELECT rowid FROM anchor WHERE anchor MATCH ?", (phrase[word],)):
+                held.setdefault(rowid, set()).add(word)
+    finally:
+        db.close()
+    # A term held by half the rows or more has FTS5's floor for a weight: a row holding none but such terms is
+    # scored by how many terms it holds, below any row holding a term that weighs.
+    weighs = {w for w in words if 2 * sum(1 for terms in held.values() if w in terms) < len(rows)}
+    for rowid in found:
+        if not held.get(rowid, set()) & weighs:
+            found[rowid] = len(held.get(rowid, ())) * ANCHOR_FLOOR_STEP
+    # Texts holding the same terms of the question are equals: the best score among them.
+    best = {}
+    for rowid, score in found.items():
+        key = frozenset(held.get(rowid, ()))
+        best[key] = max(best.get(key, -math.inf), score)
+    by_text = {rows[rowid - 1]: best[frozenset(held.get(rowid, ()))] for rowid in found}
+    return [by_text.get(text, -math.inf) for text in texts]
+
+
+def anchor_ranker():
+    """``anchor_bm25``, or None where this SQLite cannot build its table (no FTS5, or not with the tokenizer it
+    asks): the share of the terms ranks. Tried once, said once in the log."""
+    with _FTS5_LOCK:
+        if not _FTS5:
+            import sqlite3
+
+            try:
+                db = sqlite3.connect(":memory:")
+                try:
+                    db.execute(f"CREATE VIRTUAL TABLE probe USING fts5(body, tokenize = '{ANCHOR_TOKENIZE}')")
+                finally:
+                    db.close()
+                _FTS5.append(True)
+            except sqlite3.Error as exc:
+                import logging
+
+                logging.getLogger(__name__).warning("anchor rank: the share of the terms (this SQLite has no FTS5 "
+                                                    "table with the tokenizer %r: %s)", ANCHOR_TOKENIZE, exc)
+                _FTS5.append(False)
+    return anchor_bm25 if _FTS5[0] else None
+
+
+_RANK_FAILED = set()
+
+
+def _ranked(rank, query, texts, contexts):
+    """``rank``'s scores, one finite number or -inf per text; None -- the share of the terms ranks -- when it
+    raises or answers another count, said once per kind of failure: a ranker never fails a turn."""
+    try:
+        given = [float(score) for score in rank(query, texts, contexts)]
+        if len(given) != len(texts):
+            raise ValueError(f"{len(given)} scores for {len(texts)} anchors")
+    except Exception as exc:  # noqa: BLE001 - a ranker that fails is none: the share of the terms ranks
+        if type(exc).__name__ not in _RANK_FAILED:
+            _RANK_FAILED.add(type(exc).__name__)
+            import logging
+
+            logging.getLogger(__name__).warning("anchor rank: the share of the terms (the ranker failed: %s)",
+                                                type(exc).__name__)
+        return None
+    return [-math.inf if math.isnan(score) else score for score in given]
+
+
 def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unplaced=None, *, lineage=None,
-                   withdrawn=(), reached=None, gate=None):
+                   withdrawn=(), reached=None, gate=None, rank=None):
     """The anchors of open held receipts for ``query``, their words read from the Cellar, whole, within ``cap``.
 
     An anchor ranks as a peel does, by the share of the query's terms its
@@ -2010,6 +2127,15 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
     reached that ``cap`` left out, ``unplaced`` of each it reached whose
     place reads as neither any more, and ``reached`` of each it reached a
     part of which a withdrawal reached, not shown.
+    ``rank``, when given, scores the items reached by their own words as
+    shown (a fenced block by its marker: an anchor reached only by words of
+    its code scores -inf) in place of the share of the query's terms:
+    ``rank(query, texts, None)`` -> one number per text, -inf for none. Only
+    the outermost items of a receipt are scored, so a fact kept alone and
+    within its segment is one place of its words; an anchor within an item
+    takes the item's score, so an order is still shown whole before any
+    sentence of it, and items that score alike are ordered as the share
+    orders them, then by age.
     """
     from .composer import defanged
     from .probes import _is_question, _retraction, generate_probes, mask_code
@@ -2085,9 +2211,39 @@ def select_anchors(ledger, cellar, query, cap, estimate=None, dropped=None, unpl
                 asks = not _reached((turn_id, start, stop), reading[0])
             scored.append((asks, -hit, age, place, words, provenance, tuple(label), events, (turn_id, start, stop),
                            tuple(parts), (index.get(receipt.key, -1), place)))
+    # An anchor within an item of its receipt (a fact kept alone and within its segment) is no place of its words
+    # of its own: only the outermost are ranked, so a term is counted once; an anchor within takes its item's score.
+    by_age, within = {}, {}
+    for n, entry in enumerate(scored):
+        by_age.setdefault(entry[2], []).append(n)
+    for n, entry in enumerate(scored):
+        for m in by_age[entry[2]]:
+            on, start, stop = scored[m][8]
+            if m != n and (on, start, stop) != entry[8] and any(at == on and begin <= start and stop <= end
+                                                               for at, begin, end in entry[9]):
+                within.setdefault(m, []).append(n)
+    outer = [n for n in range(len(scored)) if n not in within]
+    given = None
+    if rank is not None and outer:
+        found = _ranked(rank, query, [scored[n][4] for n in outer], None)
+        if found is not None:
+            given = [-math.inf] * len(scored)
+            for n, score in zip(outer, found):
+                given[n] = score
+            for m, items in within.items():
+                given[m] = max(given[n] for n in items)
     # An item holds the words of the anchors within it, so it ranks before them: its hit is no lower, its place
     # earlier, and it never only asks; an anchor within a part shown is shown there.
-    scored.sort(key=lambda entry: entry[:4])
+    if given is None:
+        scored.sort(key=lambda entry: entry[:4])
+    else:
+        # An anchor within an item holds its item's score (above), so the item -- a whole segment, an order shown
+        # with its parts -- still ranks first: no ranker scores the sentence apart from what holds it.
+        raised = list(given)
+        # Then the share of the question's terms the anchor's own words hold: anchors the ranker scores alike (equals,
+        # an anchor and its item) are ordered by it, then by age.
+        keyed = sorted(range(len(scored)), key=lambda n: (scored[n][0], -raised[n]) + scored[n][1:4])
+        scored = [(scored[n][0], -raised[n]) + scored[n][2:] for n in keyed]
     chosen, used, laid = [], 0, []
     for _asks, neg, age, _place, words, provenance, label, events, (turn_id, start, stop), parts, when in scored:
         if any(at == age and on == turn_id and begin <= start and stop <= end for at, on, begin, end in laid):

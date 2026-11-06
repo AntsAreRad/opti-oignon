@@ -2371,6 +2371,7 @@ def _compose_block(state, question, budget, withdrawn=(), estimate=None, gate=No
     from .composer import compose, load_budget
     from .peels import (
         PeelTree,
+        anchor_ranker,
         in_time,
         join_labels,
         load_ladder,
@@ -2386,7 +2387,7 @@ def _compose_block(state, question, budget, withdrawn=(), estimate=None, gate=No
     dropped, unplaced, reached = [], [], []
     anchors = select_anchors(state.ledger, state.cellar, question or "", min(load_ladder().anchors, budget.peels),
                              estimate=estimate, dropped=dropped, unplaced=unplaced, lineage=state.lineage,
-                             withdrawn=withdrawn, reached=reached, gate=gate)
+                             withdrawn=withdrawn, reached=reached, gate=gate, rank=anchor_ranker())
     # Events of this composition: the anchors its query reached that the cap
     # left out, those whose place no longer reads as a typed unit or a whole
     # typed segment, and those whose turn a withdrawal reached.
@@ -2903,6 +2904,7 @@ def _read(state, asked):
     from .composer import _CORE_HEADER, _defang, _part, fit_kind, idle_room, memory_room
     from .peels import (
         PeelTree,
+        anchor_ranker,
         join_labels,
         peel_time,
         render_peel,
@@ -2966,7 +2968,8 @@ def _read(state, asked):
         _own, cap = memory_room(budget, shares, asked.brought, region, counted,
                                 idle_room(budget, asked.system, pinned, asked.turn, counted, asked.wrap))
         anchors = (select_anchors(state.ledger, state.cellar, asked.question, min(asked.ladder.anchors, cap),
-                                  estimate=counted, lineage=lineage, withdrawn=asked.withdrawn, gate=asked.gate)
+                                  estimate=counted, lineage=lineage, withdrawn=asked.withdrawn, gate=asked.gate,
+                                  rank=anchor_ranker())
                    if cap > 0 else [])
         room = cap - sum(counted(anchor.text) for anchor in anchors)
 
