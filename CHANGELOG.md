@@ -11,6 +11,36 @@ package costs.
 
 ### Added
 
+- The Mycelium's second layer: vectors (`opti_oignon/mycelium/vectors.py`,
+  the `vectors` section of `opti_oignon/config/mycelium.yaml`). Nothing
+  calls it yet. A vector pass asks the encoder the settings name
+  (EmbeddingGemma 2 as shipped, with the prefixes its model card asks for)
+  only through the inference registry, each batch admitted by the resource
+  governor as background work and sent under that admission; the question
+  is admitted as interactive work. A text is embedded once, however many
+  parts share it, and a pass with nothing to embed reads no file. Only a
+  text the engine refuses (HTTP 400, 413 or 422) is cut out of its batch
+  and counted; a model the engine does not serve, an engine that fails or
+  does not answer, an answer that cannot be read, or a refusal of the
+  governor that no wait lifts stops the pass at that request, by name, and
+  a busy engine holds it. A vector that is not finite, points nowhere or
+  has another dimension is never kept, and a pass the governor holds keeps
+  what it wrote. The store's lock is held to plan a pass and to write each
+  batch, never while the engine answers, and a text that left the store
+  meanwhile gets no vector. Two encoders never mix: the one a search reads
+  changes only once another covers every part, and then the old one's
+  vectors go; a store with no encoder read takes the first that covers some
+  part and lacks none but the texts the engine refused in that pass. The
+  search gains a third stage, exact cosine over the active encoder's
+  vectors, filtered by each source's sensitivity in its query; an encoder
+  that is missing, held, failing or without a vector the caller may read
+  leaves the search to its other stages and says why. The vectors' settings
+  are refused by name when malformed. A store of the first layer's schema
+  moves to the new one in one transaction, once even with two openers, and
+  is cut again at its next pass. The store now says that a part's vector is
+  kept, from which a model built for it can guess much of the text it was
+  embedded from; SQLCipher encrypts it with the rest. A search gives k
+  citations at most (it gave up to four times k).
 - The first layer of the Mycelium, the coming search of a project's code
   and documents (`opti_oignon/mycelium/`). Nothing reaches it yet: no
   route, no tool and no stage of the chat's search calls it. A folder, a

@@ -1,14 +1,19 @@
 """Finding in the Mycelium: a question -> cited spans, each with why it is there.
 
-Two lists, fused by their reciprocal ranks (K = 60): the identifiers of the question looked up in the symbol table
-(exact, free), and the full-text index (FTS5, bm25 over the path, the text, the words inside its identifiers and
+Three lists, fused by their reciprocal ranks (K = 60): the identifiers of the question looked up in the symbol
+table (exact, free); the full-text index (FTS5, bm25 over the path, the text, the words inside its identifiers and
 what the code says to a person -- raised, logged, printed), a part of the tests keeping a share of its bm25 only (a
-test's name is a sentence that holds the words of any question). ``lexical_query`` is what both lists are asked (a
-question put into English, say). Every result names its part, its lines and the sha256 of its text: ``verify``
-says whether the source still says that."""
+test's name is a sentence that holds the words of any question); and the vectors of the active encoder (exact
+cosine over the matrix, held while the store's generation holds). ``lexical_query`` is what the first two are
+asked (a question put into English, say); the vectors are asked the question as it was typed. A stage that cannot
+answer -- no encoder active, the engine missing, the governor holding the question -- is silent, and ``silent``
+says why: the search answers by the others. Every stage reads only the sources ``allow`` names. Every result names
+its part, its lines and the sha256 of its text: ``verify`` says whether the source still says that."""
 import hashlib
+import itertools
 
 from .lexis import identifiers, match_expression, question_terms
+from .vectors import Embedder, Encoder, VectorError, from_blobs
 
 # New-module safety rule: any change this module drives through the system
 # must checkpoint first. Hardcoded, never overridable.
@@ -26,10 +31,13 @@ class Searcher:
     # The share of its bm25 a part of the tests keeps in the full text's ranking (1.0: no discount).
     TESTS_KEEP = 0.7
 
-    def __init__(self, store, allow=("public", "private"), lexical_query=None):
+    def __init__(self, store, allow=("public", "private"), lexical_query=None, timeout_s=120.0):
         self.store = store
         self.allow = tuple(allow)
         self.lexical_query = lexical_query
+        self.timeout_s = timeout_s
+        self.silent = {}
+        self._held = (None, None, None)
 
     def _filter(self):
         """The sensitivity filter as SQL over the part's source (``s``), and its values: applied in each stage's own
@@ -68,21 +76,62 @@ class Searcher:
                 found.extend(r[0] for r in rows if r[0] not in found)
         return [(i, 1.0) for i in found][:n]
 
-    def search(self, query, k=10, stages=("symbols", "lexical")):
+    def _matrix(self):
+        """(encoder's {key, card}, part ids, matrix) of the active encoder, read again when the store changed or
+        the sensitivities this searcher may read did."""
+        held = (self.store.generation(), self.allow)     # what is read, and who may read it
+        if self._held[0] != held:
+            active = self.store.active_encoder()
+            ids, matrix = [], None
+            if active is not None:
+                allowed, values = self._filter()
+                rows = self.store.db.execute(
+                    "SELECT p.id, v.data FROM part p JOIN vector v ON v.embed_sha = p.embed_sha AND v.encoder = ? "
+                    f"JOIN file f ON f.id = p.file JOIN source s ON s.id = f.source WHERE {allowed} ORDER BY p.id",
+                    (active["key"], *values)).fetchall()
+                ids, matrix = [r[0] for r in rows], from_blobs([r[1] for r in rows], active["card"]["dim"])
+            self._held = (held, active, (ids, matrix))
+        return self._held[1], *self._held[2]
+
+    def dense(self, query, n=DEPTH):
+        import numpy as np
+
+        active, ids, matrix = self._matrix()
+        if active is None:
+            self.silent["dense"] = "no encoder is active: no vector pass has completed"
+            return []
+        if not ids:
+            self.silent["dense"] = f"the active encoder {active['key']} has no vector this search may read"
+            return []
+        try:
+            vector = Embedder(Encoder(**active["card"]), self.timeout_s).query(query)
+        except VectorError as exc:
+            self.silent["dense"] = str(exc)
+            return []
+        # The question's vector comes as its unit vector (normalized in double precision): a cast never overflows.
+        scores = matrix @ np.asarray(vector, dtype=np.float32)
+        order = np.argsort(-scores, kind="stable")[:n]
+        return [(ids[j], float(scores[j])) for j in order]
+
+    def search(self, query, k=10, stages=("symbols", "lexical", "dense")):
+        self.silent = {}
         worded = self.lexical_query(query) if self.lexical_query else query
         lists = {}
         if "symbols" in stages:
             lists["symbols"] = self.symbols(worded)
         if "lexical" in stages:
             lists["lexical"] = self.lexical(worded)
+        if "dense" in stages:
+            lists["dense"] = self.dense(query)
         fused, why = {}, {}
         for stage, ranked in lists.items():
             for place, (part_id, _score) in enumerate(ranked, 1):
                 fused[part_id] = fused.get(part_id, 0.0) + 1.0 / (K + place)
                 why.setdefault(part_id, []).append(f"{stage}#{place}")
         order = sorted(fused, key=lambda i: (-fused[i], i))
+        # A part gone since the index was read gives no citation: the next ones take its place, k at most.
         cited = (self.cite(part_id, fused[part_id], why[part_id]) for part_id in order[:k * 4])
-        return [c for c in cited if c is not None]
+        return list(itertools.islice((c for c in cited if c is not None), max(0, k)))
 
     def cite(self, part_id, score, why):
         """The citation of a part, or None when a pass removed it since a stage found it."""

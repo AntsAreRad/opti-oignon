@@ -460,13 +460,16 @@ STORES = {
     ),
     "mycelium": _store(
         "opti_oignon/mycelium/store.py", classes=("Store",),
-        writes=("source", "drop_parts", "episode", "meta", "purge"), quiet=("drop_parts", "episode", "meta", "purge"),
+        writes=("source", "drop_parts", "episode", "meta", "purge", "activate", "orphan_vectors", "vectors_changed"),
+        quiet=("drop_parts", "episode", "meta", "purge", "activate", "orphan_vectors", "vectors_changed"),
+        aside={"generation": "it reads the store's counters through meta and writes nothing",
+               "active_encoder": "it reads the active encoder through meta and writes nothing"},
         reason="the Mycelium's index of a corpus: the tokens, symbols and references of its files' parts, whose "
                "cited spans a search lays before a model",
     ),
     "mycelium_index": _store(
-        "opti_oignon/mycelium/index.py", classes=("Indexer",), writes=("index", "index_documents"),
-        backs=("mycelium",), content=("documents",),
+        "opti_oignon/mycelium/index.py", classes=("Indexer",), writes=("index", "index_documents", "embed"),
+        quiet=("embed",), backs=("mycelium",), content=("documents",),
         reason="the indexer, which writes the Mycelium's store from a corpus's files or documents",
     ),
     "flesh": _store(

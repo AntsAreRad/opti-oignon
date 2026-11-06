@@ -3,22 +3,26 @@ platform's key; refused in plaintext in Bulbe), or through the ``connect`` a cal
 the store's own making.
 
 Tables: ``source`` (a corpus: its name, root, kind, sensitivity), ``file`` (path, size, mtime_ns, sha256 of the
-content, language, the first sentence it opens on), ``part`` (kind, symbol, lines, sha256 of its text), ``fts``
-(FTS5 without content: the index keeps tokens, never the text, which stays in the source and is read again by path
-and lines), ``symbol`` (what a part defines), ``ref`` (what a part names: the links between parts are ``ref`` joined
+content, language, the first sentence it opens on), ``part`` (kind, symbol, lines, sha256 of its text and of the
+text it is embedded as), ``vector`` (by the text embedded and the encoder: parts that embed the same text share one;
+float16 unit vectors), ``fts`` (FTS5 without content: the index keeps tokens, never the text, which stays in the
+source and is read again by path and lines), ``symbol`` (what a part defines), ``ref`` (what a part names: the links between parts are ``ref`` joined
 to ``symbol``, so a removed part leaves no link behind), ``episode`` (each indexing pass, and what it did).
 
 What the store keeps of a source, then, is not its text but: each file's first sentence (its module docstring's, or
 its heading's), a Markdown section's heading path, the names a part defines and names, and the index's tokens with
-their positions -- from which a part's stemmed words could be read again in order. The index keeps no text, but a
+their positions -- from which a part's stemmed words could be read again in order --, and each part's vector, from
+which a model built for it can guess much of the text it was embedded from. The index keeps no text, but a
 deleted row is only marked until its segment is merged, and freed pages are zeroed (``PRAGMA secure_delete``): after
 a pass that removes a file the index is merged by a bounded number of pages (``Store.purge``), so the removed words
 leave the store's bytes as it merges -- with that pass, in a small store -- and a changed file's old words at the
 index's next merge. ``Store.purge(None)`` merges it whole.
 
 A store written by a newer schema is refused by name, and so is a database of another kind (tables, no store's meta
-table: never stamped); a store cut by another version of the cutter is cut again at the next pass. An episode holds
-counts, the meta table its own keys: neither takes a source's words. One pass at a time writes (``lock``)."""
+table: never stamped); a store cut by another version of the cutter is cut again at the next pass, and so is a store
+of schema 1 (its parts had no embedded text yet). The active encoder's card is kept in ``meta``: the dense stage
+reads its vectors, and only its, until another encoder covers every part. An episode holds counts, the meta table
+its own keys: neither takes a source's words. One pass at a time writes (``lock``)."""
 import json
 import re
 import threading
@@ -28,7 +32,7 @@ import time
 # must checkpoint first. Hardcoded, never overridable.
 checkpoint_before_apply = True
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 TOKENIZE = "porter unicode61 remove_diacritics 2 tokenchars '_'"
 SENSITIVITIES = ("public", "private", "secret")
 
@@ -44,8 +48,13 @@ CREATE TABLE IF NOT EXISTS file(
 CREATE INDEX IF NOT EXISTS file_sha ON file(sha256);
 CREATE TABLE IF NOT EXISTS part(
   id INTEGER PRIMARY KEY, file INTEGER NOT NULL REFERENCES file(id) ON DELETE CASCADE, kind TEXT NOT NULL,
-  symbol TEXT NOT NULL, first INTEGER NOT NULL, last INTEGER NOT NULL, sha256 TEXT NOT NULL);
+  symbol TEXT NOT NULL, first INTEGER NOT NULL, last INTEGER NOT NULL, sha256 TEXT NOT NULL,
+  embed_sha TEXT NOT NULL DEFAULT '');
 CREATE INDEX IF NOT EXISTS part_file ON part(file);
+CREATE INDEX IF NOT EXISTS part_embed ON part(embed_sha);
+CREATE TABLE IF NOT EXISTS vector(
+  embed_sha TEXT NOT NULL, encoder TEXT NOT NULL, dim INTEGER NOT NULL, data BLOB NOT NULL,
+  PRIMARY KEY(embed_sha, encoder));
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(path, body, words, said, content='', contentless_delete=1,
   tokenize="{TOKENIZE}");
 CREATE TABLE IF NOT EXISTS symbol(
@@ -74,10 +83,18 @@ def _safe_connect(path):
 
 
 # The tables a store makes, the full-text index's own included: a database holding any other is not a store.
-OWN_TABLES = {"meta", "source", "file", "part", "symbol", "ref", "episode", "fts", "fts_config", "fts_data",
-              "fts_docsize", "fts_idx"}
-# The meta table's keys: the schema, and per source the cutter that cut it and when its last pass began.
-META_KEY = re.compile(r"(schema|cutter:\d+|pass:\d+)\Z")
+OWN_TABLES = {"meta", "source", "file", "part", "symbol", "ref", "episode", "vector", "fts", "fts_config",
+              "fts_data", "fts_docsize", "fts_idx"}
+# The meta table's keys: the schema, the vectors' count of changes and the active encoder's card, and per source the
+# cutter that cut it, the header its texts are embedded with and when its last pass began.
+META_KEY = re.compile(r"(schema|vectors|encoder|cutter:\d+|header:\d+|pass:\d+)\Z")
+# The longest value the meta table keeps: the active encoder's card, as stored (``encoder_value``), is the longest.
+MAX_VALUE = 4096
+
+
+def encoder_value(key, card):
+    """The active encoder as the meta table keeps it."""
+    return json.dumps({"key": key, "card": card}, sort_keys=True)
 
 
 class Store:
@@ -90,6 +107,16 @@ class Store:
         held = self._version()
         if held is not None and held > SCHEMA_VERSION:
             raise StoreError(f"the store is at schema {held}, this code reads {SCHEMA_VERSION} and before")
+        if held == 1:
+            # Schema 1 had no embedded text: the column comes, and every source is cut again at its next pass; in
+            # one transaction with the new stamp, so a crash leaves schema 1 whole, and the schema read again inside
+            # it, so a store another opener moved meanwhile is not moved twice.
+            self.db.execute("BEGIN IMMEDIATE")
+            if self._version() == 1:
+                self.db.execute("ALTER TABLE part ADD COLUMN embed_sha TEXT NOT NULL DEFAULT ''")
+                self.db.execute("DELETE FROM meta WHERE key LIKE 'cutter:%'")
+                self.db.execute("UPDATE meta SET value = '2' WHERE key = 'schema'")
+            self.db.commit()
         tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if held is None and tables - OWN_TABLES:
             raise StoreError(f"{self.path} holds tables a store does not make ({', '.join(sorted(tables - OWN_TABLES))}"
@@ -112,7 +139,7 @@ class Store:
         value kept."""
         if not META_KEY.match(str(key)):
             raise StoreError(f"{key!r} is not a key the store keeps")
-        if value is not None and len(str(value)) > 64:
+        if value is not None and len(str(value)) > MAX_VALUE:
             raise StoreError(f"the value under {key!r} is longer than a store's setting")
         if value is not None:
             self.db.execute("INSERT OR REPLACE INTO meta(key, value) VALUES (?, ?)", (key, str(value)))
@@ -172,15 +199,46 @@ class Store:
         return [{"id": r[0], "at": r[1], "action": r[2], "source": r[3], "detail": json.loads(r[4])} for r in rows]
 
     def drop_parts(self, file_id):
-        """Every part of a file, its tokens, symbols and references."""
+        """Every part of a file, its tokens, symbols and references (its vectors stay while another part embeds the
+        same text: ``orphan_vectors``)."""
         ids = [r[0] for r in self.db.execute("SELECT id FROM part WHERE file = ?", (file_id,))]
         self.db.executemany("DELETE FROM fts WHERE rowid = ?", [(i,) for i in ids])
         self.db.execute("DELETE FROM part WHERE file = ?", (file_id,))
+
+    def orphan_vectors(self):
+        """Vectors no part embeds any more: dropped."""
+        dropped = self.db.execute("DELETE FROM vector WHERE embed_sha NOT IN (SELECT embed_sha FROM part)").rowcount
+        if dropped:
+            self.vectors_changed()
+        return dropped
+
+    def vectors_changed(self):
+        """A vector written or dropped: readers that hold a matrix read it again."""
+        self.meta("vectors", int(self.meta("vectors") or 0) + 1)
+
+    def generation(self):
+        """A value that changes whenever a part, a vector, a source's sensitivity or the active encoder changes:
+        each source's own generation (a sum could be met again by two sources moving), the vectors' count of
+        changes, the encoder's card."""
+        sources = tuple(self.db.execute("SELECT id, generation, sensitivity FROM source ORDER BY id"))
+        return sources, self.meta("vectors"), self.meta("encoder")
+
+    def active_encoder(self):
+        """{key, card} of the encoder whose vectors the dense stage reads, or None."""
+        held = self.meta("encoder")
+        return json.loads(held) if held else None
+
+    def activate(self, key, card):
+        """The encoder kept under ``key`` becomes the one read; every other encoder's vectors go."""
+        self.meta("encoder", encoder_value(key, card))
+        self.db.execute("DELETE FROM vector WHERE encoder != ?", (key,))
+        self.vectors_changed()
 
     def stats(self):
         def one(query):
             return self.db.execute(query).fetchone()[0]
 
         return {"sources": one("SELECT COUNT(*) FROM source"), "files": one("SELECT COUNT(*) FROM file"),
-                "parts": one("SELECT COUNT(*) FROM part"), "symbols": one("SELECT COUNT(*) FROM symbol"),
+                "parts": one("SELECT COUNT(*) FROM part"), "vectors": one("SELECT COUNT(*) FROM vector"),
+                "symbols": one("SELECT COUNT(*) FROM symbol"),
                 "refs": one("SELECT COUNT(*) FROM ref"), "episodes": one("SELECT COUNT(*) FROM episode")}

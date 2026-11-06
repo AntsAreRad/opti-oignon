@@ -1,0 +1,32 @@
+# The Mycelium: a local index of code and documents, searched by symbol, by
+# full text and by vector.
+#
+# vectors.encoder names the model whose vectors the dense stage reads. It is
+# asked only through the inference registry (embed_many), and only once the
+# resource governor admits the pass as background work. Its card below gives
+# the prefixes its model card asks for, on the question and on the text, and
+# the dimension of its vectors: a vector of another dimension, or one that is
+# not finite, is refused. An encoder the engine does not serve leaves the
+# search to its other stages. Naming another encoder keeps the old one's
+# vectors in use until every part has one under the new. A store with no
+# encoder in use takes the first that covers some part and lacks none but
+# the texts the engine refused (counted, and left out of the dense stage).
+vectors:
+  enabled: true
+  encoder: embeddinggemma-2
+  # What a part is embedded with above its lines: "full" (its path, its kind
+  # and symbol, a Python module's first sentence), "path", or "none".
+  header: full
+  # Texts per request, the shortest first.
+  batch: 32
+  timeout_s: 120
+  encoders:
+    embeddinggemma-2:
+      dim: 768
+      query_prefix: "task: code retrieval | query: "
+      text_prefix: "title: none | text: "
+    qwen3-embedding:0.6b:
+      dim: 1024
+      query_prefix: "Instruct: Given a question about a software repository, retrieve the code or
+        documentation that answers it\nQuery: "
+      text_prefix: ""

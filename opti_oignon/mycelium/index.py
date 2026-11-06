@@ -9,17 +9,29 @@ with their tokens, definitions and references. A store cut by another version of
 The pass is one episode, written with what it did and how long it took.
 
 A source that is not a folder -- the onion's Cellar, notes, an archive -- is indexed the same way from
-``{doc_id: text}`` (``index_documents``), its citations checked through the reader it leaves behind."""
+``{doc_id: text}`` (``index_documents``), its citations checked through the reader it leaves behind.
+
+Vectors are a pass of their own (``embed``), after the index: the parts whose embedded text has no vector under
+the encoder, read again from their source (a part whose lines changed since is left to the next index pass),
+embedded the shortest first, each batch written as it comes -- unless its text left the store while the engine
+answered. The store's lock is held to plan the pass and to write each batch, never while the engine answers. A
+pass held by the governor, or one whose encoder is missing or fails, keeps what it wrote and says so in its
+episode (a flag; why, in the log and ``vector_status``); the next one takes up the rest. While another encoder is
+read, the encoder becomes the one the search reads once a pass leaves no part without a vector under it; then the
+other encoder's vectors go. On a store with no encoder read, it becomes the one read once it covers some part and
+no part lacks a vector but the texts the engine refused in that pass (counted)."""
 import hashlib
 import logging
 import os
 import stat
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from .chunk import CHUNKER_VERSION, cut, language, module_doc
 from .lexis import subwords
 from .tracked import tracked_files
+from .vectors import EncoderMissing, Held, embedded_text, text_sha, to_blob
 
 # New-module safety rule: any change this module drives through the system
 # must checkpoint first. Hardcoded, never overridable.
@@ -201,8 +213,10 @@ def _reader(mapping, whole):
 
 
 class Indexer:
-    def __init__(self, store):
+    def __init__(self, store, header="full"):
         self.store = store
+        self.header = header
+        self.last_stop = None   # why the last vector pass stopped (held, missing), said in the log too
         self.readers = {}
         self._documents = {}    # name -> (the documents held, as given; whether they are the whole source)
 
@@ -239,7 +253,8 @@ class Indexer:
         if held and not listed:
             raise RootUnreadable(f"{root} lists nothing where its source holds {len(held)} files (a drive unmounted, "
                                  f"its mount point left): refused; forget the source to empty it")
-        recut = bool(held) and store.meta(f"cutter:{source}") != str(CHUNKER_VERSION)
+        recut = bool(held) and (store.meta(f"cutter:{source}") != str(CHUNKER_VERSION)
+                                or store.meta(f"header:{source}") != self.header)
         seen, fresh = set(), []
         unlooked = 0    # files that could not be looked at: kept as they were held
         for rel in listed:
@@ -326,10 +341,12 @@ class Indexer:
             store.drop_parts(row[0])
             db.execute("DELETE FROM file WHERE id = ?", (row[0],))
             counts["removed"] += 1
+        counts["vectors_dropped"] = store.orphan_vectors()
         db.execute("UPDATE source SET generation = ? WHERE id = ?", (generation, source))
         if not blind and not unlooked:
             # Only a pass that looked at every file says the source is cut by this cutter, and when it began.
             store.meta(f"cutter:{source}", CHUNKER_VERSION)
+            store.meta(f"header:{source}", self.header)
             store.meta(f"pass:{source}", began_ns)
         counts["unreadable"] += unlooked
         counts["seconds"] = round(time.perf_counter() - started, 2)
@@ -373,7 +390,8 @@ class Indexer:
         held = {r[0]: r[1:] for r in db.execute("SELECT path, id, sha256 FROM file WHERE source = ?", (source,))}
         generation = db.execute("SELECT generation FROM source WHERE id = ?", (source,)).fetchone()[0] + 1
         counts = {"added": 0, "changed": 0, "removed": 0, "unchanged": 0, "parts": 0, "recut": 0, "skipped": 0}
-        recut = bool(held) and store.meta(f"cutter:{source}") != str(CHUNKER_VERSION)
+        recut = bool(held) and (store.meta(f"cutter:{source}") != str(CHUNKER_VERSION)
+                                or store.meta(f"header:{source}") != self.header)
         given = {}
         for doc_id, text in dict(documents).items():
             try:
@@ -419,10 +437,12 @@ class Indexer:
                     store.drop_parts(row[0])
                     db.execute("DELETE FROM file WHERE id = ?", (row[0],))
                     counts["removed"] += 1
+        counts["vectors_dropped"] = store.orphan_vectors()
         db.execute("UPDATE source SET generation = ? WHERE id = ?", (generation, source))
         if complete or not held:
             # A complete pass cut every document by this cutter; so did a first one, whatever it was given.
             store.meta(f"cutter:{source}", CHUNKER_VERSION)
+            store.meta(f"header:{source}", self.header)
         counts["seconds"] = round(time.perf_counter() - started, 2)
         store.episode("index", source, counts)
         db.commit()
@@ -464,14 +484,17 @@ class Indexer:
 
     def _write_parts(self, file_id, rel, lines):
         db = self.store.db
-        db.execute("UPDATE file SET module_doc = ? WHERE id = ?", (module_doc(rel, lines), file_id))
+        doc = module_doc(rel, lines)
+        db.execute("UPDATE file SET module_doc = ? WHERE id = ?", (doc, file_id))
         words_of_path = path_words(rel)
         n = 0
         for part in cut(rel, lines):
             body = "\n".join(lines[part.first - 1:part.last])
             sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
-            part_id = db.execute("INSERT INTO part(file, kind, symbol, first, last, sha256) VALUES (?, ?, ?, ?, ?, ?)",
-                                 (file_id, part.kind, part.symbol, part.first, part.last, sha)).lastrowid
+            embed_sha = text_sha(embedded_text(self.header, rel, part.kind, part.symbol, doc, body))
+            part_id = db.execute("INSERT INTO part(file, kind, symbol, first, last, sha256, embed_sha) "
+                                 "VALUES (?, ?, ?, ?, ?, ?, ?)", (file_id, part.kind, part.symbol, part.first,
+                                                                  part.last, sha, embed_sha)).lastrowid
             db.execute("INSERT INTO fts(rowid, path, body, words, said) VALUES (?, ?, ?, ?, ?)",
                        (part_id, words_of_path, body, subwords(body + " " + part.symbol), "\n".join(part.said)))
             db.executemany("INSERT INTO symbol(part, name, qualname, kind) VALUES (?, ?, ?, ?)",
@@ -480,3 +503,124 @@ class Indexer:
                            [(part_id, *r) for r in part.refs])
             n += 1
         return n
+
+    def _part_texts(self, key):
+        """(embed_sha, text) for each embedded text that has no vector under ``key``, read again from its source
+        (only those files are read); a text whose lines changed since its pass is left out (the next index pass
+        cuts its file again)."""
+        db = self.store.db
+        rows = db.execute(
+            "SELECT p.embed_sha, f.path, p.kind, p.symbol, p.first, p.last, f.module_doc, s.root, s.kind "
+            "FROM part p JOIN file f ON f.id = p.file JOIN source s ON s.id = f.source WHERE p.embed_sha != '' "
+            "AND p.embed_sha NOT IN (SELECT embed_sha FROM vector WHERE encoder = ?) ORDER BY f.id, p.first",
+            (key,)).fetchall()
+        lines_of = {}
+        for embed_sha, rel, kind, symbol, first, last, doc, root, source_kind in rows:
+            if (root, rel) not in lines_of:
+                lines_of = {(root, rel): self._source_lines(root, source_kind, rel)}
+            lines = lines_of[(root, rel)]
+            if lines is None:
+                continue
+            text = embedded_text(self.header, rel, kind, symbol, doc, "\n".join(lines[first - 1:last]))
+            if text_sha(text) == embed_sha:
+                yield embed_sha, text
+
+    def _source_lines(self, root, source_kind, rel):
+        """A part's file read again as a citation reads it (``file_lines``), a document through the reader this
+        indexer holds; None when it cannot be (a document this indexer does not know included)."""
+        if source_kind == "documents":
+            reader = self.readers.get(root[len(DOCUMENTS):])
+            text = reader(rel) if reader is not None else None
+            return None if text is None or text is UNKNOWN else text.split("\n")
+        return file_lines(root, rel)
+
+    def embed(self, embedder, batch=32):
+        """Vectors for every embedded text that has none under ``embedder``'s encoder (see the module's doc)."""
+        started = time.perf_counter()
+        store, db = self.store, self.store.db
+        key = embedder.encoder.key
+        with store.lock:
+            wanted = {}
+            for embed_sha, text in self._part_texts(key):
+                wanted.setdefault(embed_sha, text)
+        todo = sorted(wanted.items(), key=lambda item: (len(item[1]), item[0]))
+        # An episode holds numbers: why a pass stopped is said in the log and kept here, never written.
+        counts = {"embedded": 0, "refused": 0, "held": False, "missing": False}
+        refused = set()     # the texts the engine refused in this pass
+        self.last_stop = None
+        for at in range(0, len(todo), batch):
+            chunk = todo[at:at + batch]
+            try:
+                vectors, _refused = embedder.texts([text for _sha, text in chunk])
+            except Held as exc:
+                counts["held"], self.last_stop = True, str(exc)
+                logger.info("mycelium: the vector pass under %s is held: %s", key, exc)
+                break
+            except EncoderMissing as exc:
+                counts["missing"], self.last_stop = True, str(exc)
+                logger.warning("mycelium: the vector pass under %s stopped: %s", key, exc)
+                break
+            with self._writing():
+                for (embed_sha, _text), vector in zip(chunk, vectors):
+                    if vector is None:
+                        counts["refused"] += 1
+                        refused.add(embed_sha)
+                        continue
+                    # A text that left the store while the engine answered (an index pass meanwhile) is not kept.
+                    counts["embedded"] += db.execute(
+                        "INSERT OR REPLACE INTO vector(embed_sha, encoder, dim, data) SELECT ?, ?, ?, ? "
+                        "WHERE EXISTS (SELECT 1 FROM part WHERE embed_sha = ?)",
+                        (embed_sha, key, len(vector), to_blob(vector), embed_sha)).rowcount
+                store.vectors_changed()
+        with self._writing():
+            # While another encoder is read, this one replaces it only once it covers every part: its vectors go
+            # at the change. On a store with no encoder read, the texts the engine refused in this very pass and
+            # still lacking are set aside, if it covers anything. A part this indexer could not read again
+            # (another header, a reader it does not hold, a file changed since) is never set aside.
+            lacking = self._lacking(key)
+            counts["uncovered"] = len(lacking - refused)
+            active = store.active_encoder()
+            if not counts["held"] and not counts["missing"] and (active is None or active["key"] != key):
+                ready = not lacking if active is not None else not counts["uncovered"] and self._covers(key)
+                if ready:
+                    store.activate(key, embedder.encoder.card())
+                    counts["activated"] = True
+            counts["seconds"] = round(time.perf_counter() - started, 2)
+            store.episode("embed", None, counts)
+        return counts
+
+    @contextmanager
+    def _writing(self):
+        """The store's lock held while one batch of writes is made and committed, rolled back if it fails."""
+        with self.store.lock:
+            try:
+                yield
+                self.store.db.commit()
+            except BaseException:
+                self.store.db.rollback()
+                raise
+
+    def _lacking(self, key):
+        """The embedded texts with no vector under ``key`` ('' for parts with no embedded text yet)."""
+        return {r[0] for r in self.store.db.execute(
+            "SELECT DISTINCT embed_sha FROM part WHERE embed_sha = '' OR embed_sha NOT IN "
+            "(SELECT embed_sha FROM vector WHERE encoder = ?)", (key,))}
+
+    def _covers(self, key):
+        """Whether any part has a vector under ``key``."""
+        return self.store.db.execute(
+            "SELECT EXISTS (SELECT 1 FROM part p JOIN vector v ON v.embed_sha = p.embed_sha AND v.encoder = ?)",
+            (key,)).fetchone()[0] == 1
+
+    def vector_status(self, encoder):
+        """What the vectors are, written nothing: the encoder read, the parts and those with a vector under
+        ``encoder``, and what the last vector pass said (held, missing)."""
+        db = self.store.db
+        texts = db.execute("SELECT COUNT(DISTINCT embed_sha) FROM part WHERE embed_sha != ''").fetchone()[0]
+        covered = db.execute("SELECT COUNT(DISTINCT p.embed_sha) FROM part p JOIN vector v ON v.embed_sha = "
+                             "p.embed_sha AND v.encoder = ?", (encoder.key,)).fetchone()[0]
+        last = next((e["detail"] for e in self.store.episodes(None, 50) if e["action"] == "embed"), None)
+        active = self.store.active_encoder()
+        return {"active": None if active is None else active["key"], "encoder": encoder.key, "texts": texts,
+                "with_vector": covered, "held": bool(last and last.get("held")),
+                "missing": bool(last and last.get("missing")), "why": self.last_stop}
