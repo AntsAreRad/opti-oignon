@@ -14,8 +14,14 @@ refused by name; one that is not finite, or that points nowhere, leaves its text
 kept as unit vectors in float16, normalized in double precision first.
 
 A question is embedded the same way as interactive work (the caller ``chat``): held, refused or missing, the search
-answers by its other stages and says why."""
+answers by its other stages and says why.
+
+The encoder is asked only on this machine (``on_this_machine``), whatever the mode: a backend served elsewhere, or
+one that forwards its requests or cannot say where it sends, leaves the pass and the question without vectors, said
+by name. An engine on this machine that itself sends a request on elsewhere (a model it serves from a cloud, a
+tunnel) is judged by its own address; a proxy of the environment is the engine clients' to refuse."""
 import hashlib
+import importlib
 import math
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
@@ -263,6 +269,23 @@ def engine_name(backend, model):
     return model + ":latest"
 
 
+def on_this_machine(backend):
+    """Whether ``backend`` says its requests stay on this machine: in the process, or to a loopback or unspecified
+    address (``inference_backend.is_on_this_machine``). A backend that forwards its requests, or cannot say, is
+    elsewhere. The Mycelium asks no model elsewhere -- not the encoder, the bridge nor the reranker -- whatever the
+    mode: a corpus is the owner's files."""
+    try:
+        backends = importlib.import_module("opti_oignon.inference_backend")
+        if getattr(backend, "forwards_requests", True) is not False:
+            return False
+        endpoint = backend.endpoint()
+        if not isinstance(endpoint, str) or not endpoint:
+            return False
+        return endpoint == backends.ENDPOINT_IN_PROCESS or bool(backends.is_on_this_machine(endpoint))
+    except Exception:  # noqa: BLE001 - what cannot be told is elsewhere
+        return False
+
+
 class Embedder:
     def __init__(self, encoder, timeout_s=120.0):
         self.encoder = encoder
@@ -275,6 +298,9 @@ class Embedder:
             raise EncoderMissing(f"no backend serves {self.encoder.model}: {exc}") from exc
         if backend is None:
             raise EncoderMissing(f"no backend serves {self.encoder.model}")
+        if not on_this_machine(backend):
+            raise EncoderMissing(f"{self.encoder.model} is not served on this machine: the Mycelium's texts and "
+                                 "questions never leave it")
         return backend
 
     def _admit(self, caller, name, engine):

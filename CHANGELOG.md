@@ -3859,6 +3859,21 @@ package costs.
   (`remote_bind_refused` audited). Contracts tg1-tg7 in
   `tests/test_revoked_device_never_reaches_the_api_contracts.py`.
 
+- [SECURITY] The Mycelium's encoder is asked only on this machine. Its
+  bridge and reranker asked no model elsewhere, but its encoder did: a
+  pass of vectors would send a corpus's texts, and a search its question,
+  to whatever engine the registry resolved, on another machine in Daily
+  mode. Now one rule decides for all three, whatever the mode: a backend
+  in the process, or at a loopback or unspecified address, is on this
+  machine; one that forwards its requests, or cannot say where it sends,
+  is elsewhere. An encoder elsewhere leaves a pass and a question without
+  vectors, said by name, and the search answers by its other stages. An
+  engine on this machine that itself sends a request on (a model it
+  serves from a cloud, a tunnel) is judged by its own address; and the
+  engine clients still follow the environment's proxies and an engine's
+  redirects, even for a loopback address, which no rule here can see.
+  MV26 in `tests/test_mycelium_vector_contracts.py`.
+
 - The Mycelium's vectors are asked under the name the engine knows the
   encoder by. Ollama resolves a model named without a tag to its
   `:latest` and shows every model it holds with its tag; the Mycelium

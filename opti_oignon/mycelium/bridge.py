@@ -15,7 +15,6 @@ own). A model's reasoning (a ``<think>``
 block) is never taken for its answer. A model away, held, refusing, failing, hung or answering nothing leaves the
 question as typed (and no second list); ``silent`` -- the caller's, when it hands one -- says why. Each question's
 words are kept, a bounded number of questions, so a question asked again asks nothing."""
-import importlib
 import re
 import threading
 import time
@@ -148,19 +147,9 @@ def _hand_back(governor, decision):
 
 
 def _on_this_machine(backend):
-    """Whether ``backend`` says its requests stay on this machine: in the process, or to a loopback or unspecified
-    address (``inference_backend.is_on_this_machine``). A backend that forwards its requests, or cannot say, is
-    elsewhere."""
-    try:
-        backends = importlib.import_module("opti_oignon.inference_backend")
-        if getattr(backend, "forwards_requests", True) is not False:
-            return False
-        endpoint = backend.endpoint()
-        if not isinstance(endpoint, str) or not endpoint:
-            return False
-        return endpoint == backends.ENDPOINT_IN_PROCESS or bool(backends.is_on_this_machine(endpoint))
-    except Exception:  # noqa: BLE001 - what cannot be told is elsewhere
-        return False
+    """Whether ``backend``'s requests stay on this machine, the Mycelium's one rule (``vectors.on_this_machine``):
+    the bridge and the reranker ask no model elsewhere, whatever the mode."""
+    return vectors.on_this_machine(backend)
 
 
 @dataclass(frozen=True)

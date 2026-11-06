@@ -44,6 +44,8 @@ MV24 the governor and the engine are asked under the name the engine serving the
     settings name it
 MV25 on the real governor, the background pass of an encoder the settings name without its tag, loaded in Ollama,
     is admitted and loads nothing (it was refused for good as of unknown cost: BACKLOG 239 f)
+MV26 the texts of a pass and a question are asked of no encoder off this machine: one served elsewhere, or by a
+    backend that forwards its requests or cannot say where it sends
 """
 
 import hashlib
@@ -87,6 +89,9 @@ BUDGET_S = {
     "test_mv23_a_busy_engine_holds_the_pass_and_a_final_refusal_of_its_gate_stops_it": 1.5,
     "test_mv24_the_governor_and_the_engine_are_asked_under_the_engines_name_for_the_encoder": 1.5,
     "test_mv25_the_real_governor_admits_the_pass_of_an_encoder_named_without_its_tag": 1.5,
+    "test_mv26_the_texts_and_the_question_never_leave_this_machine[remote]": 1.5,
+    "test_mv26_the_texts_and_the_question_never_leave_this_machine[forwards]": 1.5,
+    "test_mv26_the_texts_and_the_question_never_leave_this_machine[mute]": 1.5,
 }
 
 DIM = 16
@@ -173,16 +178,25 @@ class ResponseError(Exception):
 
 
 class Engine:
-    def __init__(self, dim=DIM, refuse=(), nan=(), endpoint=True, down=None):
-        self.dim, self.refuse, self.nan, self.endpoint, self.down = dim, tuple(refuse), tuple(nan), endpoint, down
+    """A stand-in encoder on this machine (``where`` places it elsewhere): its calls and the tickets they were made
+    under."""
+
+    forwards_requests = False
+
+    def __init__(self, dim=DIM, refuse=(), nan=(), endpoint=True, down=None, where="http://127.0.0.1:11434"):
+        self.dim, self.refuse, self.nan, self.serves, self.down = dim, tuple(refuse), tuple(nan), endpoint, down
+        self.where = where
         self.calls, self.tickets = [], []
+
+    def endpoint(self):
+        return self.where
 
     def embed_many(self, model, texts, timeout=None):
         from opti_oignon.resource_governor import get_active_ticket
 
         self.calls.append((model, list(texts)))
         self.tickets.append(get_active_ticket())
-        if not self.endpoint:
+        if not self.serves:
             return None
         if self.down is not None:
             raise self.down
@@ -1045,3 +1059,33 @@ def test_mv25_the_real_governor_admits_the_pass_of_an_encoder_named_without_its_
         counts
     assert engine.tickets and all(t.admitted and t.load_expected is False for t in engine.tickets)
     assert {t.model for t in engine.tickets} == {"enc:latest"}
+
+
+class Mute(Engine):
+    def endpoint(self):
+        raise RuntimeError("cannot tell")
+
+
+@pytest.mark.parametrize("case", ["remote", "forwards", "mute"])
+def test_mv26_the_texts_and_the_question_never_leave_this_machine(corpus, seams, case):
+    """MV26 -- an encoder served at another machine's address, by a backend that forwards its requests, or by one
+    that cannot say where it sends: a pass sends nothing and stops as missing, saying the encoder is not on this
+    machine; a question sends nothing and the search answers by its other stages, saying so. A text or a question
+    sent wherever the registry points -> RED."""
+    engine = {"remote": lambda: Engine(where="http://10.0.0.9:11434"),
+              "forwards": lambda: type("Forwarding", (Engine,), {"forwards_requests": True})(),
+              "mute": Mute}[case]()
+    store = corpus["store"]
+    seams(Registry({"enc-a": Engine()}), Governor())
+    indexer = Indexer(store)
+    assert indexer.embed(Embedder(A))["embedded"] > 0 and store.active_encoder()["key"] == A.key
+    seams(Registry({"enc-a": engine}), Governor())
+    searcher = Searcher(store)
+    found = searcher.search("select_peels share of terms")
+    assert found and found[0]["path"] == "peels.py"
+    assert "not served on this machine" in searcher.silent["dense"], searcher.silent
+    (corpus["root"] / "helper.py").write_text(HELPER, encoding="utf-8")
+    Indexer(store).index("oo", corpus["root"])
+    counts = indexer.embed(Embedder(A))
+    assert counts["missing"] is True and counts["embedded"] == 0 and "not served on this machine" in indexer.last_stop
+    assert engine.calls == [], ("nothing sent off the machine", engine.calls)
