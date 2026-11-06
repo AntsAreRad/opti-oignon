@@ -40,6 +40,17 @@ ollama:
   # Examples: "5m", "30m", "1h", "0" (unload immediately)
   keep_alive: "30m"
 
+  # The batch Ollama reads a prompt in, per model (a whole number above
+  # zero). A model left out reads at Ollama's own, 512. Every request that
+  # may load the model sends the same, since Ollama loads a model again for
+  # another batch, as for another context. A larger batch reads a long
+  # window several times faster and grows the buffers the load keeps on the
+  # card, which the resource governor prices. Measured on the 27B: the
+  # window read again in 4.9 s instead of 25.1 s, the answer as fast.
+  num_batch:
+    "qwen3.8:27b": 2048
+    "qwen3.5:4b": 2048
+
 # -----------------------------------------------------------------------------
 # LLAMA.CPP BACKEND
 # -----------------------------------------------------------------------------

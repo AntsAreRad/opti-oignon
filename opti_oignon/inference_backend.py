@@ -187,6 +187,51 @@ def _with_layers(options: dict | None, decision: Any) -> dict | None:
     return {**(options or {}), "num_gpu": layers}
 
 
+def ollama_name(model: str) -> str:
+    """The name Ollama resolves ``model`` to: one with no tag is its
+    ``:latest``; the tag follows the last colon after the last slash, so a
+    registry's port is no tag. Ollama shows every model it holds so.
+    """
+    text = str(model)
+    return text if ":" in text.rsplit("/", 1)[-1] else text + ":latest"
+
+
+def _read_num_batch(raw: Any) -> dict[str, int]:
+    """``ollama.num_batch`` of ``backends.yaml``: a table of model to the
+    batch Ollama reads a prompt in, keyed by the name Ollama resolves each
+    model to. An entry that is not a model's name and a whole number above
+    zero is refused by its name, the others kept; a value that is no table
+    is refused whole.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        logger.warning("backends.yaml ollama.num_batch is not a table of model to batch: %r is ignored", raw)
+        return {}
+    table: dict[str, int] = {}
+    named: dict[str, str] = {}
+    for model, batch in raw.items():
+        if not isinstance(model, str) or not model.strip():
+            logger.warning("backends.yaml ollama.num_batch names no model in %r: the entry is ignored", model)
+            continue
+        if isinstance(batch, bool) or not isinstance(batch, int) or batch < 1:
+            logger.warning(
+                "backends.yaml ollama.num_batch for %s is %r, not a whole number above zero: the entry is ignored",
+                model, batch,
+            )
+            continue
+        name = ollama_name(model.strip())
+        if name in named:
+            logger.warning(
+                "backends.yaml ollama.num_batch names %s again as %s: the second entry is ignored",
+                named[name], model,
+            )
+            continue
+        named[name] = model
+        table[name] = batch
+    return table
+
+
 def _with_threads(options: dict | None, decision: Any) -> dict | None:
     """``options`` with the CPU thread count the admission lets Ollama be
     told, as its num_thread (``AdmissionDecision.ollama_threads``: the count
@@ -977,6 +1022,25 @@ class OllamaBackend(InferenceBackend):
         self._clients_lock = threading.Lock()
         # Whether each model declares the thinking capability, read once.
         self._thinking: dict[str, bool] = {}
+        # ``ollama.num_batch`` of the same file, keyed by the name Ollama
+        # resolves each model to: the batch every request to the model sends.
+        self._num_batch: dict[str, int] = {}
+
+    def batch_for(self, model: str) -> int | None:
+        """The batch Ollama reads ``model``'s prompts in, as this backend
+        sends it on every request that may load the model; None leaves
+        Ollama's own (512)."""
+        return self._num_batch.get(ollama_name(model))
+
+    def _with_batch(self, model: str, options: dict | None) -> dict | None:
+        """``options`` with the model's batch, unless they name their own
+        (the tuner's sweep). Ollama loads a model again for a batch other
+        than the one it holds, as for a context, so every head that sends a
+        prompt sends the same. The caller's dict is never changed."""
+        batch = self.batch_for(model)
+        if batch is None or (options and "num_batch" in options):
+            return options
+        return {**(options or {}), "num_batch": batch}
 
     def _declares_thinking(self, model: str) -> bool:
         """Whether Ollama lists ``thinking`` among the model's capabilities.
@@ -1147,12 +1211,12 @@ class OllamaBackend(InferenceBackend):
         ``None`` without the client or when the client answers no vector; a
         client failure propagates. Admission is asked first: an embedding
         loads a model like any other request, and is told the CPU threads
-        the admission carries (``_with_threads``); without them it sends no
-        options.
+        the admission carries (``_with_threads``) and the model's batch
+        (``batch_for``); without either it sends no options.
         """
         if not OLLAMA_AVAILABLE:
             return None
-        told = _with_threads(None, _governor_admission(model, None))
+        told = _with_threads(self._with_batch(model, None), _governor_admission(model, None))
         extra = {"options": told} if told else {}
         result = self._embed_client(timeout).embed(model=model, input=text, **extra)
         vectors = _field(result, "embeddings") or []
@@ -1164,13 +1228,14 @@ class OllamaBackend(InferenceBackend):
         self, model: str, texts: list[str], timeout: float | None = None,
     ) -> list[list[float]] | None:
         """The whole batch through one ``embed`` of the client, after one
-        admission, told its CPU threads as ``embed`` is."""
+        admission, told its CPU threads and the model's batch as ``embed``
+        is."""
         if not OLLAMA_AVAILABLE:
             return None
         texts = list(texts)
         if not texts:
             return []
-        told = _with_threads(None, _governor_admission(model, None))
+        told = _with_threads(self._with_batch(model, None), _governor_admission(model, None))
         extra = {"options": told} if told else {}
         result = self._embed_client(timeout).embed(model=model, input=texts, **extra)
         vectors = _field(result, "embeddings") or []
@@ -1298,6 +1363,7 @@ class OllamaBackend(InferenceBackend):
         # behind it.
         engine_options, schema, tools = _split_extras(options)
         engine_options, timeout = _pop_timeout(engine_options)
+        engine_options = self._with_batch(model, engine_options)
 
         # Governor admission hook (after the availability guard so
         # the "not installed" error semantics stay exactly as pinned).
@@ -1377,6 +1443,7 @@ class OllamaBackend(InferenceBackend):
         # pinned and no request started behind them.
         engine_options, schema, tools = _split_extras(options)
         engine_options, timeout = _pop_timeout(engine_options)
+        engine_options = self._with_batch(model, engine_options)
 
         # Governor admission hook. A generator head runs at first
         # iteration; the funnel's ticket is thread-local, so funnels set it
@@ -2755,6 +2822,7 @@ def init_backends_from_config(config_path: str | None = None) -> BackendRegistry
                     "backends.yaml ollama.timeout %r is not a positive number of seconds: "
                     "the connection is left unbounded", timeout,
                 )
+            ollama_backend._num_batch = _read_num_batch(ollama_cfg.get("num_batch"))
 
     # Apply llama.cpp settings
     llama_cfg = cfg.get("llama_cpp", {})

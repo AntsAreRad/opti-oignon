@@ -11,6 +11,27 @@ package costs.
 
 ### Added
 
+- Ollama reads each model's prompts in the batch `backends.yaml` gives
+  it (`ollama.num_batch`, a table of model to batch; shipped: 2048 for
+  `qwen3.8:27b` and `qwen3.5:4b`; a model left out reads at Ollama's own,
+  512). The onion's window, which a hybrid model reads again whole at
+  every turn, is read several times faster: measured on the 27B over six
+  turns, the first token after 4.8 s instead of 23.8 s, no reload between
+  turns, and on the 4B the window read in 0.44 s instead of 1.33 s, still
+  whole on the card. In the processes that read `backends.yaml` (the API,
+  the core daemon, `oo chat`), every request oo's Ollama engine sends
+  that may load a model -- generate, the stream (the warm-up and its
+  keep-alive through them) and both embedding heads -- carries the
+  model's batch, since Ollama loads a model again for another batch as
+  for another context; a call that names its own keeps it (the tuner's
+  sweep); a name the table or the call gives without a tag is its
+  `:latest`; an entry that is not a model's name and a whole number above
+  zero, or a second entry for a model already named, is refused by its
+  name. A larger batch grows the compute buffers a load keeps on the
+  card; as shipped, Ollama places the layers itself and knows its batch
+  (the 27B kept 5.1 GB on the card at 2048 against 5.6 GB at 512).
+  BA1-BA2 in the new `tests/test_ollama_batch_contracts.py`.
+
 - The contracts never reach the machine's inference engines
   (`tests/_engine_firewall.py`, installed by the conftest with the data
   firewall, before the suites are collected): for the whole session every
