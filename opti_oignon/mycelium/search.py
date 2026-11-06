@@ -4,11 +4,14 @@ Three lists, fused by their reciprocal ranks (K = 60): the identifiers of the qu
 table (exact, free); the full-text index (FTS5, bm25 over the path, the text, the words inside its identifiers and
 what the code says to a person -- raised, logged, printed), a part of the tests keeping a share of its bm25 only (a
 test's name is a sentence that holds the words of any question); and the vectors of the active encoder (exact
-cosine over the matrix, held while the store's generation holds). ``lexical_query`` is what the first two are
-asked (a question put into English, say); the vectors are asked the question as it was typed. A stage that cannot
-answer -- no encoder active, the engine missing, the governor holding the question -- is silent, and ``silent``
-says why: the search answers by the others. Every stage reads only the sources ``allow`` names. Every result names
-its part, its lines and the sha256 of its text: ``verify`` says whether the source still says that."""
+cosine over the matrix, held while the store's generation holds). With a bridge, the first two are asked the
+question in English when it is French, and the full text is asked a second time with the words the question's code
+would use (a fourth list, ``rewritten``); without one, ``lexical_query`` is what the first two are asked; the
+vectors are asked the question as it was typed. A search may ask the reranker to judge its first passages, read
+from the fused list as deep as the reranker judges, then cut to k. A stage that cannot answer -- no encoder active,
+the engine missing, the governor holding the question, the bridge's or the reranker's model away -- is silent, and
+``silent`` says why: the search answers by the others. Every stage reads only the sources ``allow`` names. Every
+result names its part, its lines and the sha256 of its text: ``verify`` says whether the source still says that."""
 import hashlib
 import itertools
 
@@ -31,11 +34,18 @@ class Searcher:
     # The share of its bm25 a part of the tests keeps in the full text's ranking (1.0: no discount).
     TESTS_KEEP = 0.7
 
-    def __init__(self, store, allow=("public", "private"), lexical_query=None, timeout_s=120.0):
+    def __init__(self, store, allow=("public", "private"), lexical_query=None, timeout_s=120.0, bridge=None,
+                 reranker=None, readers=None):
+        """``bridge`` (``bridge.Bridge``) gives the words-matching lists their English and a second, rewritten,
+        full-text list; ``reranker`` (``rerank.Reranker``) judges the first passages when a search asks it;
+        ``readers`` read a source of documents (``Indexer.readers``)."""
+        if bridge is not None and lexical_query is not None:
+            raise ValueError("a searcher takes a bridge or a lexical_query, not both: the bridge gives the words")
         self.store = store
         self.allow = tuple(allow)
         self.lexical_query = lexical_query
         self.timeout_s = timeout_s
+        self.bridge, self.reranker, self.readers = bridge, reranker, readers
         self.silent = {}
         self._held = (None, None, None)
 
@@ -113,14 +123,22 @@ class Searcher:
         order = np.argsort(-scores, kind="stable")[:n]
         return [(ids[j], float(scores[j])) for j in order]
 
-    def search(self, query, k=10, stages=("symbols", "lexical", "dense")):
-        self.silent = {}
-        worded = self.lexical_query(query) if self.lexical_query else query
+    def search(self, query, k=10, stages=("symbols", "lexical", "dense"), rerank=False):
+        """The fused, cited passages, k at most; with ``rerank``, the first ones judged by the reranker."""
+        self.silent = silent = {}
+        worded = query
+        if self.bridge is not None and ("symbols" in stages or "lexical" in stages):
+            worded = self.bridge.english(query, silent)
+        elif self.lexical_query:
+            worded = self.lexical_query(query)
         lists = {}
         if "symbols" in stages:
             lists["symbols"] = self.symbols(worded)
         if "lexical" in stages:
             lists["lexical"] = self.lexical(worded)
+            said = self.bridge.rewritten(query, silent) if self.bridge is not None else ""
+            if said and said != worded:
+                lists["rewritten"] = self.lexical(said)
         if "dense" in stages:
             lists["dense"] = self.dense(query)
         fused, why = {}, {}
@@ -129,9 +147,25 @@ class Searcher:
                 fused[part_id] = fused.get(part_id, 0.0) + 1.0 / (K + place)
                 why.setdefault(part_id, []).append(f"{stage}#{place}")
         order = sorted(fused, key=lambda i: (-fused[i], i))
-        # A part gone since the index was read gives no citation: the next ones take its place, k at most.
-        cited = (self.cite(part_id, fused[part_id], why[part_id]) for part_id in order[:k * 4])
-        return list(itertools.islice((c for c in cited if c is not None), max(0, k)))
+        # A part gone since the index was read gives no citation: the next ones take its place, k at most -- or as
+        # many as the reranker judges, before the cut to k.
+        judging = rerank and self.reranker is not None
+        if rerank and self.reranker is None:
+            silent["rerank"] = "no reranker: the passages keep their fused order"
+        want = 0 if k <= 0 else max(k, self.reranker.settings.depth if judging else 0)
+        cited = (self.cite(part_id, fused[part_id], why[part_id]) for part_id in order[:want * 4])
+        hits = list(itertools.islice((c for c in cited if c is not None), want))
+        if judging and hits:
+            hits = self.reranker(query, hits, self.read, silent)
+        return hits[:max(0, k)]
+
+    def read(self, citation):
+        """The text of a citation's lines while its source still says it (``verify``), else None."""
+        lines = source_lines(citation, self.readers)
+        if lines is None:
+            return None
+        body = "\n".join(lines[citation["first"] - 1:citation["last"]])
+        return body if hashlib.sha256(body.encode("utf-8")).hexdigest() == citation["sha256"] else None
 
     def cite(self, part_id, score, why):
         """The citation of a part, or None when a pass removed it since a stage found it."""

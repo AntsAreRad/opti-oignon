@@ -76,47 +76,69 @@ class VectorSettings:
     timeout_s: float
 
 
-def load_settings(path=None):
-    """The vectors' settings from ``mycelium.yaml``, refused by name when malformed: not YAML, not a mapping, a key
-    of another type than its own (a quoted "false" is no flag), a dimension, batch or timeout that is not a
-    positive number, a header the indexer does not know, a card longer than a store keeps."""
-    import yaml
+class Section:
+    """A section of ``mycelium.yaml``, read strictly: a file that is not YAML, not a mapping, or a value of another
+    type than its own (a quoted "false" is no flag, a flag no number) is refused by name, as ``error``."""
 
-    try:
-        with open(path or _CONFIG, encoding="utf-8") as handle:
-            loaded = yaml.safe_load(handle)
-    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
-        raise VectorError(f"mycelium.yaml: cannot be read as YAML ({type(exc).__name__})") from exc
-    if loaded is None:
-        loaded = {}
-    raw = loaded.get("vectors") if isinstance(loaded, dict) else None
-    if not isinstance(raw, dict):
-        raise VectorError("mycelium.yaml: a mapping with a vectors mapping is expected")
+    def __init__(self, name, path=None, error=None):
+        import yaml
 
-    def typed(value, kinds, what):
+        self.error = error or VectorError
+        try:
+            with open(path or _CONFIG, encoding="utf-8") as handle:
+                loaded = yaml.safe_load(handle)
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+            raise self.error(f"mycelium.yaml: cannot be read as YAML ({type(exc).__name__})") from exc
+        if loaded is None:
+            loaded = {}
+        raw = loaded.get(name) if isinstance(loaded, dict) else None
+        if not isinstance(raw, dict):
+            raise self.error(f"mycelium.yaml: a mapping with a {name} mapping is expected")
+        self.raw = raw
+
+    def typed(self, value, kinds, what):
         if isinstance(value, bool) and bool not in kinds or not isinstance(value, kinds):
-            raise VectorError(f"mycelium.yaml: {what} is not of type {' or '.join(k.__name__ for k in kinds)}")
+            raise self.error(f"mycelium.yaml: {what} is not of type {' or '.join(k.__name__ for k in kinds)}")
         return value
 
-    def positive(value, kinds, what):
-        value = typed(value, kinds, what)
+    def positive(self, value, kinds, what, most=None):
+        value = self.typed(value, kinds, what)
         try:
-            fits = math.isfinite(value) and value > 0
+            fits = math.isfinite(value) and value > 0 and (most is None or value <= most)
         except OverflowError:       # an integer past a float's range
             fits = False
         if not fits:
-            raise VectorError(f"mycelium.yaml: {what} is a positive number a float holds, not {str(value)[:40]}")
+            bound = "" if most is None else f" at most {most}"
+            raise self.error(f"mycelium.yaml: {what} is a positive number{bound} a float holds, not "
+                             f"{str(value)[:40]}")
         return value
 
-    def prefix(value, what):
-        return "" if value is None else typed(value, (str,), what)
+    def text(self, value, what):
+        return "" if value is None else self.typed(value, (str,), what)
 
+    def only(self, *keys, raw=None, where=None):
+        """Refuses by name a key the code does not read (a misspelled ``timout_s`` would fall back unseen)."""
+        held = self.raw if raw is None else raw
+        unread = sorted(str(key) for key in held if key not in keys)
+        if unread:
+            raise self.error(f"mycelium.yaml: {where or 'this section'} holds {', '.join(unread)}, which no code "
+                             f"reads")
+
+
+def load_settings(path=None):
+    """The vectors' settings from ``mycelium.yaml``, refused by name when malformed (``Section``): a dimension,
+    batch or timeout that is not a positive number, a header the indexer does not know, a card longer than a store
+    keeps."""
+    section = Section("vectors", path)
+    section.only("enabled", "encoder", "header", "batch", "timeout_s", "encoders", where="vectors")
+    raw, typed, positive = section.raw, section.typed, section.positive
     name = typed(raw.get("encoder"), (str,), "vectors.encoder")
     cards = typed(raw.get("encoders"), (dict,), "vectors.encoders")
     card = typed(cards.get(name), (dict,), f"the card of {name}")
+    section.only("dim", "query_prefix", "text_prefix", raw=card, where=f"the card of {name}")
     encoder = Encoder(name, positive(card.get("dim"), (int,), f"the dim of {name}"),
-                      prefix(card.get("query_prefix"), f"the query_prefix of {name}"),
-                      prefix(card.get("text_prefix"), f"the text_prefix of {name}"))
+                      section.text(card.get("query_prefix"), f"the query_prefix of {name}"),
+                      section.text(card.get("text_prefix"), f"the text_prefix of {name}"))
     header = typed(raw.get("header", "full"), (str,), "vectors.header")
     if header not in HEADERS:
         raise VectorError(f"mycelium.yaml: vectors.header is one of {', '.join(HEADERS)}, not {header!r}")

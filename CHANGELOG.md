@@ -11,6 +11,38 @@ package costs.
 
 ### Added
 
+- [SECURITY] The Mycelium's third layer: a bridge and a reranker
+  (`opti_oignon/mycelium/bridge.py`, `rerank.py`, the `bridge` and `rerank`
+  sections of `opti_oignon/config/mycelium.yaml`). Nothing calls them yet.
+  One local model (qwen3.5:4b as shipped) is asked through the inference
+  registry only, and only on this machine, in every mode: a backend that
+  sends elsewhere, forwards its requests or cannot say where they go is
+  never asked. A backend on this machine that serves a model from elsewhere
+  (a proxy, a cloud model) is judged by its own address, so naming such a
+  model sends the question and the passages there. Each call is admitted by
+  the resource governor as interactive work, sent under that admission's
+  ticket with the context and keep_alive it names, the question bounded;
+  its resolution and its answer share the settings' timeout, past which it
+  is given up whatever the backend does, and while a call given up lives no
+  other call from the Mycelium to that model starts. A call whose thread
+  cannot start hands its admission back. A model's reasoning is never taken
+  for its answer. A French question, told by its words (not by a word of
+  code, an acronym or a loanword's accents), is put into English for the
+  symbol table and the full text, the vectors reading it as typed; any
+  question is also put into the words its code would use, for a second
+  full-text list. The reranker judges the first passages of a search, as
+  deep as its depth before the cut to k, all within its timeout, each shown
+  as a bounded document from a source that still says it, one token asked
+  and read as a word (yes or oui, no or non): those it says answer come
+  first, each group in its fused order. Whether a passage answers is True
+  only when the first was judged to, False only when every passage given
+  was judged and says no, and unknown otherwise; a passage's text can move
+  it to the head and have the judge say it answers, nothing more. A model
+  away, held, failing, hung or answering nothing leaves the question as
+  typed and the order as fused, and says why, in each search's own
+  silences. The settings of the vectors, the bridge and the reranker are
+  read by one strict reader: each value of its type and within its bound,
+  and a key no code reads refused by name.
 - The Mycelium's second layer: vectors (`opti_oignon/mycelium/vectors.py`,
   the `vectors` section of `opti_oignon/config/mycelium.yaml`). Nothing
   calls it yet. A vector pass asks the encoder the settings name

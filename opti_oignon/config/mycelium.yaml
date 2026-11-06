@@ -30,3 +30,30 @@ vectors:
       query_prefix: "Instruct: Given a question about a software repository, retrieve the code or
         documentation that answers it\nQuery: "
       text_prefix: ""
+
+# The bridge: words for the full text, by a local model asked through the
+# inference registry as interactive work. A French question is put into
+# English for the symbol table and the full text (the vectors read the
+# question as typed); any question is also put into the words its code would
+# use, for a second full-text list. The model is asked only when it runs on
+# this machine, each call given up at timeout_s; a model away, held, failing
+# or hung leaves the question as typed.
+bridge:
+  model: qwen3.5:4b
+  translate: true
+  rewrite: true
+  timeout_s: 30
+  # Questions kept with their words, the oldest dropped first.
+  cache: 256
+
+# The reranker: the first passages of a search judged "yes" or "no" by a local
+# model (one token), those it says answer the question put first, each group
+# in its fused order. Off for the search before every turn; asked by the
+# model's own search tool, where it also says when no passage answers.
+# depth is at most 100, parallel at most 16, max_chars at most 20000.
+rerank:
+  model: qwen3.5:4b
+  depth: 20
+  parallel: 4
+  max_chars: 3000
+  timeout_s: 60

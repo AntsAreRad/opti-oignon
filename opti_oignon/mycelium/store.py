@@ -6,8 +6,9 @@ Tables: ``source`` (a corpus: its name, root, kind, sensitivity), ``file`` (path
 content, language, the first sentence it opens on), ``part`` (kind, symbol, lines, sha256 of its text and of the
 text it is embedded as), ``vector`` (by the text embedded and the encoder: parts that embed the same text share one;
 float16 unit vectors), ``fts`` (FTS5 without content: the index keeps tokens, never the text, which stays in the
-source and is read again by path and lines), ``symbol`` (what a part defines), ``ref`` (what a part names: the links between parts are ``ref`` joined
-to ``symbol``, so a removed part leaves no link behind), ``episode`` (each indexing pass, and what it did).
+source and is read again by path and lines), ``symbol`` (what a part defines), ``ref`` (what a part names: the
+links between parts are ``ref`` joined to ``symbol``, so a removed part leaves no link behind), ``episode`` (each
+indexing pass, and what it did).
 
 What the store keeps of a source, then, is not its text but: each file's first sentence (its module docstring's, or
 its heading's), a Markdown section's heading path, the names a part defines and names, and the index's tokens with
