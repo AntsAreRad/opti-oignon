@@ -11,6 +11,29 @@ package costs.
 
 ### Added
 
+- The contracts never reach the machine's inference engines
+  (`tests/_engine_firewall.py`, installed by the conftest with the data
+  firewall, before the suites are collected): for the whole session every
+  socket connection to an engine -- Ollama's port, 11434, on any host; the
+  engine `OLLAMA_HOST` names, read as Ollama's client reads it; the hosts
+  `config/backends.yaml` gives Ollama and the llama-server -- is refused as
+  an engine that is down refuses it, a named host compared with the address
+  the client resolved it to; and the `ollama` command, which the platform
+  runs to read a model's limits and list the models, is the firewall's own,
+  answering as a failing command does, and checked to answer so before the
+  session starts. Each connection refused is counted with the contract
+  running when it came and the line of code that asked, each command with
+  its arguments, and the session's summary names those contracts, and
+  counts apart what came at collection, between them or after the last: a
+  contract named there leaned on the maintainer's engine and needs its
+  stand-in. A contract that forgot its stand-in used to reach the local
+  engine through the registry or the command, its verdict depending on what
+  that engine served. A conftest copied without the firewall says so; a
+  firewall that fails to import fails the session. Not covered: a child's
+  own sockets, a connection made below Python's sockets (uvloop's loop), a
+  child given a PATH of its own (the sandbox's, a plugin's), and what reads
+  the engine without connecting to it (`/proc/net/tcp`, a running `ollama
+  serve`'s environment).
 - [SECURITY] The Mycelium's third layer: a bridge and a reranker
   (`opti_oignon/mycelium/bridge.py`, `rerank.py`, the `bridge` and `rerank`
   sections of `opti_oignon/config/mycelium.yaml`). Nothing calls them yet.

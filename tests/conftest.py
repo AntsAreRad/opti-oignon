@@ -47,6 +47,20 @@ environment is replaced (the import footprint guard's probe, on purpose),
 and a process that is not Python started in a data place.
 ``tests/_data_firewall.py`` has what stays uncovered.
 
+It keeps the contracts away from the machine's inference engines as well:
+``tests/_engine_firewall.py``, installed with the data firewall, refuses
+every socket connection to an engine (Ollama's port, the engine
+``OLLAMA_HOST`` names, the hosts ``config/backends.yaml`` gives) as an
+engine that is down refuses it, and the ``ollama`` command as a failing
+command answers; the summary line names each contract that asked: that
+contract leaned on the maintainer's engine and needs its stand-in. Its
+module has what stays uncovered (a child's own sockets, a connection made
+below Python's sockets, a child given a PATH of its own). A copy of this
+file without that sibling runs without it, and says so in the summary --
+the conftest's own contracts copy it with the data firewall alone --; the
+real session is held to it by EF1, and a sibling that fails to import
+fails the session (EF8).
+
 The heap the collection built is frozen before any contract runs, so a
 collector pass does not rescan it inside a contract and charge that
 contract a pause it did not cause (PH3 holds it).
@@ -79,6 +93,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _data_firewall import REFUSED, DataFirewall  # noqa: E402
 
+try:
+    from _engine_firewall import EngineFirewall  # noqa: E402
+except ModuleNotFoundError as missing:  # a copy of this file without its sibling (see above); nothing else
+    if missing.name != "_engine_firewall":
+        raise
+    EngineFirewall = None
+
 # The key, the passphrase and the data directory a shell may carry to start the platform: never a contract's; nor the
 # origins it lists for the API.
 for _name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME", "OPTI_CORS_ORIGINS"):
@@ -87,10 +108,13 @@ for _name in ("OPTI_ENCRYPTION_KEY", "OPTI_KEYFILE_PASSPHRASE", "RAG_HOME", "OPT
 _PACKAGE = "opti_oignon"
 _FOUND = pytest.StashKey()
 _FIREWALL = DataFirewall(Path(__file__).resolve().parent.parent)
+_ENGINE = EngineFirewall() if EngineFirewall is not None else None
 
 
 def pytest_configure(config):
     _FIREWALL.install()
+    if _ENGINE is not None:
+        _ENGINE.install()
     uncovered = _FIREWALL.cover_children()
     if uncovered:
         pytest.exit(f"data firewall: the child processes of this session cannot be covered ({uncovered}); "
@@ -119,12 +143,18 @@ def pytest_collection_finish(session):
 
 def pytest_unconfigure(config):
     gc.unfreeze()
+    if _ENGINE is not None:
+        _ENGINE.uninstall()
     _FIREWALL.uncover_children()
     _FIREWALL.uninstall()
 
 
 def pytest_terminal_summary(terminalreporter):
     terminalreporter.write_line(_FIREWALL.summary())
+    if _ENGINE is not None:
+        _ENGINE.settle()    # what was asked after the last contract: outside any
+    terminalreporter.write_line(_ENGINE.summary() if _ENGINE is not None else
+                                "engine firewall: not installed (no _engine_firewall.py beside this conftest)")
 
 
 def _project_entries():
@@ -155,26 +185,35 @@ def left_behind(found, now):
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_setup(item):
     _FIREWALL.current = item.nodeid
+    if _ENGINE is not None:
+        _ENGINE.settle()    # what was asked at collection or between contracts: outside any
+        _ENGINE.current = item.nodeid
     item.stash[_FOUND] = (_project_entries(), urllib.request.urlopen, held_secrets())
     return (yield)
 
 
 @pytest.hookimpl(wrapper=True)
 def pytest_runtest_teardown(item):
-    result = yield
-    found = item.stash.get(_FOUND, None)
-    if found is not None:
-        entries, transport, secrets = found
-        problems = []
-        left = left_behind(entries, _project_entries())
-        if left:
-            problems.append(f"project modules left as stand-ins or neutralised: {left[:6]}")
-        if urllib.request.urlopen is not transport:
-            problems.append("urllib.request.urlopen is left replaced")
-        held = sorted(name for name, holder in held_secrets().items() if secrets.get(name) is not holder)
-        if held:
-            problems.append(f"the platform's secrets left held by opti_oignon.process_secrets: {held}")
-        if problems:
-            raise AssertionError("; ".join(problems))
-    _FIREWALL.current = None
-    return result
+    try:
+        result = yield
+        found = item.stash.get(_FOUND, None)
+        if found is not None:
+            entries, transport, secrets = found
+            problems = []
+            left = left_behind(entries, _project_entries())
+            if left:
+                problems.append(f"project modules left as stand-ins or neutralised: {left[:6]}")
+            if urllib.request.urlopen is not transport:
+                problems.append("urllib.request.urlopen is left replaced")
+            held = sorted(name for name, holder in held_secrets().items() if secrets.get(name) is not holder)
+            if held:
+                problems.append(f"the platform's secrets left held by opti_oignon.process_secrets: {held}")
+            if problems:
+                raise AssertionError("; ".join(problems))
+        return result
+    finally:
+        # A teardown that failed still ends the contract: what came after is not charged to it.
+        _FIREWALL.current = None
+        if _ENGINE is not None:
+            _ENGINE.settle()
+            _ENGINE.current = None
