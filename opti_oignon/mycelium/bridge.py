@@ -191,6 +191,7 @@ class Asker:
         together."""
         model = self.model
         seconds = self.timeout_s if timeout_s is None else timeout_s
+        vectors.machine_rule()      # its first import paid here, never on the call's own time
         deadline = time.monotonic() + seconds
         if _hanging(model):
             raise AskError(f"a call to {model} given up still lives: nothing more is asked of it until it returns")

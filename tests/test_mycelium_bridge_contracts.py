@@ -185,6 +185,14 @@ def no_engine(monkeypatch):
     monkeypatch.setattr(vectors, "_governor", lambda: None)
 
 
+@pytest.fixture(autouse=True)
+def no_call_left_given_up():
+    """A contract that fails before its given-up call returns leaves that call in ``bridge._hung``: emptied after
+    each contract, so the next one is never told that a call of another contract still lives."""
+    yield
+    bridge_module._hung.clear()
+
+
 @pytest.fixture
 def seams(monkeypatch):
     def install(registry, governor):

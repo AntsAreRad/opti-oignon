@@ -11,6 +11,27 @@ package costs.
 
 ### Added
 
+- [SECURITY] The Mycelium's search reads a citation through the store: the
+  root the store holds for the source the citation names, a path that
+  source holds, a source the searcher may read, lines that are whole
+  numbers in order and a sha256 (`Searcher.read`, `Searcher.verify`): the
+  root a citation carries is never read, and any other citation -- a path
+  a model wrote, a file the walk skipped (a `.env`), a secret source,
+  lines out of order, a name no store can hold -- is read as nothing and
+  verified as `unknown`; lines past a file's end are no text of it
+  (`modified`); the module's `verify` and `source_lines` still read a
+  citation as it carries its root, for a caller's own. A search gives back
+  the silences of its own stages with its passages (`Searcher.find`), so
+  two searches at once, or one run inside another, no longer mix them, and
+  `search` keeps the last ones as before; the vectors' matrix is the
+  store's, shared by every searcher of the same sensitivities and read
+  again when the vectors change; a pass of the process holding the store
+  keeps a vector search waiting no longer than its timeout, the vectors
+  then left out of that search. The bridge loads the engine's module
+  before it sets a call's deadline: a cold process's first call no longer
+  spends its own time on the import. MQ1-MQ4 in the new
+  `tests/test_mycelium_query_contracts.py`; the bridge's suite empties a
+  given-up call after each contract.
 - The Mycelium has its owner's route: `python -m opti_oignon mycelium
   index CORPUS FOLDER` indexes a folder (a repository: the files its index
   tracks) into the corpus's store, as a source named as the corpus unless

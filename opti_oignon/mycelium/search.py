@@ -10,10 +10,16 @@ would use (a fourth list, ``rewritten``); without one, ``lexical_query`` is what
 vectors are asked the question as it was typed. A search may ask the reranker to judge its first passages, read
 from the fused list as deep as the reranker judges, then cut to k. A stage that cannot answer -- no encoder active,
 the engine missing, the governor holding the question, the bridge's or the reranker's model away -- is silent, and
-``silent`` says why: the search answers by the others. Every stage reads only the sources ``allow`` names. Every
-result names its part, its lines and the sha256 of its text: ``verify`` says whether the source still says that."""
+the search says why with its passages (``find``: ``Found(hits, silent)``, the silences its own; ``search`` gives the
+passages and keeps the last silences on the searcher): the search answers by the others. Every stage reads only the
+sources ``allow`` names. The vectors' matrix is the store's, one per set of sensitivities read, shared by every
+searcher of the store and read again when its generation moves. Every result names its part, its lines and the
+sha256 of its text: ``Searcher.verify`` says whether the source still says that, a citation read through the store
+(``Searcher.lines``) -- never through the root or the path it carries, which a model may have written."""
 import hashlib
 import itertools
+import threading
+from collections import namedtuple
 
 from .lexis import identifiers, match_expression, question_terms
 from .vectors import Embedder, Encoder, VectorError, from_blobs
@@ -26,6 +32,9 @@ K = 60
 DEPTH = 100
 MAX_DEFINITIONS = 6
 DOCUMENTS = "documents:"
+
+# A search's passages, and why each silent stage was silent: its own, whatever other searches run meanwhile.
+Found = namedtuple("Found", "hits silent")
 
 
 class Searcher:
@@ -47,7 +56,7 @@ class Searcher:
         self.timeout_s = timeout_s
         self.bridge, self.reranker, self.readers = bridge, reranker, readers
         self.silent = {}
-        self._held = (None, None, None)
+        self._searching = threading.local()     # the silences of the search this thread runs (``find``)
 
     def _filter(self):
         """The sensitivity filter as SQL over the part's source (``s``), and its values: applied in each stage's own
@@ -87,36 +96,52 @@ class Searcher:
         return [(i, 1.0) for i in found][:n]
 
     def _matrix(self):
-        """(encoder's {key, card}, part ids, matrix) of the active encoder, read again when the store changed or
-        the sensitivities this searcher may read did."""
-        held = (self.store.generation(), self.allow)     # what is read, and who may read it
-        if self._held[0] != held:
-            active = self.store.active_encoder()
-            ids, matrix = [], None
-            if active is not None:
-                allowed, values = self._filter()
-                rows = self.store.db.execute(
-                    "SELECT p.id, v.data FROM part p JOIN vector v ON v.embed_sha = p.embed_sha AND v.encoder = ? "
-                    f"JOIN file f ON f.id = p.file JOIN source s ON s.id = f.source WHERE {allowed} ORDER BY p.id",
-                    (active["key"], *values)).fetchall()
-                ids, matrix = [r[0] for r in rows], from_blobs([r[1] for r in rows], active["card"]["dim"])
-            self._held = (held, active, (ids, matrix))
-        return self._held[1], *self._held[2]
+        """(encoder's {key, card}, part ids, matrix) of the active encoder, as the store holds it for the set of
+        sensitivities this searcher may read (``Store.matrices``, whatever their order), read again when the store's
+        generation moved; None when a pass of this process holds the store past the searcher's ``timeout_s`` (its
+        rows are read under the store's lock, never in the middle of a pass)."""
+        if not self.store.lock.acquire(timeout=self.timeout_s):
+            return None
+        try:
+            generation = self.store.generation()
+            key = tuple(sorted(set(self.allow)))
+            held = self.store.matrices.get(key)
+            if held is None or held[0] != generation:
+                active = self.store.active_encoder()
+                ids, matrix = [], None
+                if active is not None:
+                    allowed, values = self._filter()
+                    rows = self.store.db.execute(
+                        "SELECT p.id, v.data FROM part p JOIN vector v ON v.embed_sha = p.embed_sha AND v.encoder = "
+                        f"? JOIN file f ON f.id = p.file JOIN source s ON s.id = f.source WHERE {allowed} ORDER BY "
+                        "p.id", (active["key"], *values)).fetchall()
+                    ids, matrix = [r[0] for r in rows], from_blobs([r[1] for r in rows], active["card"]["dim"])
+                held = (generation, active, ids, matrix)
+                self.store.matrices[key] = held
+        finally:
+            self.store.lock.release()
+        return held[1:]
 
     def dense(self, query, n=DEPTH):
         import numpy as np
 
-        active, ids, matrix = self._matrix()
+        silent = getattr(self._searching, "silent", None)
+        silent = self.silent if silent is None else silent
+        held = self._matrix()
+        if held is None:
+            silent["dense"] = f"a pass holds the store past {self.timeout_s:g} s: the vectors are left out"
+            return []
+        active, ids, matrix = held
         if active is None:
-            self.silent["dense"] = "no encoder is active: no vector pass has completed"
+            silent["dense"] = "no encoder is active: no vector pass has completed"
             return []
         if not ids:
-            self.silent["dense"] = f"the active encoder {active['key']} has no vector this search may read"
+            silent["dense"] = f"the active encoder {active['key']} has no vector this search may read"
             return []
         try:
             vector = Embedder(Encoder(**active["card"]), self.timeout_s).query(query)
         except VectorError as exc:
-            self.silent["dense"] = str(exc)
+            silent["dense"] = str(exc)
             return []
         # The question's vector comes as its unit vector (normalized in double precision): a cast never overflows.
         scores = matrix @ np.asarray(vector, dtype=np.float32)
@@ -124,8 +149,23 @@ class Searcher:
         return [(ids[j], float(scores[j])) for j in order]
 
     def search(self, query, k=10, stages=("symbols", "lexical", "dense"), rerank=False):
-        """The fused, cited passages, k at most; with ``rerank``, the first ones judged by the reranker."""
-        self.silent = silent = {}
+        """The fused, cited passages, k at most (``find``'s); the silences kept on the searcher, the last search's."""
+        found = self.find(query, k, stages, rerank)
+        self.silent = found.silent
+        return found.hits
+
+    def find(self, query, k=10, stages=("symbols", "lexical", "dense"), rerank=False):
+        """``Found``: the fused, cited passages, k at most -- with ``rerank``, the first ones judged by the
+        reranker --, and the silences of this search's own stages."""
+        silent = {}
+        outer = getattr(self._searching, "silent", None)     # a search run inside another's, on this thread
+        self._searching.silent = silent
+        try:
+            return self._find(query, k, stages, rerank, silent)
+        finally:
+            self._searching.silent = outer
+
+    def _find(self, query, k, stages, rerank, silent):
         worded = query
         if self.bridge is not None and ("symbols" in stages or "lexical" in stages):
             worded = self.bridge.english(query, silent)
@@ -157,15 +197,60 @@ class Searcher:
         hits = list(itertools.islice((c for c in cited if c is not None), want))
         if judging and hits:
             hits = self.reranker(query, hits, self.read, silent)
-        return hits[:max(0, k)]
+        return Found(hits[:max(0, k)], silent)
+
+    def held_root(self, citation):
+        """The root the store holds for the source a citation names, when the citation is one the store holds: the
+        path one of that source's files, the source one this searcher may read, its lines whole numbers in order
+        (1 <= first <= last), its sha256 a text; else None. Never the root the citation carries: a model writes the
+        citations it hands back, and a file the walk skipped (a secret one) or a source it may not read is never read
+        for it."""
+        try:
+            source, path, first, last, sha = (citation[key] for key in ("source", "path", "first", "last", "sha256"))
+        except (KeyError, TypeError):
+            return None
+        if not all(type(n) is int for n in (first, last)) or not 1 <= first <= last:
+            return None
+        if not all(isinstance(text, str) for text in (source, path, sha)):
+            return None
+        try:
+            source.encode("utf-8")
+            path.encode("utf-8")
+        except UnicodeEncodeError:
+            return None         # a lone surrogate (JSON can carry one): no name the store holds
+        allowed, values = self._filter()
+        row = self.store.db.execute(
+            f"SELECT s.root FROM file f JOIN source s ON s.id = f.source WHERE s.name = ? AND f.path = ? AND "
+            f"{allowed}", (source, path, *values)).fetchone()
+        return None if row is None else row[0]
+
+    def lines(self, citation):
+        """The lines of a citation's file, read through the store (``held_root``) as the index read them; None for a
+        citation the store does not hold, or a file that cannot be read now."""
+        root = self.held_root(citation)
+        return None if root is None else source_lines({"root": root, "path": citation["path"]}, self.readers)
 
     def read(self, citation):
-        """The text of a citation's lines while its source still says it (``verify``), else None."""
-        lines = source_lines(citation, self.readers)
-        if lines is None:
-            return None
+        """The text of a citation's lines while its source still says it, read through the store (``lines``), else
+        None."""
+        lines = self.lines(citation)
+        if lines is None or citation["last"] > len(lines):
+            return None         # lines the file does not hold are no text of it
         body = "\n".join(lines[citation["first"] - 1:citation["last"]])
         return body if hashlib.sha256(body.encode("utf-8")).hexdigest() == citation["sha256"] else None
+
+    def verify(self, citation):
+        """``verify`` of a citation read through the store: 'unknown' when the store holds no such file of a source
+        this searcher may read, or its lines are not whole numbers in order, or it carries no sha256 (``held_root``);
+        'modified' when the file holds fewer lines than it cites; else 'fresh', 'modified', 'gone' or 'unchecked',
+        read under the store's root."""
+        root = self.held_root(citation)
+        if root is None:
+            return "unknown"
+        lines = self.lines(citation)
+        if lines is not None and citation["last"] > len(lines):
+            return "modified"
+        return verify(dict(citation, root=root), self.readers)
 
     def cite(self, part_id, score, why):
         """The citation of a part, or None when a pass removed it since a stage found it."""
@@ -182,7 +267,8 @@ class Searcher:
 def verify(citation, readers=None):
     """'fresh' when the source's lines still hash to the citation's sha256; 'modified' when they do not; 'gone'
     when the file is not there. A source of documents is read through ``readers[NAME]`` (``Indexer.readers``);
-    without one, nothing can be checked: 'unchecked', never 'fresh'."""
+    without one, nothing can be checked: 'unchecked', never 'fresh'. The citation's root and path are read as it
+    carries them: for the caller's own citations; one a model handed back goes through ``Searcher.verify``."""
     from .index import UNKNOWN
 
     root = citation["root"]

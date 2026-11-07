@@ -248,10 +248,14 @@ transaction that dropped them until it runs to its end, said when it did
 not, and done by the route's next pass. In a store kept in plaintext,
 the rollback journals of those passes and of the rewrite hold the
 dropped words and are removed, not overwritten. The route never indexes
-the package's data folder or a folder inside it. The account wipe, for a
-single-user install's one user, overwrites and removes every store; with
-several users, it names them as not covered. The plaintext copies an
-encryption run keeps beside the stores stay, as for every store.
+the package's data folder or a folder inside it. A citation the search
+reads back -- one a model hands it -- is read through the store: under
+the root the store holds for the source it names, only a file that
+source holds, of a source the reader may read; never a root or a path
+the citation carries. The account wipe, for a single-user install's one
+user, overwrites and removes every store; with several users, it names
+them as not covered. The plaintext copies an encryption run keeps beside
+the stores stay, as for every store.
 
 Known exception (MP-01): enforcement of the model provenance seal at
 load is wired on the `llama_cpp` backend only. The Ollama backend (the

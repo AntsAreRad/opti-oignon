@@ -269,6 +269,16 @@ def engine_name(backend, model):
     return model + ":latest"
 
 
+def machine_rule():
+    """The engine's module, which says whether a backend stays on this machine, loaded now: a caller with a deadline
+    loads it before setting one, so a cold process's first import never spends a call's own time. A module that
+    cannot be loaded is left to ``on_this_machine``, which then says elsewhere."""
+    try:
+        importlib.import_module("opti_oignon.inference_backend")
+    except Exception:  # noqa: BLE001 - said by on_this_machine, which reads the module again
+        pass
+
+
 def on_this_machine(backend):
     """Whether ``backend`` says its requests stay on this machine: in the process, or to a loopback or unspecified
     address (``inference_backend.is_on_this_machine``). A backend that forwards its requests, or cannot say, is
