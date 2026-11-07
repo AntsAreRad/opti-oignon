@@ -71,6 +71,8 @@ _CONFIG = Path(__file__).resolve().parent.parent / "config" / "onion.yaml"
 _QUESTION_WORDS = frozenset({
     "what", "which", "who", "how", "happened", "about",
     "quoi", "quel", "quelle", "quels", "quelles", "comment",
+    "where", "when", "why", "whom", "whose",
+    "quand", "pourquoi", "combien", "lequel", "laquelle", "lesquels", "lesquelles",
 })
 
 

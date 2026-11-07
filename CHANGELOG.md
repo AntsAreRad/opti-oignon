@@ -3784,6 +3784,18 @@ package costs.
   origin. Contracts op1-op8 in
   `tests/test_another_port_is_another_site_contracts.py`; xs2 gives way
   to them.
+- A question asked with "where", "when", "why", "whom" or "whose", or in
+  French with "quand", "pourquoi", "combien", "lequel", "laquelle",
+  "lesquels" or "lesquelles", no longer reaches the memory's anchors by
+  that word: it was a term, so an anchor holding it ("Where I live does
+  not matter") ranked with the one that answers. The twelve join the words
+  a question asks with; "ou" was already set aside as a function word. The
+  cost: a name or a title made of one of them alone (a boat called the
+  Pourquoi-Pas, the song "Why") no longer reaches its anchor by it. A
+  replay registered before it ran (LoCoMo, ten conversations, 1 530
+  questions with an answer) kept the answer's words in the window as well:
+  +0.001 [-0.002, +0.004]. Contracts QW1-QW2 in
+  `tests/test_question_words_contracts.py`.
 - Importing the network manager no longer reaches the inference engine.
   Its module ran a health check when it was loaded, so importing the
   executor, which imports it, asked the engine before anything ran. The
