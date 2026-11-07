@@ -848,7 +848,7 @@ class SecurityModeManager:
         that cannot be read, make it readable. Nothing is written.
 
         Scoped to the brick on purpose. A backend whose load seam never calls
-        the gate (Ollama, llama-server today) is not bricked by escalation, so
+        the gate (llama-server today) is not bricked by escalation, so
         its manifest -- absent, sealed with a MAC, or forged -- earns no blocker
         even though loading unverified weights in a fortress is its own
         weakness. That weakness is documented as a gap; turning it into an
@@ -857,7 +857,8 @@ class SecurityModeManager:
         is asked before the manifest is read, and a reading that cannot run is
         no verdict either: the host then escalates into a gate that refuses.
         """
-        backend = _default_backend()
+        # No backend named in backends.yaml: the registry activates Ollama, so Ollama's gate is the one a load meets.
+        backend = _default_backend() or "ollama"
         try:
             from opti_oignon.model_provenance import backend_enforces_provenance
         except Exception as exc:  # noqa: BLE001 - a broken import is not a verdict
@@ -877,7 +878,10 @@ class SecurityModeManager:
             )
 
             reading = read_manifest_for_fortress()
-            if reading.status == REASON_VERIFIED and reading.entries:
+            # Ollama's gate reads the entries of its own models (``ollama:<name>``): a manifest that pins only GGUF
+            # files leaves every Ollama request refused in Bulbe, a brick like an absent one (MP-01).
+            pinned = [key for key in reading.entries if (backend == "ollama") == str(key).startswith("ollama:")]
+            if reading.status == REASON_VERIFIED and pinned:
                 return []
         except Exception as exc:  # noqa: BLE001 - a check that cannot run is not a verdict
             logger.error("the provenance manifest could not be judged: %s", exc)
@@ -887,9 +891,15 @@ class SecurityModeManager:
         except Exception as exc:  # noqa: BLE001 - the verdict stands without its advice
             logger.error("the way out of the provenance manifest could not be named: %s", exc)
             way = f"name the way out by hand: it could not be named here ({type(exc).__name__})"
+        if backend == "ollama" and reading.status in (REASON_MANIFEST_MISSING, REASON_VERIFIED):
+            # The GGUF enrolment pins no Ollama model: the Ollama one is the way out of this host (review 255-1).
+            way = ("enrol the Ollama models the engine lists (POST /api/security/pqc/enroll-ollama-models)")
 
         if reading.status == REASON_MANIFEST_MISSING:
             found = "this host has no provenance manifest"
+        elif reading.status == REASON_VERIFIED and reading.entries:
+            found = ("its provenance manifest pins no Ollama model" if backend == "ollama"
+                     else "its provenance manifest pins no GGUF model")
         elif reading.status == REASON_VERIFIED:
             found = "its provenance manifest pins no model"
         else:

@@ -238,7 +238,7 @@ HOMES = {
         factories=("_transport", "_embed_client"),
         callers_in=(),
         ungated={},
-        sinks=14,
+        sinks=15,           # 255: the engine's list read for the provenance gate, through _transport
         contracts=("bg1", "bg2"),
         reason=(
             "the inference transports: every request to Ollama or to a llama-server asks the local "

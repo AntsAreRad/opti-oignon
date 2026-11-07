@@ -107,6 +107,10 @@ def live(monkeypatch):
         if name.lower().endswith("_proxy") or name == "OLLAMA_HOST":
             monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(inference_backend, "_live_mode", lambda: "bulbe")
+    # The models' provenance is OV's (test_ollama_provenance_contracts): passed here, never read from the data.
+    from opti_oignon import model_provenance
+
+    monkeypatch.setattr(model_provenance, "guard_ollama", lambda name, digest, **kwargs: None)
     monkeypatch.setattr(inference_backend, "_governor_admission", lambda model, options, unsplittable=None: None)
     monkeypatch.setattr(inference_backend, "_governor_note_threads", lambda model, options: None)
     servers = []

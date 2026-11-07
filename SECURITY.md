@@ -270,14 +270,31 @@ knowledge base never answers in its place. The bridge that translates a
 turn's question is made for that search alone and keeps no question past
 it.
 
-Known exception (MP-01): enforcement of the model provenance seal at
-load is wired on the `llama_cpp` backend only. The Ollama backend (the
-default) and the llama-server backend load model weights without an
-integrity check, so under Bulbe the "only a verified model loads"
-guarantee holds for `llama_cpp` but not for those two backends.
-Extending the gate to the Ollama blob store is the remaining work, and
-it is tracked as such. The startup security checklist reports the
-active backend's provenance coverage as an advisory warning.
+The model provenance seal covers the `llama_cpp` backend at load and,
+since MP-01 was closed, the Ollama backend (the default) at every
+request: an Ollama model is pinned by the sha256 of its manifest (which
+names every layer by the sha256 of its bytes), under the same seal as
+the GGUF files, and each chat, stream or embedding request for it is
+checked against the digest the engine lists for it now -- refused under
+Bulbe when it is not pinned or differs, observed in Daily by default.
+Enrolment reads the model's manifest and layers from the engine's
+folder and refuses a layer that does not hash to its name, for the
+models already pinned too; the same check runs on demand (`POST
+/api/security/pqc/verify-ollama-models`). The requests compare the
+digest the engine lists, never the layers' bytes: a layer rewritten in
+place after its enrolment passes the requests until one of those checks
+runs. The escalation preflight refuses Bulbe on an Ollama host (named in
+`backends.yaml`, or the registry's default when none is) whose manifest
+pins no Ollama model, and on a `llama_cpp` host whose manifest pins no
+GGUF file. The limits: the seal
+proves where the weights come from, never that they are harmless --
+weights poisoned in training pass a valid seal; the key is the local
+account's; the digest the engine lists is kept five seconds, and between
+the check and the engine's load, which happens by name in another
+process, a window remains. Known exception (MP-01, what remains): the
+llama-server backend loads weights without an integrity check; the
+startup security checklist reports the active backend's provenance
+coverage.
 
 
 ### Layer 3 -- Isolation and sandboxing

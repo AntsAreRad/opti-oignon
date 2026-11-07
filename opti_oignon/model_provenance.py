@@ -77,6 +77,7 @@ import hmac as _hmac
 import json
 import logging
 import os
+import re
 import stat
 import time
 from collections.abc import Callable
@@ -578,15 +579,16 @@ def _load_config() -> dict[str, Any]:
         return {}
 
 
-# The backends whose load seam actually calls the gate above. Measured, not
-# assumed: only LlamaCppBackend._get_or_load is wired to guard_model_load today.
-# The other backends load weights with no provenance check, so a host that
+# The backends whose seam actually calls a gate. Measured, not assumed:
+# LlamaCppBackend._get_or_load calls guard_model_load, and OllamaBackend calls
+# guard_ollama before every request (MP-01). llama-server loads weights with no
+# provenance check, so a host that
 # serves loads through them is not BRICKED by escalation -- it is a weaker
 # posture, documented as a gap, not an escalation refusal that would buy no
 # security. The escalation preflight keys off this set to tell a real brick from
 # that gap; when the gate is wired into another backend, its name MUST join this
 # set or the preflight stops protecting against the brick that wiring causes.
-PROVENANCE_GATED_BACKENDS = frozenset({"llama_cpp"})
+PROVENANCE_GATED_BACKENDS = frozenset({"llama_cpp", "ollama"})
 
 
 def backend_enforces_provenance(backend: str | None) -> bool:
@@ -1409,3 +1411,299 @@ def guard_model_load(
     if not decision.allowed:
         raise ProvenanceRefusal(decision)
     return decision
+
+
+# ---------------------------------------------------------------------------
+# Ollama models (MP-01)
+# ---------------------------------------------------------------------------
+#
+# Ollama loads a model by its name, in its own process: there is no file for this process to hash before the load.
+# What Ollama names a model by is its manifest, whose sha256 is the digest the engine lists for it, and the manifest
+# names every layer by the sha256 of its bytes. So a model is pinned by that digest, under the same seal as the GGUF
+# files (an entry ``ollama:<name:tag>``, its ``sha256`` the manifest's), and each request for it is checked against
+# the digest the engine lists now. Another model pulled or created under the same name has another manifest, hence
+# another digest, and is refused under enforcement. A layer rewritten on the disk under its own name is not seen by
+# the engine; ``verify_ollama_layers`` hashes the layers, at enrolment and on demand. The limits: the seal proves the
+# origin of the weights, never their innocence (weights poisoned in training pass a valid seal); the key is the local
+# account's; between the check and the engine's load a window remains, the engine loading by name out of process.
+
+OLLAMA_PREFIX = "ollama:"
+REASON_NOT_LISTED = "not_listed"        # the engine lists no model by that name: nothing to compare
+_said_ollama: set[tuple[str, str]] = set()
+# A part of a model's name, as the engine's registry spells one: never ".", "..", or a separator.
+_NAME_PART = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,127}\Z")
+
+
+class OllamaPinChanged(PinnedFileChanged):
+    """Pinned Ollama models whose digest changed: named, nothing written, unless re-pinned by name."""
+
+    def __init__(self, models: list[str]):
+        ProvenanceError.__init__(
+            self,
+            "Pinned Ollama models whose digest changed, refused, nothing written: " + ", ".join(models)
+            + ". Check them, then re-pin each by its name (repin in POST /api/security/pqc/enroll-ollama-models)")
+        self.models = list(models)
+
+
+def _name_parts(name: str) -> list[str] | None:
+    """The parts of a model's ``name:tag`` path in the engine's folder, or None when one could leave it."""
+    full = ollama_name(name)
+    model, tag = full.rsplit(":", 1)
+    parts = model.split("/")
+    if len(parts) == 1:
+        parts = ["registry.ollama.ai", "library", parts[0]]
+    elif len(parts) == 2:
+        parts = ["registry.ollama.ai", *parts]
+    parts.append(tag)
+    if not all(_NAME_PART.match(part) and part not in (".", "..") for part in parts):
+        return None
+    return parts
+
+
+def ollama_name(name: str) -> str:
+    """A model's name as the engine lists it: ``name:tag``, ``latest`` when no tag is given."""
+    name = str(name or "").strip()
+    return name if ":" in name.rsplit("/", 1)[-1] else f"{name}:latest"
+
+
+def ollama_key(name: str) -> str:
+    """The manifest entry of an Ollama model."""
+    return OLLAMA_PREFIX + ollama_name(name)
+
+
+def plain_digest(digest: Any) -> str:
+    """A sha256 as hex, lower case, its ``sha256:`` prefix dropped."""
+    text = str(digest or "").strip().lower()
+    return text[len("sha256:"):] if text.startswith("sha256:") else text
+
+
+def classify_ollama(
+    name: str,
+    digest: Any,
+    manifest: dict[str, Any] | None,
+    *,
+    keys: SealKeys | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
+) -> tuple[str, str | None]:
+    """Classify an Ollama model's listed ``digest`` against the manifest. Pure: no policy, no raise. ``digest`` may
+    be a callable that asks the engine for it: it is called only once the model is found pinned under a seal that
+    verifies -- an unpinned model is decided without asking the engine anything."""
+    if manifest is None:
+        return REASON_MANIFEST_MISSING, None
+    if not manifest:
+        return REASON_MANIFEST_UNREADABLE, None
+    seal_keys = keys if keys is not None else resolve_seal_keys()
+    if seal_keys is None:
+        return REASON_KEY_UNAVAILABLE, None
+    seal_reason = verify_seal(_payload_of(manifest), manifest.get("seal"), seal_keys, verifier=verifier)
+    if seal_reason != REASON_VERIFIED:
+        return seal_reason, None
+    entry = (manifest.get("entries") or {}).get(ollama_key(name))
+    if not isinstance(entry, dict) or not entry.get("sha256"):
+        return REASON_UNPINNED, None
+    listed = plain_digest(digest() if callable(digest) else digest)
+    if not listed:
+        return REASON_NOT_LISTED, None
+    if not _hmac.compare_digest(listed, plain_digest(entry.get("sha256"))):
+        return REASON_DIGEST_MISMATCH, listed
+    return REASON_VERIFIED, listed
+
+
+def verify_ollama(
+    name: str,
+    digest: Any,
+    *,
+    manifest_path: Path | str | None = None,
+    mode: str | None = None,
+    config: dict[str, Any] | None = None,
+    keys: SealKeys | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
+) -> ProvenanceDecision:
+    """Classify an Ollama model and apply the enforcement policy; an unverified model is said once per process,
+    model and reason (each request of an observing host would say it again otherwise)."""
+    enforcement = enforcement_mode(mode=mode, config=config)
+    reason, listed = classify_ollama(name, digest, load_manifest(manifest_path), keys=keys, verifier=verifier)
+    allowed = decide(reason, enforcement)
+    if reason != REASON_VERIFIED and (ollama_name(name), reason + str(allowed)) not in _said_ollama:
+        _said_ollama.add((ollama_name(name), reason + str(allowed)))
+        (logger.error if not allowed else logger.warning)(
+            "Model provenance %s for the Ollama model %s: %s",
+            "REFUSED" if not allowed else "not verified (observing)", ollama_name(name), reason)
+    return ProvenanceDecision(allowed=allowed, reason=reason, enforcement=enforcement,
+                              model=ollama_key(name), digest=listed)
+
+
+def guard_ollama(name: str, digest: Any, **kwargs: Any) -> ProvenanceDecision:
+    """The gate the Ollama backend calls before a request for ``name`` leaves. Raises to refuse."""
+    decision = verify_ollama(name, digest, **kwargs)
+    if not decision.allowed:
+        raise ProvenanceRefusal(decision)
+    return decision
+
+
+def ollama_models_dir() -> Path:
+    """Where the engine keeps its manifests and blobs: ``OLLAMA_MODELS``, or ``~/.ollama/models``."""
+    return Path(os.environ.get("OLLAMA_MODELS") or Path.home() / ".ollama" / "models")
+
+
+def read_ollama_manifest(name: str, models_dir: Path | str | None = None) -> tuple[str, list[str]] | None:
+    """(the sha256 of the model's manifest bytes, its layers' digests) read from the engine's folder, or None when
+    the folder or the manifest cannot be read (the library's registry and namespace assumed for a bare name)."""
+    base = Path(models_dir) if models_dir is not None else ollama_models_dir()
+    parts = _name_parts(name)
+    if parts is None:
+        return None             # a name that could climb out of the engine's folder is no model's
+    path = base.joinpath("manifests", *parts)
+    try:
+        raw = path.read_bytes()
+        held = json.loads(raw)
+    except (OSError, ValueError):
+        return None
+    layers = [plain_digest(item.get("digest")) for item in [held.get("config") or {}, *(held.get("layers") or [])]
+              if isinstance(item, dict) and item.get("digest")]
+    return hashlib.sha256(raw).hexdigest(), layers
+
+
+def verify_ollama_layers(layers: list[str], models_dir: Path | str | None = None,
+                         chunk_size: int = _CHUNK) -> list[str]:
+    """The layers whose blob does not hash to its name (or cannot be read), each as ``<digest>: <why>``; [] when all
+    hold. A blob is named by the sha256 of its bytes: one rewritten under its own name is seen here."""
+    base = (Path(models_dir) if models_dir is not None else ollama_models_dir()) / "blobs"
+    bad = []
+    for layer in layers:
+        path = base / f"sha256-{plain_digest(layer)}"
+        try:
+            held = compute_digest(path, chunk_size=chunk_size)
+        except OSError as exc:
+            bad.append(f"{plain_digest(layer)}: unreadable ({type(exc).__name__})")
+            continue
+        if not _hmac.compare_digest(held, plain_digest(layer)):
+            bad.append(f"{plain_digest(layer)}: its bytes hash to {held}")
+    return bad
+
+
+def enroll_ollama_models(
+    models: list[tuple[str, str]],
+    *,
+    manifest_path: Path | str | None = None,
+    models_dir: Path | str | None = None,
+    keys: SealKeys | None = None,
+    signer: Callable[[bytes, bytes], bytes] | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
+    repin: list[str] | tuple[str, ...] = (),
+    chunk_size: int = _CHUNK,
+) -> dict[str, Any]:
+    """Pin the Ollama models ``models`` (``(name, digest)``, as the engine lists them) under the manifest's ONE seal.
+
+    The same rules as ``enroll_models``: only a manifest whose seal verifies here is carried, an absent one is a
+    fresh start, any other is refused by its reason, nothing written; no key, no write; a pinned model whose digest
+    changed is never re-pinned on the way (``PinnedFileChanged``) unless named in ``repin``. Each model's manifest
+    is read from the engine's folder when it can be: its bytes must hash to the listed digest, and every layer must
+    hash to its name (``verify_ollama_layers``), or the model is refused by name, nothing written; a folder that
+    cannot be read pins the listed digest alone, said in ``layers_unchecked``."""
+    if not models:
+        return {"enrolled": [], "count": 0, "kept": [], "repinned": [], "layers_unchecked": [], "written": False}
+    seal_keys = keys if keys is not None else resolve_seal_keys()
+    if seal_keys is None:
+        raise ProvenanceError("No key material available to seal the model provenance manifest")
+    target = Path(manifest_path) if manifest_path is not None else DEFAULT_MANIFEST_PATH
+    reading = read_manifest(target, keys=seal_keys, verifier=verifier)
+    if reading.status == REASON_MANIFEST_MISSING:
+        entries: dict[str, Any] = {}
+    elif reading.status != REASON_VERIFIED:
+        raise _refusal(reading, target)
+    else:
+        entries = dict(reading.entries)
+    named = {ollama_name(n) for n in repin}
+    enrolled, kept, repinned, changed, unchecked, broken = [], [], [], [], [], []
+    for name, digest in models:
+        full, listed = ollama_name(name), plain_digest(digest)
+        if _name_parts(full) is None:
+            broken.append(f"{full!r}: not a model's name (it could leave the engine's folder)")
+            continue
+        if not listed:
+            broken.append(f"{full}: the engine lists no digest")
+            continue
+        held = entries.get(ollama_key(full))
+        if isinstance(held, dict) and plain_digest(held.get("sha256")) == listed:
+            # Kept as pinned -- but its layers hashed again: one rewritten in place since is refused here.
+            read = read_ollama_manifest(full, models_dir)
+            if read is not None:
+                bad = verify_ollama_layers(read[1], models_dir, chunk_size=chunk_size)
+                if read[0] != listed or bad:
+                    broken.append(f"{full}: " + ("; ".join(bad) or f"its manifest on the disk hashes to {read[0]}"))
+                    continue
+            kept.append(full)
+            continue
+        if isinstance(held, dict):
+            if full not in named:
+                changed.append(full)
+                continue
+            repinned.append(full)
+        read = read_ollama_manifest(full, models_dir)
+        layers: list[str] = []
+        if read is None:
+            unchecked.append(full)
+        else:
+            on_disk, layers = read
+            if on_disk != listed:
+                broken.append(f"{full}: its manifest on the disk hashes to {on_disk}, the engine lists {listed}")
+                continue
+            bad = verify_ollama_layers(layers, models_dir, chunk_size=chunk_size)
+            if bad:
+                broken.append(f"{full}: " + "; ".join(bad))
+                continue
+        entries[ollama_key(full)] = {"sha256": listed, "kind": "ollama", "layers": layers,
+                                     "recorded_at": time.time()}
+        enrolled.append({"model": full, "sha256": listed})
+    if broken:
+        raise ProvenanceError("Ollama models not enrolled, nothing written: " + " | ".join(broken))
+    if changed:
+        raise OllamaPinChanged(changed)
+    moved = reading.status == REASON_VERIFIED and reading.scheme != seal_keys.scheme
+    written = bool(enrolled) or moved
+    if written:
+        payload = {"version": MANIFEST_VERSION, "entries": entries}
+        sealed = dict(payload)
+        sealed["seal"] = compute_seal(payload, seal_keys, signer=signer)
+        save_manifest(sealed, target)
+    logger.info("Enrolled %d Ollama model(s) under %s, %d kept", len(enrolled), seal_keys.scheme, len(kept))
+    return {"enrolled": enrolled, "count": len(enrolled), "kept": kept, "repinned": repinned,
+            "layers_unchecked": unchecked, "scheme": seal_keys.scheme, "written": written}
+
+
+def verify_ollama_pins(
+    *,
+    manifest_path: Path | str | None = None,
+    models_dir: Path | str | None = None,
+    keys: SealKeys | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
+    chunk_size: int = _CHUNK,
+) -> list[str]:
+    """The check on demand of every pinned Ollama model against the engine's folder: its manifest on the disk must
+    hash to the pinned digest and every layer to its name; what does not, each as ``<name:tag>: <why>``; [] when all
+    hold. A manifest that does not verify here is itself the one line. The requests check the digest the engine lists,
+    never the layers' bytes: a layer rewritten in place after its enrolment is seen here, or at the next enrolment."""
+    seal_keys = keys if keys is not None else resolve_seal_keys()
+    if seal_keys is None:
+        return ["the manifest: no key to verify its seal"]
+    target = Path(manifest_path) if manifest_path is not None else DEFAULT_MANIFEST_PATH
+    reading = read_manifest(target, keys=seal_keys, verifier=verifier)
+    if reading.status != REASON_VERIFIED:
+        return [f"the manifest: {reading.status}"]
+    out = []
+    for key, entry in sorted(reading.entries.items()):
+        if not str(key).startswith(OLLAMA_PREFIX):
+            continue
+        name = str(key)[len(OLLAMA_PREFIX):]
+        read = read_ollama_manifest(name, models_dir)
+        if read is None:
+            out.append(f"{name}: its manifest cannot be read in the engine's folder")
+            continue
+        if read[0] != plain_digest(entry.get("sha256")):
+            out.append(f"{name}: its manifest on the disk hashes to {read[0]}, pinned {plain_digest(entry.get('sha256'))}")
+            continue
+        bad = verify_ollama_layers(read[1], models_dir, chunk_size=chunk_size)
+        if bad:
+            out.append(f"{name}: " + "; ".join(bad))
+    return out

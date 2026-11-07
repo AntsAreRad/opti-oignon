@@ -2278,6 +2278,66 @@ async def enroll_on_disk_models(request: EnrollModelsRequest | None = None) -> d
     return {"success": True, "seal": manifest_seal_scheme(), **result}
 
 
+class EnrollOllamaModelsRequest(BaseModel):
+    """Re-pin named Ollama models whose digest changed since they were pinned."""
+
+    repin: list[str] = Field(default_factory=list)
+
+
+@router.post("/pqc/enroll-ollama-models")
+async def enroll_ollama_models_route(request: EnrollOllamaModelsRequest | None = None) -> dict[str, Any]:
+    """Pin the models the Ollama engine lists in the provenance manifest (MP-01).
+
+    Under Bulbe the Ollama backend refuses every request for a model it cannot
+    verify, so a host whose Ollama models are not pinned is held there until it
+    enrols them: this is that handle. Each model's manifest and layers are read
+    from the engine's folder and hashed (a layer that does not hash to its name
+    refuses the enrolment, 409, nothing written); a folder that cannot be read
+    pins the listed digest alone and says so. A pinned model whose digest changed
+    is named and refused (409), unless the body names it in repin.
+    """
+    ask = request or EnrollOllamaModelsRequest()
+    if not PROVENANCE_SEAL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Model provenance is not available")
+
+    from opti_oignon.model_provenance import enroll_ollama_models
+
+    try:
+        from opti_oignon.inference_backend import get_backend_registry
+
+        # The registered Ollama backend, whichever backend is active: per-model routing reaches it too.
+        backend = get_backend_registry().get("ollama")
+        listed = backend.listed_digests() if hasattr(backend, "listed_digests") else {}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Model discovery failed: {exc}") from exc
+    if not listed:
+        return {"success": True, "count": 0, "enrolled": [],
+                "message": "No Ollama backend is registered, or its engine lists no model."}
+    try:
+        result = enroll_ollama_models(sorted(listed.items()), repin=ask.repin)
+    except ProvenanceError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Enrolment failed: {exc}") from exc
+    return {"success": True, "seal": manifest_seal_scheme(), **result}
+
+
+@router.post("/pqc/verify-ollama-models")
+async def verify_ollama_models_route() -> dict[str, Any]:
+    """Check every pinned Ollama model against the engine's folder (MP-01): its manifest on the disk must hash to the
+    pinned digest and every layer to its name. The requests compare the digest the engine lists, never the layers'
+    bytes: a layer rewritten in place after its enrolment is found here, or at the next enrolment. Nothing written."""
+    if not PROVENANCE_SEAL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Model provenance is not available")
+    from opti_oignon.model_provenance import verify_ollama_pins
+
+    try:
+        problems = verify_ollama_pins()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"The check failed: {exc}") from exc
+    return {"success": not problems, "problems": problems}
+
+
 # =========================================================================
 # Hash-Chain Signed Audit Log endpoints
 # =========================================================================

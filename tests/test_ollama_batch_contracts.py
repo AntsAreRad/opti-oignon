@@ -19,6 +19,7 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _isolation import isolate, source  # noqa: E402
+from _provenance_stand_in import provenance_seed  # noqa: E402
 
 BUDGET_S = {
     "test_ba1_every_head_sends_the_models_batch_and_a_callers_own_wins": 3.0,
@@ -48,7 +49,8 @@ class _Fake:
 
 
 def _open_backend():
-    loaded, restore = isolate(targets={_BACKEND: source("inference_backend.py")}, packages=("opti_oignon",))
+    loaded, restore = isolate(targets={_BACKEND: source("inference_backend.py")}, packages=("opti_oignon",),
+                              seeded=provenance_seed())  # the provenance gate stood in (MP-01)
     mod = loaded[_BACKEND]
     fake = _Fake()
     mod.OLLAMA_AVAILABLE = True

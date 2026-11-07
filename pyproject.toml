@@ -1878,4 +1878,6 @@ addopts = """
     --deselect=tests/test_mycelium_place_contracts.py::test_mp10_an_indexer_forgets_what_it_held_of_a_forgotten_source
     --deselect=tests/test_provenance_gate_contracts.py::test_pv10_every_agent_and_chat_tool_has_a_class_from_the_closed_set_of_six
     --deselect=tests/test_provenance_gate_contracts.py::test_pv13_the_agent_allowlists_are_the_class_table_read_per_mode
+    --deselect=tests/test_escalation_preflight_verifies_contracts.py::test_ev7_an_ungated_backend_escalates_whatever_its_manifest_and_it_is_not_read
+    --deselect=tests/test_fortress_readiness_contracts.py::test_f21_the_gated_backend_set_is_measured_not_guessed
 """

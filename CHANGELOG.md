@@ -11,6 +11,36 @@ package costs.
 
 ### Added
 
+- [SECURITY] The model provenance seal covers the Ollama backend (MP-01):
+  each Ollama model is pinned by the sha256 of its manifest -- which
+  names every layer by the sha256 of its bytes -- under the same seal as
+  the GGUF files, and every chat, stream and embedding request for it is
+  checked against the digest the engine lists for it now. Under Bulbe a
+  model that is not pinned, or whose digest changed, is refused before
+  anything is started for it (no admission, no request); in Daily it is
+  observed by default, said once per model and reason; the check reads
+  the request's mode, as the host rule does. The engine is asked for
+  the digest only for a pinned model, its list kept five seconds. `POST /api/security/pqc/enroll-ollama-models` pins the models
+  the engine lists: each one's manifest and layers are read from the
+  engine's folder and hashed (the models already pinned too), a layer
+  that does not hash to its name refuses the enrolment by name, and
+  nothing is written; a changed digest is re-pinned only when named; a
+  name that could leave the engine's folder is refused.
+  `POST /api/security/pqc/verify-ollama-models` runs the same check on
+  demand: the requests compare the listed digest, never the layers'
+  bytes, so a layer rewritten in place after its enrolment passes until
+  a check runs. Ollama now counts as a guarded backend: the escalation to
+  Bulbe of an Ollama host (named, or the registry's default when none is)
+  is refused, named, with the Ollama enrolment as its way out, until its
+  manifest pins an Ollama model; a llama_cpp host whose manifest pins no
+  GGUF file is held too; the startup checklist reports the coverage. A
+  host off the machine in Bulbe is refused for its host before its
+  provenance is asked. Until then, a host already in Bulbe gets its Ollama requests
+  refused: enrol the models (one call). The seal proves where the weights
+  come from, never that they are harmless -- weights poisoned in training
+  pass a valid seal. llama-server stays outside the seal (the remaining
+  exception). Contracts OV1-OV9; EV7 and F21, which pinned Ollama as
+  ungated, are superseded by OV7 and OV6.
 - [SECURITY] A project's chat reads its Mycelium store: the project
   context of a turn comes from the project's own store (`project_<id>`),
   its passages under the names the files were added under, with their

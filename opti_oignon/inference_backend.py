@@ -1246,6 +1246,7 @@ class OllamaBackend(InferenceBackend):
         """
         if not OLLAMA_AVAILABLE:
             return None
+        self._provenance_gate(model)
         told = _with_threads(self._with_batch(model, None), _governor_admission(model, None))
         extra = {"options": told} if told else {}
         result = self._embed_client(timeout).embed(model=model, input=text, **extra)
@@ -1265,6 +1266,7 @@ class OllamaBackend(InferenceBackend):
         texts = list(texts)
         if not texts:
             return []
+        self._provenance_gate(model)
         told = _with_threads(self._with_batch(model, None), _governor_admission(model, None))
         extra = {"options": told} if told else {}
         result = self._embed_client(timeout).embed(model=model, input=texts, **extra)
@@ -1375,6 +1377,72 @@ class OllamaBackend(InferenceBackend):
             extra=extra,
         )
 
+    # The digests the engine listed, by model, and when: a request asks the engine's list at most once every
+    # DIGEST_TTL_S seconds (the window a model replaced under its name may still be served for, said in SECURITY.md).
+    DIGEST_TTL_S = 5.0
+
+    def listed_digests(self) -> dict[str, str]:
+        """``{name:tag: digest}`` as the engine lists its models now (each manifest's sha256); {} when it lists
+        none or cannot be asked."""
+        from opti_oignon.model_provenance import ollama_name
+
+        listed: dict[str, str] = {}
+        try:
+            response = self._transport().list()
+            raw = getattr(response, "models", None)
+            if raw is None and isinstance(response, dict):
+                raw = response.get("models")
+            for m in raw or []:
+                key = (m.get("model") or m.get("name")) if isinstance(m, dict) else (
+                    getattr(m, "model", None) or getattr(m, "name", None))
+                digest = m.get("digest") if isinstance(m, dict) else getattr(m, "digest", None)
+                if key and digest:
+                    listed[ollama_name(key)] = str(digest)
+        except Exception as exc:  # noqa: BLE001 - an engine that does not list: nothing to compare, said by the gate
+            logger.debug("Ollama list for the provenance gate failed: %s", type(exc).__name__)
+        return listed
+
+    def _listed_digest(self, model: str) -> str | None:
+        """The digest the engine lists now for ``model``, the engine's list kept DIGEST_TTL_S seconds; None when
+        it lists none."""
+        import time as _time
+
+        from opti_oignon.model_provenance import ollama_name
+
+        name = ollama_name(model)
+        held = getattr(self, "_digests", None)
+        if held is None:
+            held = self._digests = {}
+        now = _time.monotonic()
+        if name in held and now - held[name][1] < self.DIGEST_TTL_S:
+            return held[name][0]
+        listed = self.listed_digests()
+        for key, digest in listed.items():
+            held[key] = (digest, now)
+        held[name] = (listed.get(name), now)
+        return held[name][0]
+
+    def _provenance_gate(self, model: str) -> None:
+        """The model's provenance, checked before a request for it leaves (MP-01): the digest the engine lists for
+        it (asked only for a pinned model) against the one pinned in the sealed manifest; refused under enforcement
+        (Bulbe always), observed in Daily by default. A provenance module that cannot be imported refuses whenever the mode enforces, as the
+        ``llama_cpp`` seam does."""
+        # A host off the machine in Bulbe is refused for its host first, the reason said (as the transport says it).
+        refusal = self._bulbe_refusal()
+        if refusal:
+            raise RuntimeError(refusal)
+        try:
+            from opti_oignon import model_provenance as _provenance
+        except Exception as exc:
+            if _live_mode() != "daily":
+                raise RuntimeError(
+                    "Model provenance verification is unavailable and the current security mode enforces it; "
+                    f"refusing to send a request for {model}") from exc
+            logger.warning("Model provenance unavailable; the request for %s continues unverified: %s", model, exc)
+            return
+        # The request's mode, read once by this module's reader, as the host rule above reads it: one mode per request.
+        _provenance.guard_ollama(model, lambda: self._listed_digest(model), mode=_live_mode())
+
     def generate(
         self,
         model: str,
@@ -1394,6 +1462,8 @@ class OllamaBackend(InferenceBackend):
         engine_options, schema, tools = _split_extras(options)
         engine_options, timeout = _pop_timeout(engine_options)
         engine_options = self._with_batch(model, engine_options)
+        # The model's provenance before anything is started for it (MP-01).
+        self._provenance_gate(model)
 
         # Governor admission hook (after the availability guard so
         # the "not installed" error semantics stay exactly as pinned).
@@ -1474,6 +1544,8 @@ class OllamaBackend(InferenceBackend):
         engine_options, schema, tools = _split_extras(options)
         engine_options, timeout = _pop_timeout(engine_options)
         engine_options = self._with_batch(model, engine_options)
+        # The model's provenance before anything is started for it (MP-01).
+        self._provenance_gate(model)
 
         # Governor admission hook. A generator head runs at first
         # iteration; the funnel's ticket is thread-local, so funnels set it

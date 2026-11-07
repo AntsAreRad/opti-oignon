@@ -808,15 +808,15 @@ def _check_backend_provenance_coverage() -> CheckItem:
     detector and the Ollama-limits advisory, this check NEVER returns
     severity "critical", so it can never set the blocked flag.
 
-    The model-provenance gate (guard_model_load) is wired on the llama_cpp
-    backend only (model_provenance.PROVENANCE_GATED_BACKENDS). The Ollama
-    and llama-server backends load weights with no integrity check, so when
-    either is the active backend the "only a verified model loads" posture
-    is not in force for the weights actually loaded -- including under
-    bulbe, where that posture is otherwise strongest. Naming the gap here
-    keeps the checklist honest instead of implying a coverage the code does
-    not provide. Extending the gate to the Ollama blob store is tracked as
-    remaining work; this check only reports the state. Never raises.
+    The model-provenance gate is wired on the llama_cpp backend at load
+    (guard_model_load) and on the Ollama backend at every request
+    (guard_ollama) -- model_provenance.PROVENANCE_GATED_BACKENDS. The
+    llama-server backend loads weights with no integrity check, so when it
+    is the active backend the "only a verified model loads" posture is not
+    in force for the weights actually loaded -- including under bulbe,
+    where that posture is otherwise strongest. Naming the gap here keeps
+    the checklist honest instead of implying a coverage the code does not
+    provide; this check only reports the state. Never raises.
     """
     try:
         from opti_oignon.model_provenance import backend_enforces_provenance
@@ -840,8 +840,8 @@ def _check_backend_provenance_coverage() -> CheckItem:
                 name="backend_provenance_coverage",
                 passed=True,
                 severity="info",
-                detail=f"Active backend '{backend}' enforces model "
-                       "provenance at load",
+                detail=f"Active backend '{backend}' verifies model "
+                       "provenance " + ("at load" if backend == "llama_cpp" else "before each request"),
                 score_impact=0,
             )
         # Active backend not gated: advisory warning, never blocking --
@@ -857,16 +857,14 @@ def _check_backend_provenance_coverage() -> CheckItem:
             severity="warning",
             detail=f"Active backend '{backend}' loads model weights without "
                    "an integrity check: the provenance gate is wired on the "
-                   f"llama_cpp backend only.{bulbe_note}",
+                   f"llama_cpp and Ollama backends only.{bulbe_note}",
             score_impact=-3,
             tips=[
-                "Provenance enforcement currently covers the llama_cpp "
-                "backend only (model_provenance.PROVENANCE_GATED_BACKENDS).",
-                "To load only enrolled weights today, set default_backend "
-                "to llama_cpp in config/backends.yaml and enrol the models "
-                "(scripts/enroll_models.py).",
-                "Extending the gate to the Ollama blob store is tracked as "
-                "remaining work.",
+                "Provenance enforcement covers the llama_cpp and Ollama "
+                "backends (model_provenance.PROVENANCE_GATED_BACKENDS).",
+                "To load only enrolled weights, set default_backend to "
+                "ollama or llama_cpp in config/backends.yaml and enrol the "
+                "models.",
             ],
         )
     except Exception as exc:
