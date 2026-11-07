@@ -187,6 +187,24 @@ def _with_layers(options: dict | None, decision: Any) -> dict | None:
     return {**(options or {}), "num_gpu": layers}
 
 
+def _environment_verify() -> Any:
+    """The TLS context httpx itself builds when it trusts the environment,
+    or None when the environment names no certificate (``SSL_CERT_FILE``,
+    ``SSL_CERT_DIR``): a client built for this machine reads no proxy of
+    the environment, and would otherwise lose these with them, refusing a
+    local engine behind TLS the environment trusts. Asked of the httpx
+    installed (``create_ssl_context(trust_env=True)``), never copied, so
+    its own rules hold: which variable first, a name that is no file.
+    """
+    if not os.environ.get("SSL_CERT_FILE") and not os.environ.get("SSL_CERT_DIR"):
+        return None
+    try:
+        import httpx
+    except ImportError:
+        return None
+    return httpx.create_ssl_context(trust_env=True)
+
+
 def ollama_name(model: str) -> str:
     """The name Ollama resolves ``model`` to: one with no tag is its
     ``:latest``; the tag follows the last colon after the last slash, so a
@@ -1100,7 +1118,13 @@ class OllamaBackend(InferenceBackend):
             connect = float(self._connect_timeout)
         if host is None and timeout is None and connect is None:
             return _ollama_module
-        key = (host, timeout, connect)
+        # A request to this machine never goes through a proxy of the
+        # environment (the HTTP client follows one even to a loopback
+        # address) and never follows a redirect elsewhere: what the Bulbe
+        # gate and every "on this machine" check judged is where it goes.
+        endpoint = self.endpoint()
+        local = isinstance(endpoint, str) and _is_on_this_machine(endpoint)
+        key = (host, timeout, connect, endpoint if local else None)
         with self._clients_lock:
             client = self._clients.get(key)
             if client is None:
@@ -1111,6 +1135,12 @@ class OllamaBackend(InferenceBackend):
                     kwargs["timeout"] = timeout
                 elif connect is not None:
                     kwargs["timeout"] = _connect_only_timeout(connect)
+                if local:
+                    kwargs["trust_env"] = False
+                    kwargs["follow_redirects"] = False
+                    verify = _environment_verify()
+                    if verify is not None:
+                        kwargs["verify"] = verify
                 client = _ollama_module.Client(**kwargs)
                 self._clients[key] = client
             return client

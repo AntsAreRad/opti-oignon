@@ -386,6 +386,7 @@ _CHROMA_LOCAL = frozenset({"chromadb.PersistentClient", "chromadb.Client", "chro
 # Value objects of a client library: they hold settings and send nothing.
 _INERT = frozenset({
     "httpx.Timeout", "httpx.Limits", "httpx.Headers", "httpx.URL", "httpx.Cookies",
+    "httpx.create_ssl_context",
     "aiohttp.ClientTimeout",
 })
 

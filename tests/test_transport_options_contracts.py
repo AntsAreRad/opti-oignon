@@ -57,7 +57,7 @@ _MSGS = [{"role": "user", "content": "hi"}]
 class _FakeClient:
     instances = []
 
-    def __init__(self, timeout=None):
+    def __init__(self, timeout=None, **_kwargs):
         type(self).instances.append(timeout)
         self.timeout = timeout
         self.calls = []

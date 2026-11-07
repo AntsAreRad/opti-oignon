@@ -36,6 +36,10 @@ deselected by name; their successors keep every assertion in Daily mode:
   * OH11 -- ``ollama.timeout`` in ``backends.yaml`` bounds the connection
     only, never a long generation; a request's own timeout still binds the
     whole request; without a setting nothing is bound, as before.
+    Deselected by name since the client the engine builds for this machine
+    reads no proxy of the environment and follows no redirect: OH12 keeps
+    every assertion, those two arguments of the client added.
+  * OH12 -- OH11, the client built for this machine with them.
 
 Local-only (the public distribution ships no tests). The backend module is
 loaded through the shared isolation window with the client library faked.
@@ -378,3 +382,32 @@ def test_oh11_the_configured_timeout_bounds_the_connection_and_never_a_generatio
     finally:
         restore()
 
+
+# ---------------------------------------------------------------------------
+# OH12 -- OH11, the client built for this machine reading no proxy, following no redirect
+# ---------------------------------------------------------------------------
+def test_oh12_the_configured_timeout_bounds_the_connection_and_never_a_generation(monkeypatch, tmp_path):
+    monkeypatch.delenv("OLLAMA_HOST", raising=False)
+    mod, fake, restore = _open_daily()
+    try:
+        local = {"trust_env": False, "follow_redirects": False}
+        backend = mod.OllamaBackend(connect_timeout=30)
+        assert backend.generate("m", _MSGS).content == "ok"
+        assert len(fake.clients) == 1 and set(fake.clients[0]) == {"timeout"} | set(local)
+        assert {k: fake.clients[0][k] for k in local} == local, "this machine: no proxy, no redirect"
+        bound = fake.clients[0]["timeout"]
+        assert bound.connect == 30 and bound.read is None and bound.write is None, (
+            "the connection is bounded, a long generation is not"
+        )
+        backend.generate("m", _MSGS, options={"timeout": 7})
+        assert fake.clients[-1] == {"timeout": 7, **local}, "a request's own timeout still binds the whole request"
+        assert mod.OllamaBackend().generate("m", _MSGS).content == "ok" and fake.calls == ["chat"], (
+            "without a setting nothing is bound, as before"
+        )
+
+        config = tmp_path / "backends.yaml"
+        config.write_text(yaml.safe_dump({"ollama": {"host": "http://127.0.0.1:11434", "timeout": 30}}), encoding="utf-8")
+        registry = mod.init_backends_from_config(str(config))
+        assert registry.get("ollama")._connect_timeout == 30.0, "the file's timeout reaches the backend"
+    finally:
+        restore()

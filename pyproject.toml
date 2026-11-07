@@ -1454,6 +1454,7 @@ addopts = """
     --deselect=tests/test_ollama_host_contracts.py::test_oh3_the_environment_variable_wins_over_the_configured_host
     --deselect=tests/test_ollama_host_contracts.py::test_oh4_one_client_per_host_and_timeout_built_once
     --deselect=tests/test_ollama_host_contracts.py::test_oh5_the_endpoint_follows_the_host_and_the_file_reaches_the_backend
+    --deselect=tests/test_ollama_host_contracts.py::test_oh11_the_configured_timeout_bounds_the_connection_and_never_a_generation
     --deselect=tests/test_api_schemas_contracts.py::test_q1_window_holds_and_the_module_is_import_pure
     --deselect=tests/test_pre_cache_contracts.py::test_p6_mapping_and_object_client_responses_both_yield_content
     --deselect=tests/test_routes_benchmark_contracts.py::test_r32_missing_inference_client_yields_an_empty_installed_list

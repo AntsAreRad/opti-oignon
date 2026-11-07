@@ -651,7 +651,7 @@ class _FakeOllamaWithClients(_FakeOllama):
         super().__init__(**kwargs)
         self.clients = []
 
-    def Client(self, timeout=None):  # noqa: N802 - the client library's spelling
+    def Client(self, timeout=None, **_kwargs):  # noqa: N802 - the client library's spelling
         self.clients.append(timeout)
         return self
 

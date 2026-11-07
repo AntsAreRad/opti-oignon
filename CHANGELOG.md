@@ -3859,6 +3859,31 @@ package costs.
   (`remote_bind_refused` audited). Contracts tg1-tg7 in
   `tests/test_revoked_device_never_reaches_the_api_contracts.py`.
 
+- [SECURITY] A request the Ollama engine's own client sends to this
+  machine goes there, and only there. Ollama's client library follows a
+  proxy of the environment (`HTTP_PROXY`, `ALL_PROXY`, a name in any
+  case) even to a loopback address, and follows an engine's redirects: a
+  request that Bulbe mode's gate, the Mycelium's checks or the title
+  refiner had judged local could leave the machine through either, and
+  one did, a question reaching a stand-in proxy in Bulbe mode. Now the
+  client the engine builds for an address of this machine (as the
+  shipped `backends.yaml`, with its host and timeout, always has it
+  build) reads no proxy of the environment and follows no redirect; a
+  redirect fails with the engine's status. It keeps the certificates the
+  environment names (`SSL_CERT_FILE`, `SSL_CERT_DIR`), in the TLS context
+  the installed httpx builds from them, so a local engine behind TLS is
+  still reached. A client for another machine's
+  address, which Daily mode lets the engine ask, is built as before,
+  since a proxy may be needed to reach it. Not covered yet: the
+  library's module-level client, which the engine uses when neither a
+  host nor a valid timeout reaches it (a process that reads no
+  `backends.yaml`, or a file without a timeout while `OLLAMA_HOST` is
+  set); model lifecycle, which pulls, checks and deletes models through
+  `requests` and that client (their names only); and the llama-server
+  backend's requests. PX1-PX4 in the
+  new `tests/test_engine_client_proxy_contracts.py`; OH11 is deselected
+  and kept as OH12, the client's two new arguments added.
+
 - [SECURITY] The Mycelium's encoder is asked only on this machine. Its
   bridge and reranker asked no model elsewhere, but its encoder did: a
   pass of vectors would send a corpus's texts, and a search its question,
