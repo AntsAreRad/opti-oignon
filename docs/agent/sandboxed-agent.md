@@ -38,7 +38,22 @@ it -- and returns cited passages, bounded under the loop's observation caps
 the tools section of the run's prompt says which corpus, or that none is
 indexed.
 It is present in both modes, each call asked in Bulbe, and neutralized in the
-evaluation harness.
+evaluation harness. When the run's search gave the model passages, its final
+answer then goes through the citation gate: each `[path:first-last]` it gives
+is checked, mechanically and with no model, against the lines the search gave
+the model -- the lines the agent loop's message holds whole, as the model is
+handed them, not those its caps cut or its untrusted wrapper defanged (what
+the engine does with a prompt longer than its context is not seen). Its
+verdict is where the citation points (lines the search gave, unchanged, or
+unseen, gone, modified, empty); a line the run read with another tool is not
+counted. Apart, an alert names some identifiers and numbers
+of the citing sentence that the cited lines do not hold. The paragraph is
+added after the answer, never in its place. The gate never says an answer is
+right, and an alert's absence proves nothing: only names with an underscore,
+an inner capital, a leading acronym or dots, code between backquotes, and
+numbers of two digits or more and decimals are compared -- never a plain word,
+a one-digit integer, a path, a URL, a domain, an abbreviation, the line numbers
+a sentence names or the ends of a cited range.
 
 ## Modes and approval
 

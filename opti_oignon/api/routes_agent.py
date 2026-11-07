@@ -195,6 +195,10 @@ class AgentRunManager:
         # The active run's record in the run journal (opti_oignon.run_journal);
         # None when the journal is off or the run's task is not vouched typed.
         self._journal: Any = None
+        # The lines the active run's Mycelium search showed it (gate.Shown):
+        # its final answer's citations are checked against them; None when
+        # the run has no Mycelium search.
+        self._shown: Any = None
 
     # status / control
 
@@ -256,16 +260,43 @@ class AgentRunManager:
                     self._rounds = rnd
             if getattr(event, "kind", "") == "tool_result":
                 self._note_read(getattr(event, "data", {}) or {})
+            data = getattr(event, "data", {}) or {}
+            if getattr(event, "kind", "") == "done":
+                data = self._citations_checked(data)
             payload = json.dumps(
                 _strict_frame({
                     "kind": getattr(event, "kind", ""),
                     "round": rnd,
-                    "data": getattr(event, "data", {}) or {},
+                    "data": data,
                 })
             )
         except Exception:  # pragma: no cover - defensive
             return
         self._broadcast(payload)
+
+    def _citations_checked(self, data: dict) -> dict:
+        """The ``done`` event's data with the citation gate's verdict: when the run's Mycelium search gave the model
+        passages (lines the loop delivered), the verdict paragraph is added after the final text -- never in its
+        place, the model's words kept whole -- and the verdicts given as ``citations``. Unchanged otherwise -- a run
+        that never searched, one with no workspace, whatever its answer cites --, and when the gate cannot run."""
+        with self._lock:
+            shown = self._shown
+        if shown is None or not shown.any():
+            return data
+        try:
+            from opti_oignon.mycelium import gate as citation_gate
+            from opti_oignon.mycelium.index import file_lines
+
+            text = data.get("final_text")
+            text = text if isinstance(text, str) else ""
+            result = citation_gate.check(text, shown, file_lines)
+            paragraph = citation_gate.said(result, True)
+            if not paragraph:
+                return data
+            return dict(data, final_text=(text + "\n\n" + paragraph) if text else paragraph, citations=result)
+        except Exception:  # noqa: BLE001 - the gate never breaks the run's end
+            logger.debug("the citation gate could not check the run's answer", exc_info=True)
+            return data
 
     def _note_read(self, data: dict) -> None:
         """Record a reading tool whose result the run read; one that did not run returned nothing to read."""
@@ -400,6 +431,7 @@ class AgentRunManager:
             self._stop_reason = ""
             self._running = True
             self._journal = None
+            self._shown = None
         run_id = uuid.uuid4().hex[:12]
         try:
             tool_set = agent_tools.build_tool_set(mode)
@@ -436,6 +468,8 @@ class AgentRunManager:
                 mycelium = _mycelium_for_run(sandbox)
                 if mycelium is not None:
                     handlers[_MYCELIUM_SEARCH], mycelium_card = mycelium
+                    with self._lock:
+                        self._shown = getattr(handlers[_MYCELIUM_SEARCH], "shown", None)
             # manage_skills (Daily only) proposes into this run's own review
             # gate, with the run's sandbox for verification steps: no one is
             # asked during the run, the person reviews the whole text later.
@@ -542,6 +576,7 @@ class AgentRunManager:
             with self._lock:
                 self._running = False
                 self._journal = None
+                self._shown = None
 
     def _detach_owned_sandbox(self) -> None:
         """Release the conversation-bound session, never destroying it.

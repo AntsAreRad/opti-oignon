@@ -22,13 +22,15 @@ which, a passage of which no line fits is named and the next ones still tried, a
 named by their citations. When the judge said that no passage
 answers, the answer says that verdict first, and that the judge is wrong about one time in four or five on a question
 the corpus does answer. What the tool gives back is data: the agent's loop wraps every tool result as untrusted
-before the model reads it. A handler never raises."""
+before the model reads it. A handler never raises. The lines its answers gave are kept by the run's handler
+(``handler.shown``) once the agent loop says the model was given them, after its caps (``handler.delivered``): the
+citation gate (``gate``) checks the run's final answer against them."""
 import json
 import logging
 import os
 import threading
 
-from . import place
+from . import gate, place
 
 # New-module safety rule: any change this module drives through the system
 # must checkpoint first. Hardcoded, never overridable.
@@ -213,9 +215,11 @@ def card(sandbox):
             lines.append(f"  - {source['name']} ({source['kind']}, {files} files"
                          + (f", indexed {last['at']})" if last else ")"))
     return ("Mycelium: mycelium_search searches what the owner indexed of this run's workspace, in the corpus `"
-            + corpus + "`, by symbols, full text and meaning; its passages are cited path:first-last, quote the "
-            "citations you use. A passage marked modified or gone no longer says what the file says now. Its "
-            "sources:\n" + "\n".join(lines))
+            + corpus + "`, by symbols, full text and meaning; its passages are cited [path:first-last]. Cite "
+            "the lines you use as [path:first-last] (or [path:line]), in the sentence that says what they hold: "
+            "your final answer's citations are checked against the lines this search gave you (where they point, "
+            "not whether what you say of them is right), and the verdict is shown with it. A passage marked modified or gone no longer says what the file says now. "
+            "Its sources:\n" + "\n".join(lines))
 
 
 def _settings_or_none(load, make):
@@ -303,11 +307,12 @@ def _shown(line):
     return line[:MAX_LINE_CHARS] + f" [... {len(line) - MAX_LINE_CHARS} more characters of this line]"
 
 
-def render(searcher, found, judged):
+def render(searcher, found, judged, shown=None):
     """The tool's answer: the judge's verdict when it found none, the silences, then the widened passages while the
     answer has room (MAX_BYTES, MAX_LINES in all, every head and the closing line counted): a passage that does not fit
     gives its first lines that do, a passage of which no line fits is named and the next ones tried, and once a
-    passage is cut the others are named."""
+    passage is cut the others are named. The lines given are offered to ``shown`` (``gate.Shown``), as they were read,
+    for the citation gate: they count once the agent loop says the model was given them (``Shown.delivered``)."""
     out = []
     if judged is False:
         out.append(JUDGED_NONE)
@@ -321,7 +326,7 @@ def render(searcher, found, judged):
     closing_room = 200 + MAX_NAMED * 120
     used_bytes = sum(_size(block) + 2 for block in out) + closing_room
     used_lines = sum(block.count("\n") + 2 for block in out) + 2
-    named, cut = [], False
+    named, cut, records = [], False, []
     for span in widened(searcher, found.hits):
         cite = f"{span['path']}:{span['first']}-{span['last']}"
         if cut:
@@ -346,6 +351,15 @@ def render(searcher, found, judged):
         else:
             head = f"[{cite}] ({span['state']})"
         block = head + ("\n" + "\n".join(given) if given else "")
+        if given:
+            # The lines as they were read, not as cut for the answer: the gate reads the file the same way. Each with
+            # the offset in its block just past it as given: the gate keeps the lines the model was given whole.
+            ends, end = [], len(head)
+            for line in given:
+                end += 1 + len(line)
+                ends.append(end)
+            records.append((len(out), span["key"][0], span["path"], span["first"],
+                            span["lines"][span["first"] - 1:span["first"] - 1 + len(given)], ends))
         out.append(block)
         used_bytes += _size(block) + 2
         used_lines += len(given) + 2
@@ -353,13 +367,23 @@ def render(searcher, found, judged):
         more = len(named) - MAX_NAMED
         out.append("Passages left out by the answer's bound: " + ", ".join(named[:MAX_NAMED])
                    + (f", and {more} more" if more > 0 else ""))
-    return "\n\n".join(out)
+    answer = "\n\n".join(out)
+    if shown is not None and records:
+        starts = [0]
+        for block in out:
+            starts.append(starts[-1] + len(block) + 2)
+        shown.offer(answer, [(root, path, first, lines, [starts[at] + end for end in ends])
+                             for at, root, path, first, lines, ends in records])
+    return answer
 
 
 def make_handler(sandbox):
     """The run's handler of ``mycelium_search``: what the owner indexed of the run's workspace, searched (see the
-    module's doc); never raises."""
+    module's doc); never raises. ``handler.shown`` keeps the lines its answers gave the model (``gate.Shown``): the
+    run's citation gate reads them; ``handler.delivered(answer, given)`` is how the agent loop says what of an answer
+    the model was given, once its caps are applied."""
     state, root = _workspace(sandbox)
+    shown = gate.Shown()
 
     def handle(arguments):
         try:
@@ -385,9 +409,11 @@ def make_handler(sandbox):
                 searcher = _searcher(store, names)
                 found = searcher.find(query, k, rerank=searcher.reranker is not None)
                 judged = searcher.reranker.found(found.hits) if searcher.reranker is not None else None
-                return render(searcher, found, judged)
+                return render(searcher, found, judged, shown)
         except Exception as exc:  # noqa: BLE001 - a tool's failure is said to the model, never raised into the run
             logger.warning("mycelium: the agent's search failed (%s)", type(exc).__name__)
             return f"The Mycelium could not search this time ({type(exc).__name__})."
 
+    handle.shown = shown
+    handle.delivered = shown.delivered
     return handle

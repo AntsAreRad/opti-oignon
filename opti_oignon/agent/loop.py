@@ -602,6 +602,7 @@ def _capped_observations_message(
     rnd: int,
     sandbox: Any,
     spill_counter: dict[str, int],
+    handlers: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """The 6.1 cap-and-spill transform, applied BEFORE untrusted wrapping.
 
@@ -609,10 +610,15 @@ def _capped_observations_message(
     texts. The ``DispatchResult`` objects are never mutated (events and
     ``tool_results`` keep the full observation; only the transcript copy is
     clipped). Later observations in an over-budget round truncate harder
-    (the over-budget floor), never drop. Returns ``(message_or_None,
-    spill_paths)``.
+    (the over-budget floor), never drop. A handler of ``handlers`` with a
+    ``delivered(observation, given)`` hook is told the text its observation
+    has in the round's message -- clipped, its markers defanged as the
+    untrusted wrapper writes its block, the very text the model is handed
+    (the citation gate counts only the lines that text holds whole); a hook
+    that fails is logged, never raised. Returns ``(message_or_None, spill_paths)``.
     """
     items: list[tuple[str, str]] = []
+    hooked: list[tuple[Any, str, str, str]] = []
     spills: list[str] = []
     remaining = int(round_budget)
     for r in results:
@@ -642,6 +648,18 @@ def _capped_observations_message(
             clipped = clipped + joiner + stub
         remaining = max(0, remaining - len(clipped.encode("utf-8")))
         items.append(("tool", f"{r.tool_name}: {clipped}"))
+        hook = getattr((handlers or {}).get(r.tool_name), "delivered", None)
+        if callable(hook) and r.executed:
+            hooked.append((hook, text, f"{r.tool_name}: ", items[-1][1]))
+    for hook, text, label, item in hooked:
+        # What the message below holds for this observation, as the model reads it: the text its block is written
+        # with (``untrusted_context.block_text``, as ``_block`` writes it), the label taken off.
+        held = untrusted_context.block_text(item)
+        given = held[len(label):] if held.startswith(label) else ""
+        try:
+            hook(text, given)
+        except Exception:  # noqa: BLE001 - a handler's bookkeeping never breaks the round
+            logger.debug("a tool handler's delivered hook failed", exc_info=True)
     return untrusted_context.untrusted_message_many(items), spills
 
 
@@ -1549,6 +1567,7 @@ def run(
             rnd=rounds,
             sandbox=sandbox,
             spill_counter=spill_counter,
+            handlers=effective_handlers,
         )
         if obs_msg is not None:
             messages.append(obs_msg)

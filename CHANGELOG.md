@@ -11,6 +11,30 @@ package costs.
 
 ### Added
 
+- The agent's citations are checked for where they point: when a run's
+  Mycelium search gave the model passages, each `[path:first-last]` its final
+  answer gives is checked, mechanically and with no model, against the lines
+  that search gave the model -- the lines the agent loop's message holds whole,
+  as the model is handed them, not those its caps cut or its untrusted
+  wrapper defanged; a line longer than 400 characters is given cut, its cut
+  said, and counts as given; what the engine does with a prompt longer than
+  its context is not seen. The verdict is where the citation points: lines
+  the search gave, unchanged, or lines it never gave (a line the run read
+  with another tool is not counted), a file gone or changed since, blank
+  lines. Apart, as an alert, some identifiers and numbers of the citing
+  sentence that the cited lines do not hold as a whole token. The gate never
+  says an answer is right, and an alert's absence proves nothing: only names
+  with an underscore, an inner capital, a leading acronym or dots, code
+  between backquotes, and numbers of two digits or more and decimals are
+  compared -- never a plain word, a one-digit integer, a path, a URL, a file
+  name, a domain, an abbreviation, the line numbers a sentence names, the ends
+  of a cited range, or a number after `path:`. The paragraph is added after
+  the answer, never in its place; an answer that gives no citation is said to
+  give none; a run that never searched, or has no workspace, is left as it
+  was. The gate reads at most 200 000 characters of an answer and checks 50
+  citations, keeps 20 000 given lines of a run, and never breaks the run's
+  end. The tool's card tells the model where its citations are checked to
+  point. Contracts CI1-CI10.
 - [SECURITY] The agent has the Mycelium's search, `mycelium_search(query,
   k?)`: it reads the public and private sources rooted at the folder the
   run's workspace was cloned from, in the store that holds them -- never

@@ -244,7 +244,12 @@ def neutralize_frames(text: str) -> str:
 
 def _block(source: str, content: str, *, frames: bool = False) -> str:
     open_tag = OPEN_FMT.format(source=_safe_source(source))
-    return f"{open_tag}\n{_neutralize(str(content), frames=frames)}\n{CLOSE}"
+    return f"{open_tag}\n{block_text(content, frames=frames)}\n{CLOSE}"
+
+
+def block_text(content: Any, *, frames: bool = False) -> str:
+    """The text a block holds for ``content``: the content as the model reads it, its markers defanged."""
+    return _neutralize(str(content), frames=frames)
 
 
 def wrap(content: str, *, source: str = SOURCE_EXTERNAL, frames: bool = False) -> str:
