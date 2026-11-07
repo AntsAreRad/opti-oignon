@@ -11,6 +11,27 @@ package costs.
 
 ### Added
 
+- [SECURITY] A project's files are indexed into the Mycelium too, each
+  project into its own store, `project_<id>`: indexing a file of the
+  project (and reindexing the project) passes the files its rows name,
+  private -- never a file left on the disk with no row, and none the
+  indexer does not read (a PDF, a binary, a secret's name), which stay
+  with the knowledge base's index --, then their vectors, one pass at a
+  time on the install, under the resource governor. The rows are read
+  and the pass run under the projects' write lock, so a deletion is
+  never undone by it: a project's write or deletion waits for the pass
+  (the vectors are made outside the lock). A file removed from the
+  project leaves the store, which is rewritten so its words leave the
+  bytes; a project's deletion overwrites and removes its store; the
+  sweep of every deletion removes the stores of projects that are gone,
+  from a live project's store the files its rows no longer name, and
+  runs a rewrite a store still owes. What the Mycelium could not do is
+  never raised into the projects' index or a deletion: a deletion names
+  it in its answer, under the project indexes' label; an indexing names
+  it in its result and the log. Only a
+  corpus named `project_` and a project's id is a project's: the owner's
+  route refuses to write one, and the sweep touches no other. The chat
+  does not read these stores yet. Contracts PM1-PM7.
 - The agent's citations are checked for where they point: when a run's
   Mycelium search gave the model passages, each `[path:first-last]` its final
   answer gives is checked, mechanically and with no model, against the lines

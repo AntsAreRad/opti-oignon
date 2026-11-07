@@ -118,6 +118,33 @@ _COLLECTION_PREFIX = "project_"
 _INDEX_LABEL = "project indexes (chunks of the project files)"
 
 
+# The Mycelium's project stores (``mycelium.projects``): a project's files indexed into its own store there too.
+_MYCELIUM = "opti_oignon.mycelium.projects"
+
+
+def _mycelium_stores() -> Any:
+    """The Mycelium's project stores, or None when this tree has none (a window that leaves the Mycelium out): then
+    no project has a store there. A Mycelium that is there and fails to load raises."""
+    try:
+        from opti_oignon.mycelium import projects as stores
+    except ModuleNotFoundError as e:
+        if e.name and (e.name == _MYCELIUM or _MYCELIUM.startswith(e.name + ".")):
+            return None
+        raise
+    return stores
+
+
+def _in_mycelium(project_id: str, call: Any) -> list[str]:
+    """``call`` of the Mycelium's project stores: what it could not do, named -- never raised, so the Mycelium never
+    breaks the projects' index or a deletion; nothing when this tree has no Mycelium."""
+    try:
+        stores = _mycelium_stores()
+        return [] if stores is None else list(call(stores))
+    except Exception as exc:  # noqa: BLE001 - named, and the next pass or sweep takes it up again
+        logger.warning("project %s: its Mycelium store was not reached: %s", project_id, type(exc).__name__)
+        return [f"{_INDEX_LABEL} (project {project_id}'s Mycelium store, not reached: {type(exc).__name__})"]
+
+
 def _waiting(client: Any) -> str | None:
     """What stays of the index while ChromaDB's projects folder waits for its migration: every call of the client
     refuses until then, and the chunks are in that folder."""
@@ -226,6 +253,8 @@ class IndexResult:
     summary: str = ""
     key_terms: list[str] = field(default_factory=list)
     error: str = ""
+    # What the project's Mycelium store could not be given (``ProjectIndexer.index_mycelium``), named: no words.
+    mycelium: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -563,6 +592,22 @@ class ProjectIndexer:
         self,
         project_id: str,
         file_id: str,
+        *,
+        mycelium: bool = True,
+    ) -> IndexResult:
+        """Index a single project file into its project's collection (``_index_file``), then, unless ``mycelium`` is
+        False, pass the project's files into its Mycelium store (``index_mycelium``), whatever the collection's
+        outcome, once the collection's own pass has let go of the projects' write lock; what the Mycelium could not do
+        is named in ``result.mycelium`` (and in the log)."""
+        result = self._index_file(project_id, file_id)
+        if mycelium:
+            result.mycelium = self.index_mycelium(project_id)
+        return result
+
+    def _index_file(
+        self,
+        project_id: str,
+        file_id: str,
     ) -> IndexResult:
         """Index a single project file into its project's collection.
 
@@ -727,6 +772,24 @@ class ProjectIndexer:
         )
         return result
 
+    def index_mycelium(self, project_id: str, vectors: bool = True) -> list[str]:
+        """The files the project's rows name, passed into its Mycelium store (``mycelium.projects.index``): the rows
+        read and the pass run under the projects' write lock, so a deletion meanwhile is never undone (a project's write
+        or deletion waits for the pass); then the store's vector pass unless ``vectors`` is False, the store opened
+        under the lock and embedded outside it. What was not done, named -- never raised."""
+        if self._store is None:
+            return []
+
+        def passed(stores: Any) -> list[str]:
+            with holding():
+                paths = [pf.file_path for pf in self._store.list_files(project_id)]
+                left = stores.index(project_id, paths, vectors=False)
+            if vectors and paths:
+                left += stores.vectors(project_id, holding)
+            return left
+
+        return _in_mycelium(project_id, passed)
+
     def remove_file_from_index(self, project_id: str, file_id: str) -> bool:
         """Remove a file's chunks from the project's collection.
 
@@ -794,8 +857,12 @@ class ProjectIndexer:
 
         files = self._store.list_files(project_id)
         for pf in files:
-            result = self.index_file(project_id, pf.id)
+            result = self.index_file(project_id, pf.id, mycelium=False)
             results.append(result)
+        # One pass of the Mycelium for them all, what it could not do named on the last result.
+        left = self.index_mycelium(project_id)
+        if results:
+            results[-1].mycelium = left
 
         return results
 
@@ -820,38 +887,43 @@ class ProjectIndexer:
     @staticmethod
     def forget_project_index(project_id: str, vectors_db: Path | None = None) -> list[str]:
         """A project's deletion's erasure of its index: the collection of its files' chunks, their metadata and
-        vectors; what could not be removed, named (nothing when all went). A store that is not there holds none, and is
-        not created; a project never indexed has no collection to remove."""
+        vectors, and its store in the Mycelium (``mycelium.projects.forget``); what could not be removed, named (nothing
+        when all went). A store that is not there holds none, and is not created; a project never indexed has no
+        collection to remove."""
+        mine = _in_mycelium(project_id, lambda stores: stores.forget(project_id))
         if not VECTOR_STORE_AVAILABLE:
-            return []
+            return mine
         client = _vector_client(vectors_db)
         waiting = _waiting(client)
         if waiting is not None:
-            return [waiting]
+            return mine + [waiting]
         if not client.path.exists():
-            return []
+            return mine
         try:
             client.delete_collection(f"{_COLLECTION_PREFIX}{project_id}")
         except vector_db.CollectionNotFound:
             pass
         except Exception as exc:  # noqa: BLE001 - named, and the next deletion's sweep tries again
             logger.warning("project %s: its index could not be removed: %s", project_id, type(exc).__name__)
-            return [f"{_INDEX_LABEL} (project {project_id}'s, not removed: {type(exc).__name__})"]
-        return []
+            return mine + [f"{_INDEX_LABEL} (project {project_id}'s, not removed: {type(exc).__name__})"]
+        return mine
 
     @staticmethod
     def forget_file_chunks(project_id: str, paths: Any, vectors_db: Path | None = None) -> list[str]:
         """A file's removal's erasure of its chunks from its project's collection, each drawn from one of ``paths``;
-        what could not be removed, named. A store, or a collection, that is not there holds none."""
+        what could not be removed, named; the files leave the project's Mycelium store too (``mycelium.projects.drop``).
+        A store, or a collection, that is not there holds none."""
+        paths = set(paths)
+        mine = _in_mycelium(project_id, lambda stores: stores.drop(project_id, paths))
         if not VECTOR_STORE_AVAILABLE:
-            return []
+            return mine
         paths = set(paths)
         client = _vector_client(vectors_db)
         waiting = _waiting(client)
         if waiting is not None:
-            return [waiting]
+            return mine + [waiting]
         if not client.path.exists():
-            return []
+            return mine
         try:
             collection = client.get_collection(f"{_COLLECTION_PREFIX}{project_id}")
             held = collection.get(include=["metadatas"])
@@ -864,23 +936,25 @@ class ProjectIndexer:
         except Exception as exc:  # noqa: BLE001 - named, and the next deletion's sweep tries again
             logger.warning("project %s: a removed file's chunks could not be removed: %s", project_id,
                            type(exc).__name__)
-            return [f"{_INDEX_LABEL} (a removed file's chunks in project {project_id}, not removed: "
+            return mine + [f"{_INDEX_LABEL} (a removed file's chunks in project {project_id}, not removed: "
                     f"{type(exc).__name__})"]
-        return []
+        return mine
 
     @staticmethod
     def sweep_index(live: dict[str, set[str]], vectors_db: Path | None = None) -> list[str]:
         """What earlier deletions left in the projects' index, removed: each collection whose project ``live`` does not
         hold, and in each project's collection the chunks drawn from no file ``live`` gives it (``project -> paths``);
-        what could not be removed, named. A store that is not there holds none, and is not created."""
+        what could not be removed, named; the projects' Mycelium stores are swept the same way
+        (``mycelium.projects.sweep``). A store that is not there holds none, and is not created."""
+        mine = _in_mycelium("(every project)", lambda stores: stores.sweep(live))
         if not VECTOR_STORE_AVAILABLE:
-            return []
+            return mine
         client = _vector_client(vectors_db)
         waiting = _waiting(client)
         if waiting is not None:
-            return [waiting]
+            return mine + [waiting]
         if not client.path.exists():
-            return []
+            return mine
         try:
             for collection in client.list_collections():
                 if not collection.name.startswith(_COLLECTION_PREFIX):
@@ -897,8 +971,8 @@ class ProjectIndexer:
         except Exception as exc:  # noqa: BLE001 - named, and the next deletion's sweep tries again
             logger.warning("projects: what earlier deletions left in the index could not be removed: %s",
                            type(exc).__name__)
-            return [f"{_INDEX_LABEL} (what earlier deletions left, not removed: {type(exc).__name__})"]
-        return []
+            return mine + [f"{_INDEX_LABEL} (what earlier deletions left, not removed: {type(exc).__name__})"]
+        return mine
 
     def _update_file_record(
         self,

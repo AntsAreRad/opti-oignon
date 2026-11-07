@@ -502,9 +502,10 @@ wipe names those notes as left. A deletion the journal could not take is
 named as not told to the paired devices, and published by the next one.
 The projects go the same way, only when named (`remove=projects`): each
 project deleted as its own deletion does -- its index (every chunk of
-its files), its files and outputs (overwritten), its rows --, then what
-earlier deletions left (the index of projects already gone, the chunks
-of files already removed, their folders), then both stores' logs
+its files, and its Mycelium store), its files and outputs (overwritten),
+its rows --, then what earlier deletions left (the index of projects
+already gone, their Mycelium stores, the chunks of files already
+removed, their folders), then both stores' logs
 emptied once; a read or a write in progress then is named, and keeps
 what it held until it ends. The conversations linked to the projects
 stay. A project whose deletion fails is tried again, and named when it
@@ -705,7 +706,8 @@ already. `not_forgotten` and the refusals as above.
 ### DELETE /api/projects/{project_id}
 
 Delete a project, keeping none of its words: its index first (every
-chunk of its files, with their metadata and vectors), then every file
+chunk of its files, with their metadata and vectors, and its store in
+the Mycelium, overwritten and removed), then every file
 and output under its folder -- each overwritten, then removed; a link is
 removed, never followed --, its rows (the conversations linked to it
 stay, unlinked), its folder, and both stores' logs emptied. A file
@@ -727,7 +729,8 @@ waits for `db_encryption migrate`, the index is named as left.
 ### DELETE /api/projects/{project_id}/files/{file_id}
 
 Remove a file from its project: its chunks first, so no turn retrieves
-them again, then its bytes (overwritten) and its row, with the summary
+them again (it leaves the project's Mycelium store too, which is
+rewritten), then its bytes (overwritten) and its row, with the summary
 and key terms drawn from it. `not_forgotten` as above.
 `DELETE /api/projects/{project_id}/outputs/{output_id}` does the same
 for an output (it has no chunks).

@@ -1,6 +1,7 @@
 """The owner's route to the Mycelium: ``python -m opti_oignon mycelium index|forget|status`` (``main.cmd_mycelium``).
 
-``index CORPUS FOLDER`` indexes a folder into the corpus's store (``place.open_to_write``), as the source named as the
+``index CORPUS FOLDER`` indexes a folder into the corpus's store (``place.open_to_write``) -- never a project's store,
+``project_`` and a project's id, which its project keeps (``projects``) --, as the source named as the
 corpus unless ``--source`` names another (by the corpus's rule), private unless ``--sensitivity`` says otherwise. A
 name outside the rule, a folder that is missing, not a folder, that this process cannot list, or that is the
 package's data folder or inside it (its real path: a link into it is refused too), and settings (``mycelium.yaml``)
@@ -24,7 +25,7 @@ import logging
 import os
 from pathlib import Path
 
-from . import place
+from . import place, projects
 from .store import SENSITIVITIES, StoreError
 
 # New-module safety rule: any change this module drives through the system
@@ -45,6 +46,15 @@ def _refused(message):
 
 def _counted(n, word):
     return f"{n} {word}" + ("" if n == 1 else "s")
+
+
+def _owners(corpus):
+    """``corpus`` when it is the owner's to write: a name the rule admits and no project's store (``project_`` and a
+    project's id: its project keeps it); any other refused by name."""
+    place.path_for(corpus)
+    if projects.project_of(corpus) is not None:
+        raise StoreError(f"{corpus!r} is a project's store: its project keeps it, the route never writes it")
+    return corpus
 
 
 def _source_name(name):
@@ -99,7 +109,7 @@ def index(corpus, folder, source=None, sensitivity=None, vectors=True):
     from .index import Indexer
 
     try:
-        place.path_for(corpus)
+        _owners(corpus)
         name = _source_name(corpus if source is None else source)
         if sensitivity is not None and sensitivity not in SENSITIVITIES:
             raise StoreError(f"sensitivity is one of {', '.join(SENSITIVITIES)}, not {sensitivity!r}")
@@ -191,7 +201,7 @@ def forget(corpus, source):
     from .index import Indexer
 
     try:
-        store = place.open_to_write(corpus, make=False)
+        store = place.open_to_write(_owners(corpus), make=False)
     except StoreError as exc:
         return _refused(str(exc))
     except Exception as exc:  # noqa: BLE001 - a key, a sealed file: said by name, nothing forgotten

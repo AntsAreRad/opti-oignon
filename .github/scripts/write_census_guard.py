@@ -760,6 +760,12 @@ EXEMPT = {
     ("opti_oignon/mycelium/route.py", "mycelium_index"): (
         "gesture", "it indexes the folder the owner names into a corpus, then its vectors, or forgets the source they "
                    "name, on the command line (main.py, cmd_mycelium)"),
+    ("opti_oignon/mycelium/projects.py", "mycelium"): (
+        "quiet", "it rewrites a project's store after a pass removed or changed a file, and reads whether a rewrite "
+                 "is owed: it adds nothing"),
+    ("opti_oignon/mycelium/projects.py", "mycelium_index"): (
+        "gesture", "it indexes the files the user added to a project into the project's own store, then their "
+                   "vectors, and drops from it the files the user removed (project_context.ProjectIndexer)"),
     ("opti_oignon/user_data_manager.py", "conversation"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "documents"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "facts_canonical"): ("quiet", "the user's own erasure"),
@@ -821,6 +827,8 @@ ARGUED_SITES = {
         ("_rebuild", "append"),),
     ("opti_oignon/mycelium/route.py", "mycelium_index"): (
         ("index", "index"), ("_vectors", "embed"), ("forget", "forget"),),
+    ("opti_oignon/mycelium/projects.py", "mycelium_index"): (
+        ("index", "index"), ("_vectors", "embed"),),
     ("opti_oignon/project_context.py", "projects"): (
         ("ProjectIndexer._update_file_record", "_get_conn"),),
     ("opti_oignon/rag/augmenter.py", "document_index"): (

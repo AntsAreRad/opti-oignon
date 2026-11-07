@@ -258,7 +258,12 @@ opened again when the security mode changed; in Bulbe each call is
 asked. The account wipe, for a single-user install's one user,
 overwrites and removes every store; with several users, it names them as
 not covered. The plaintext copies an encryption run keeps beside the
-stores stay, as for every store.
+stores stay, as for every store. A project's files are indexed into
+the project's own store, `project_<id>`: only the files its rows name,
+private; a file removed from the project leaves that store, which is
+rewritten; a project's deletion overwrites and removes its store, and
+the sweep of every deletion removes the stores of projects that are
+gone. The owner's route never writes a project's store.
 
 Known exception (MP-01): enforcement of the model provenance seal at
 load is wired on the `llama_cpp` backend only. The Ollama backend (the

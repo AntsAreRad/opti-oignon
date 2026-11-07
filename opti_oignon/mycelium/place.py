@@ -10,7 +10,7 @@ WAL, where SQLite makes its -wal and -shm on reading until the store is written 
 owner's alone, and the store (``open_to_write``), unless only an existing store is to be written. One vector pass runs
 at a time on the install's stores (``one_vector_pass``: the folder itself held, no file made). The account wipe
 overwrites and removes every store, the files SQLite keeps beside one while it writes and what an interrupted encryption
-left beside it (``remove_every_store``; a file another name also holds, as an interrupted encryption's ``.restoring``
+left beside it (``remove_every_store``; one store and its files: ``remove_store``; a file another name also holds, as an interrupted encryption's ``.restoring``
 holds its kept copy's bytes, is removed without its overwrite, said in the log); the copies an encryption run keeps in
 ``plaintext-*`` folders are not removed, as for every store of the platform. The stores are the install's, not a user's:
 the wipe asks it for a single-user install's one user."""
@@ -144,6 +144,21 @@ def remove_every_store():
         except OSError as exc:
             logger.warning("A store of the Mycelium could not be removed: %s", type(exc).__name__)
             stayed.append(entry.name)
+    if stayed:
+        raise OSError(f"stores of the Mycelium that stayed: {', '.join(stayed)}")
+
+
+def remove_store(corpus):
+    """The store of ``corpus`` and the files beside it (``COMPANIONS``) overwritten, then removed; a store that is
+    not there is not made. Raises naming what stayed."""
+    path = path_for(corpus)
+    stayed = []
+    for name in [path.name] + [path.name + companion for companion in COMPANIONS]:
+        try:
+            _overwrite_and_remove(path.parent / name)
+        except OSError as exc:
+            logger.warning("A store of the Mycelium could not be removed: %s", type(exc).__name__)
+            stayed.append(name)
     if stayed:
         raise OSError(f"stores of the Mycelium that stayed: {', '.join(stayed)}")
 
