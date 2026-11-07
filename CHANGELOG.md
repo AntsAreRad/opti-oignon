@@ -11,6 +11,30 @@ package costs.
 
 ### Added
 
+- [SECURITY] A project's chat reads its Mycelium store: the project
+  context of a turn comes from the project's own store (`project_<id>`),
+  its passages under the names the files were added under, with their
+  lines and their state (a file changed since it was indexed is said
+  modified, a cut passage keeps its lines) -- when the store holds every
+  file of the project (a secret's name aside). A project with no store,
+  or one that holds a file its store does not (a PDF, a document, a
+  sheet, an image, a file not indexed yet, a text file the index could
+  not read or over its 2 MB bound), is served by the knowledge base, as
+  before. A store that cannot be read gives no passage, and the knowledge
+  base never answers in its place. What the turn has to say of it (the
+  knowledge base serving, the store unread, the lexical stages
+  answering) is in the context's report (the optimizer's project zone,
+  labelled with the source, or the server's status lines on the path
+  without it) and in the log, once per project and reason; the web
+  interface does not show it yet. The search reads the public and
+  private sources, never a secret one, in both modes; it keeps the bridge
+  (the question in English and rewritten) and the judge when their
+  settings are read; the question's vector waits 5 s at most, the whole
+  search 10 s from the store's opening, past which the lexical stages
+  alone answer -- the full search then runs to its end on its own thread,
+  its bridge and judge calls unused. Each search makes its own bridge,
+  which keeps no question once the search ends. The unified layer's
+  project source follows the same rule. Contracts TM1-TM7.
 - [SECURITY] A project's files are indexed into the Mycelium too, each
   project into its own store, `project_<id>`: indexing a file of the
   project (and reindexing the project) passes the files its rows name,

@@ -134,6 +134,23 @@ def _mycelium_stores() -> Any:
     return stores
 
 
+def _turn_passages(project_id: str, paths: list[str], query: str) -> Any:
+    """The turn's passages from the project's Mycelium store (``mycelium.turn.passages``); None when this tree has no
+    Mycelium (the knowledge base serves, as before). A failure of the search itself reads as an unreadable store."""
+    try:
+        from opti_oignon.mycelium import turn
+    except ModuleNotFoundError as e:
+        name = "opti_oignon.mycelium.turn"
+        if e.name and (e.name == name or name.startswith(e.name + ".")):
+            return None
+        raise
+    try:
+        return turn.passages(project_id, paths, query)
+    except Exception as exc:  # noqa: BLE001 - never raised into the turn: said, and no project passage
+        logger.warning("project %s: its Mycelium search failed: %s", project_id, type(exc).__name__)
+        return turn.Turn("unreadable", said=f"the project's Mycelium search failed ({type(exc).__name__})")
+
+
 def _in_mycelium(project_id: str, call: Any) -> list[str]:
     """``call`` of the Mycelium's project stores: what it could not do, named -- never raised, so the Mycelium never
     breaks the projects' index or a deletion; nothing when this tree has no Mycelium."""
@@ -280,6 +297,10 @@ class ProjectContext:
     source_files: list[str] = field(default_factory=list)
     project_id: str = ""
     project_name: str = ""
+    # Where the chunks came from: "mycelium" (the project's store), "rag" (the knowledge base), or "" (none asked);
+    # and what is to be said of it (a store left unread, a project the knowledge base serves), no file's words.
+    source: str = ""
+    said: str = ""
 
 
 # =============================================================================
@@ -1184,7 +1205,12 @@ class ProjectContextBuilder:
         """Build a context block for injection into the LLM prompt.
 
         Retrieves relevant chunks, assembles them within the token
-        budget, and prepends the project's system_instructions.
+        budget, and prepends the project's system_instructions. The
+        chunks come from the project's Mycelium store when it holds every
+        file of the project (``mycelium.turn``); from the knowledge base when the project has
+        no store or holds a file its store does not; and none when the store
+        cannot be read (said in ``ctx.said``; never the knowledge base in
+        its place).
 
         Args:
             project_id: The project ID.
@@ -1225,8 +1251,8 @@ class ProjectContextBuilder:
             ctx.total_tokens_estimate = instructions_tokens
             return ctx
 
-        # Retrieve relevant chunks
-        chunks = self.retrieve_chunks(project_id, query)
+        # Retrieve relevant chunks: the project's Mycelium store first, the knowledge base when it does not serve.
+        chunks = self._project_chunks(ctx, project_id, query)
 
         # Assemble chunks within budget
         selected_parts = []
@@ -1240,8 +1266,11 @@ class ProjectContextBuilder:
                 remaining = available_for_chunks - total_chunk_tokens
                 if remaining > 50:
                     truncated = chunk.content[:remaining * 4]
+                    cut_label = Path(chunk.source_file).name
+                    if chunk.section_name:
+                        cut_label += f" ({chunk.section_name}, cut)"
                     selected_parts.append(
-                        f"[{Path(chunk.source_file).name}] {truncated}..."
+                        f"[{cut_label}] {truncated}..."
                     )
                     source_files.add(Path(chunk.source_file).name)
                 break
@@ -1269,6 +1298,23 @@ class ProjectContextBuilder:
         ctx.total_tokens_estimate = _estimate_tokens(ctx.context_text)
 
         return ctx
+
+    def _project_chunks(self, ctx: ProjectContext, project_id: str, query: str) -> list[RetrievedChunk]:
+        """The turn's chunks, ``ctx.source`` and ``ctx.said`` set (see ``build_context``)."""
+        paths = [pf.file_path for pf in self._store.list_files(project_id)] if self._store is not None else []
+        turn = _turn_passages(project_id, paths, query)
+        if turn is not None and turn.state == "ok":
+            ctx.source, ctx.said = "mycelium", turn.said
+            return [RetrievedChunk(content=p["text"], source_file=p["name"],
+                                   section_name=f"lines {p['first']}-{p['last']}"
+                                   + ("" if p["state"] == "fresh" else f", {p['state']}"))
+                    for p in turn.passages]
+        if turn is not None and turn.state == "unreadable":
+            ctx.source, ctx.said = "", turn.said
+            return []
+        ctx.source = "rag"
+        ctx.said = turn.said if turn is not None else ""
+        return self.retrieve_chunks(project_id, query)
 
     def build_system_instructions_only(self, project_id: str) -> ProjectContext:
         """Build a context with only system_instructions (no RAG).

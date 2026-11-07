@@ -101,7 +101,7 @@ This scenario demonstrates the RAG-powered project system for contextual convers
    - **Level 2 (term matching)**: Matches domain terms from indexed files
    - **Level 3 (LLM classification)**: Determines relevance if levels 1–2 are inconclusive
 
-   Relevant file chunks are injected into the context via RAG, and the model responds with project-aware information.
+   Relevant passages are injected into the context -- from the project's Mycelium store when it holds every file of the project, from the knowledge base otherwise -- and the model responds with project-aware information.
 
 6. **Verify context injection** — The Project Context Badge shows a green indicator when context was injected. The Context Panel (accessible from the side panel) shows which chunks were retrieved and their relevance scores.
 

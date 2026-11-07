@@ -2398,11 +2398,17 @@ class Executor:
                     if budget_tokens is None
                     else _project_context_builder.build_context(project_id, question, budget_tokens=budget_tokens)
                 )
+                if getattr(ctx, "said", ""):
+                    _status(f"[!] Project context: {ctx.said}")
             else:
                 # Fallback: system_instructions only (always for project convos)
                 ctx = _project_context_builder.build_system_instructions_only(project_id)
 
             if ctx.context_text:
+                source = {"mycelium": "the project's Mycelium store", "rag": "the knowledge base"}.get(
+                    getattr(ctx, "source", ""))
+                if source and ctx.chunks_used:
+                    _status(f"[>] Project context from {source}")
                 _status(
                     f"[OK] Project context injected: "
                     f"{ctx.chunks_used} chunks, ~{ctx.total_tokens_estimate} tokens"

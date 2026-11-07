@@ -287,6 +287,21 @@ def _get_compressor() -> Any:
     return _default_compressor
 
 
+def _project_turn(project_id: str, query: str) -> Any:
+    """The project's turn from its Mycelium store (``project_context._turn_passages``), or None when this tree has no
+    project context or projects' store (a window that leaves them out): the knowledge base then serves, as before."""
+    try:
+        from .project_context import _turn_passages
+        from .projects import project_store
+    except ModuleNotFoundError as e:
+        absent = ("opti_oignon.project_context", "opti_oignon.projects")
+        if e.name and any(e.name == name or name.startswith(e.name + ".") for name in absent):
+            return None
+        raise
+    paths = [pf.file_path for pf in project_store.list_files(project_id)] if project_store is not None else []
+    return _turn_passages(project_id, paths, query)
+
+
 def _default_sources(
     conversation_id: str | None,
     project_id: str | None,
@@ -299,6 +314,18 @@ def _default_sources(
     """
 
     def rag(query: str, limit: int) -> list[RetrievedItem]:
+        if project_id:
+            # The project's Mycelium store first (``mycelium.turn``), as the project's context builder reads it.
+            turn = _project_turn(project_id, query)
+            if turn is not None and turn.state == "ok":
+                return [RetrievedItem(source="rag", content=p["text"], score=1.0 / (1 + place),
+                                      origin=f"{p['name']} (lines {p['first']}-{p['last']}"
+                                      + ("" if p["state"] == "fresh" else f", {p['state']}") + ")",
+                                      metadata={"store": "mycelium", "state": p["state"]})
+                        for place, p in enumerate(turn.passages[:limit])]
+            if turn is not None and turn.state == "unreadable":
+                return []
+
         from .rag_hybrid_search import get_hybrid_engine
 
         collection = f"project_{project_id}" if project_id else None

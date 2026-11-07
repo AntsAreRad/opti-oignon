@@ -263,7 +263,12 @@ the project's own store, `project_<id>`: only the files its rows name,
 private; a file removed from the project leaves that store, which is
 rewritten; a project's deletion overwrites and removes its store, and
 the sweep of every deletion removes the stores of projects that are
-gone. The owner's route never writes a project's store.
+gone. The owner's route never writes a project's store. A project's
+chat turn reads its store, the public and private sources only, never a
+secret one; a store that cannot be read gives no passage, and the
+knowledge base never answers in its place. The bridge that translates a
+turn's question is made for that search alone and keeps no question past
+it.
 
 Known exception (MP-01): enforcement of the model provenance seal at
 load is wired on the `llama_cpp` backend only. The Ollama backend (the
