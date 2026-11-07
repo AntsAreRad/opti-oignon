@@ -29,7 +29,16 @@ explicit copy-in and a diff-gated write-back -- see
 [Sandbox Workspaces](sandbox-workspaces.md). The agent performance cycle
 A later cycle added read-only search tools (`grep`, `glob`, `ls`), a
 diagnostics pass after writes, `todo` and `task` tools, loop hardening and
-an eval harness -- see [Agent Performance](agent-performance.md).
+an eval harness -- see [Agent Performance](agent-performance.md). The
+Mycelium's search, `mycelium_search`, reads what the owner indexed of the
+folder a run's workspace was cloned from (`python -m opti_oignon mycelium
+index`), its public and private sources only -- no other folder indexed beside
+it -- and returns cited passages, bounded under the loop's observation caps
+(bytes and lines);
+the tools section of the run's prompt says which corpus, or that none is
+indexed.
+It is present in both modes, each call asked in Bulbe, and neutralized in the
+evaluation harness.
 
 ## Modes and approval
 

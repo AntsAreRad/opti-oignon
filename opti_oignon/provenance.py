@@ -119,6 +119,8 @@ TOOL_EFFECTS: Mapping[str, str] = MappingProxyType({
     "manage_skills": DEFERRED,
     "todo": SESSION,
     "task": SESSION,
+    # The Mycelium's search: reads on this machine, nothing changed anywhere.
+    "mycelium_search": NONE,
     # The chat: the four built-ins that run only in a sandbox session, and
     # the sandbox session's own four.
     "execute_code": SANDBOX,

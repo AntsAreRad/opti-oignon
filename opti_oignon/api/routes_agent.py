@@ -139,6 +139,22 @@ _READ_ACTIONS = {
 }
 
 
+# The Mycelium's search, by the name the agent's tools declare it under (a tool set without it binds nothing).
+_MYCELIUM_SEARCH = "mycelium_search"
+
+
+def _mycelium_for_run(sandbox: Any) -> tuple[Callable[[dict[str, Any]], str], str] | None:
+    """The run's ``mycelium_search`` handler and the card its tools section carries, or None when the Mycelium
+    cannot be loaded here (the process-level handler then says that no corpus is searched)."""
+    try:
+        from opti_oignon.mycelium import tool as mycelium_tool
+
+        return mycelium_tool.make_handler(sandbox), mycelium_tool.card(sandbox)
+    except Exception:  # noqa: BLE001 - the run goes on without the Mycelium's corpus
+        logger.debug("the Mycelium's search could not be bound to the run", exc_info=True)
+        return None
+
+
 class AgentRunManager:
     """Drives one agent run at a time and fans its events out to subscribers.
 
@@ -412,6 +428,14 @@ class AgentRunManager:
                     sandbox = owned_sandbox
             with self._lock:
                 self._owned_sandbox = owned_sandbox
+            # The Mycelium's search reads the corpus of this run's workspace
+            # (the folder its workspace was cloned from); the tools section
+            # says which, or that none is indexed.
+            mycelium_card = ""
+            if _MYCELIUM_SEARCH in handlers:
+                mycelium = _mycelium_for_run(sandbox)
+                if mycelium is not None:
+                    handlers[_MYCELIUM_SEARCH], mycelium_card = mycelium
             # manage_skills (Daily only) proposes into this run's own review
             # gate, with the run's sandbox for verification steps: no one is
             # asked during the run, the person reviews the whole text later.
@@ -433,6 +457,8 @@ class AgentRunManager:
             )
             native = tool_set.native_tools()
             prompt = system_prompt or agent_tools.system_prompt_section_for(mode)
+            if mycelium_card:
+                prompt = prompt + "\n\n" + mycelium_card
             # Consult learned procedures relevant to the task; wrapped as untrusted.
             if consult:
                 consultation = agent_skills.consult_skills(task, registry=registry)

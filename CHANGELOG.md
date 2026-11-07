@@ -11,6 +11,36 @@ package costs.
 
 ### Added
 
+- [SECURITY] The agent has the Mycelium's search, `mycelium_search(query,
+  k?)`: it reads the public and private sources rooted at the folder the
+  run's workspace was cloned from, in the store that holds them -- never
+  another source of that store, another store, or a secret source --,
+  through a read-only connection, one search at a time; a store wiped or
+  replaced since it was opened is never read through the old connection,
+  which is closed, and a store opened under another security mode is
+  opened again, so the platform's opener judges it anew (a plaintext store
+  is refused in Bulbe). A workspace not cloned from a host folder is told
+  so, and a store the platform's opener refuses is named as refused, never
+  as a folder not indexed; one folder indexed under two sources of a store
+  gives each passage once. Its passages are widened as the frozen recipe
+  widened them (20 lines at least, the passages of one file that meet
+  merged until none do), cited path:first-last with the state of their
+  lines; a passage is held to the lines its file has now; the answer is
+  bounded in bytes and in lines, under the agent loop's caps on an
+  observation (16384 bytes, 256 lines), a line longer than 400 characters
+  cut and said: a passage that does not fit gives its first lines, its
+  citation saying which, a passage of which no line fits is named and the
+  next ones still tried, and the passages past the bound are named; when
+  the judge finds that no passage answers, the answer says that verdict
+  first, and that the judge errs on about one question in four or five the
+  corpus does answer. The run's tools section carries the corpus's card
+  (its name, its public and private sources and their files), or says that
+  none is indexed, with the owner's route. Class `none`, present in Daily
+  and Bulbe, each call asked in Bulbe; neutralized in the agent's
+  evaluation. PV10 and PV13 of `tests/test_provenance_gate_contracts.py`
+  (thirteen agent tools; thirteen and nine per mode) are deselected by the
+  canonical selection rule and kept as MY2 and MY3 (fourteen; fourteen and
+  ten). MY1-MY11 in the new `tests/test_mycelium_agent_contracts.py`.
 - [SECURITY] The Mycelium's search reads a citation through the store: the
   root the store holds for the source the citation names, a path that
   source holds, a source the searcher may read, lines that are whole

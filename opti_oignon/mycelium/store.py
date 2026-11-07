@@ -132,8 +132,8 @@ class Store:
         self.path = str(path)
         self.read_only = read_only
         self.lock = threading.RLock()
-        # The vectors' matrices the searchers of this store read, by the sensitivities read: (generation, encoder,
-        # part ids, matrix), read again when the generation moves (``search.Searcher._matrix``).
+        # The vectors' matrices the searchers of this store read, by the sensitivities and the sources read:
+        # (generation, encoder, part ids, matrix), read again when the generation moves (``search.Searcher._matrix``).
         self.matrices = {}
         if read_only:
             if not os.path.isfile(self.path):

@@ -12,8 +12,9 @@ from the fused list as deep as the reranker judges, then cut to k. A stage that 
 the engine missing, the governor holding the question, the bridge's or the reranker's model away -- is silent, and
 the search says why with its passages (``find``: ``Found(hits, silent)``, the silences its own; ``search`` gives the
 passages and keeps the last silences on the searcher): the search answers by the others. Every stage reads only the
-sources ``allow`` names. The vectors' matrix is the store's, one per set of sensitivities read, shared by every
-searcher of the store and read again when its generation moves. Every result names its part, its lines and the
+sources of the sensitivities ``allow`` names -- and, with ``sources``, only the sources named. The vectors' matrix is
+the store's, one per set of sensitivities and of sources read, shared by every searcher of the store and read again
+when its generation moves. Every result names its part, its lines and the
 sha256 of its text: ``Searcher.verify`` says whether the source still says that, a citation read through the store
 (``Searcher.lines``) -- never through the root or the path it carries, which a model may have written."""
 import hashlib
@@ -44,14 +45,16 @@ class Searcher:
     TESTS_KEEP = 0.7
 
     def __init__(self, store, allow=("public", "private"), lexical_query=None, timeout_s=120.0, bridge=None,
-                 reranker=None, readers=None):
+                 reranker=None, readers=None, sources=None):
         """``bridge`` (``bridge.Bridge``) gives the words-matching lists their English and a second, rewritten,
         full-text list; ``reranker`` (``rerank.Reranker``) judges the first passages when a search asks it;
-        ``readers`` read a source of documents (``Indexer.readers``)."""
+        ``readers`` read a source of documents (``Indexer.readers``); ``sources``, when given, the names of the only
+        sources every stage and every citation read back may read (the agent's tool: those of the run's workspace)."""
         if bridge is not None and lexical_query is not None:
             raise ValueError("a searcher takes a bridge or a lexical_query, not both: the bridge gives the words")
         self.store = store
         self.allow = tuple(allow)
+        self.sources = None if sources is None else tuple(sources)
         self.lexical_query = lexical_query
         self.timeout_s = timeout_s
         self.bridge, self.reranker, self.readers = bridge, reranker, readers
@@ -59,9 +62,14 @@ class Searcher:
         self._searching = threading.local()     # the silences of the search this thread runs (``find``)
 
     def _filter(self):
-        """The sensitivity filter as SQL over the part's source (``s``), and its values: applied in each stage's own
-        query, before its limit, so a secret source neither shows a part nor pushes a readable one out."""
-        return f"s.sensitivity IN ({','.join('?' * len(self.allow))})", tuple(self.allow)
+        """The sensitivity filter as SQL over the part's source (``s``), and its values -- with ``sources``, the
+        sources named too: applied in each stage's own query, before its limit, so a source this searcher may not
+        read neither shows a part nor pushes a readable one out."""
+        clause, values = f"s.sensitivity IN ({','.join('?' * len(self.allow))})", tuple(self.allow)
+        if self.sources is not None:
+            clause += f" AND s.name IN ({','.join('?' * len(self.sources))})" if self.sources else " AND 0"
+            values += self.sources
+        return clause, values
 
     def lexical(self, query, n=DEPTH):
         terms = question_terms(query)
@@ -96,15 +104,17 @@ class Searcher:
         return [(i, 1.0) for i in found][:n]
 
     def _matrix(self):
-        """(encoder's {key, card}, part ids, matrix) of the active encoder, as the store holds it for the set of
-        sensitivities this searcher may read (``Store.matrices``, whatever their order), read again when the store's
+        """(encoder's {key, card}, part ids, matrix) of the active encoder, as the store holds it for the sets of
+        sensitivities and of sources this searcher may read (``Store.matrices``, whatever their order), read again when
+        the store's
         generation moved; None when a pass of this process holds the store past the searcher's ``timeout_s`` (its
         rows are read under the store's lock, never in the middle of a pass)."""
         if not self.store.lock.acquire(timeout=self.timeout_s):
             return None
         try:
             generation = self.store.generation()
-            key = tuple(sorted(set(self.allow)))
+            key = (tuple(sorted(set(self.allow))),
+                   None if self.sources is None else tuple(sorted(set(self.sources))))
             held = self.store.matrices.get(key)
             if held is None or held[0] != generation:
                 active = self.store.active_encoder()

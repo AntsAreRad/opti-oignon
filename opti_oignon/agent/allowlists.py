@@ -81,6 +81,11 @@ STATE_MUTATION_TOOLS = frozenset(
 # mode-posture table: the ceremony gates actions with consequences).
 SESSION_STATE_TOOLS = frozenset({"todo"})
 
+# Reads on this machine of what the owner indexed: the Mycelium's search of the
+# run's workspace corpus, its public and private sources. Present in both modes;
+# in Bulbe each call rides the per-call approval like the sandboxed tools.
+READ_TOOLS = frozenset({"mycelium_search"})
+
 # The bounded subagent tool: loop-managed, present in
 # both modes. The call itself launches nothing ungated -- the child registry
 # is the real gate and every child sandbox call inherits the Bulbe per-call
@@ -99,6 +104,7 @@ DAILY_ALLOWLIST = frozenset(
     | STATE_MUTATION_TOOLS
     | SESSION_STATE_TOOLS
     | SUBAGENT_TOOLS
+    | READ_TOOLS
 )
 
 # Bulbe: derived from Daily by removing the network and state-mutation tools,

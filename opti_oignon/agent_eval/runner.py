@@ -130,8 +130,9 @@ def _evaluation_gate() -> tuple[str, Any, Any]:
 CHECK_TIMEOUT_S = 60
 
 # Tools whose handlers are neutralized on the eval path: every tool that
-# writes the user's state, and the network.
-_DISABLED_TOOLS = ("manage_skills", "manage_memory", "manage_notes", "web_search")
+# writes the user's state, the network, and the Mycelium's search (it reads the
+# owner's indexed corpora, which an evaluation must not depend on).
+_DISABLED_TOOLS = ("manage_skills", "manage_memory", "manage_notes", "web_search", "mycelium_search")
 
 # Spill references live in the transcript as workspace-relative paths
 # (the 6.1 truncation stubs and the 6.2 prune stubs both carry them).

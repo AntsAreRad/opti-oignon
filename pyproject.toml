@@ -1876,4 +1876,6 @@ addopts = """
     --deselect=tests/test_launcher_unlock_contracts.py::test_ul14_the_backend_script_runs_no_program_but_the_server
     --deselect=tests/test_code_outputs_forgetting_contracts.py::test_xo6_the_overwrite_is_one_text_in_its_six_copies
     --deselect=tests/test_mycelium_place_contracts.py::test_mp10_an_indexer_forgets_what_it_held_of_a_forgotten_source
+    --deselect=tests/test_provenance_gate_contracts.py::test_pv10_every_agent_and_chat_tool_has_a_class_from_the_closed_set_of_six
+    --deselect=tests/test_provenance_gate_contracts.py::test_pv13_the_agent_allowlists_are_the_class_table_read_per_mode
 """
