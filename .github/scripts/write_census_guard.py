@@ -461,8 +461,9 @@ STORES = {
     "mycelium": _store(
         "opti_oignon/mycelium/store.py", classes=("Store",),
         writes=("source", "drop_parts", "episode", "meta", "purge", "activate", "orphan_vectors", "vectors_changed",
-                "forget"),
-        quiet=("drop_parts", "episode", "meta", "purge", "activate", "orphan_vectors", "vectors_changed", "forget"),
+                "forget", "rewrite"),
+        quiet=("drop_parts", "episode", "meta", "purge", "activate", "orphan_vectors", "vectors_changed", "forget",
+               "rewrite"),
         aside={"generation": "it reads the store's counters through meta and writes nothing",
                "active_encoder": "it reads the active encoder through meta and writes nothing"},
         reason="the Mycelium's index of a corpus: the tokens, symbols and references of its files' parts, whose "
@@ -753,6 +754,12 @@ EXEMPT = {
     ("opti_oignon/rag/batch_ingest.py", "documents"): (
         "gesture", "it stores the files of a batch the user started on a folder they chose"),
     ("opti_oignon/rag/indexer.py", "document_index"): ("script", "the indexer's self-run, only as a program"),
+    ("opti_oignon/mycelium/route.py", "mycelium"): (
+        "quiet", "the owner's route rewrites a store after a pass of theirs removed a file, and reads whether a rewrite "
+                 "is owed: it adds nothing"),
+    ("opti_oignon/mycelium/route.py", "mycelium_index"): (
+        "gesture", "it indexes the folder the owner names into a corpus, then its vectors, or forgets the source they "
+                   "name, on the command line (main.py, cmd_mycelium)"),
     ("opti_oignon/user_data_manager.py", "conversation"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "documents"): ("quiet", "the user's own erasure"),
     ("opti_oignon/user_data_manager.py", "facts_canonical"): ("quiet", "the user's own erasure"),
@@ -812,6 +819,8 @@ ARGUED_SITES = {
         ("_rebuild", "add"),),
     ("opti_oignon/memory/onion_store.py", "receipts"): (
         ("_rebuild", "append"),),
+    ("opti_oignon/mycelium/route.py", "mycelium_index"): (
+        ("index", "index"), ("_vectors", "embed"), ("forget", "forget"),),
     ("opti_oignon/project_context.py", "projects"): (
         ("ProjectIndexer._update_file_record", "_get_conn"),),
     ("opti_oignon/rag/augmenter.py", "document_index"): (

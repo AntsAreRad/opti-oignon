@@ -11,30 +11,66 @@ package costs.
 
 ### Added
 
+- The Mycelium has its owner's route: `python -m opti_oignon mycelium
+  index CORPUS FOLDER` indexes a folder (a repository: the files its index
+  tracks) into the corpus's store, as a source named as the corpus unless
+  `--source` names another, private unless `--sensitivity` says otherwise;
+  then its vectors, every request admitted by the resource governor as
+  background work, one vector pass at a time on the install (another is
+  refused by name, the vectors left to the next pass; `--no-vectors`
+  leaves them too). A name outside the rule, a folder that is missing, not
+  a folder, not listable, or the package's data folder or inside it (a
+  link into it too), and `mycelium.yaml` refused -- its header decides how
+  every part is embedded --, refuse the pass by name before any store is
+  opened. `mycelium forget CORPUS SOURCE` forgets a source of an existing
+  store; one held by a reader at its commit is refused, nothing forgotten.
+  `mycelium status [CORPUS]` says what each store holds -- its sources,
+  files, parts and last pass, what a pass would do now, its vectors --
+  reading each one read-only, nothing written or made (but beside a store
+  another program left in WAL, where SQLite makes its `-wal` and `-shm` on
+  reading). A pass that changed, renamed or removed a file owes the store
+  a rewrite in its own transaction, and the route rewrites it (`VACUUM`):
+  even merged, the index left copies of moved rows, a removed or changed
+  file's old names among them, in the pages' free space; a rewrite that
+  fails, or that a process's end cuts short, stays owed, is said (exit 1)
+  and done by the route's next pass (the library's own pass leaves it
+  owed); a recut, which drops no word the store does not hold again, owes
+  none. A file or a folder the pass could not read exits 1 too. A pass, a
+  documents' pass and a forgetting take the store's write lock at their
+  start: one that finds another connection or process writing the store is
+  refused by name, nothing written, and a vector pass stops as held. A
+  store is written in the rollback journal: one left in WAL is brought
+  back to it, one another connection holds in WAL is refused. A source of
+  documents' text is served to check a citation only while the store holds
+  the document as it was given: one forgotten or changed by another
+  connection is no longer served, and reads as absent once the store no
+  longer holds it. `config/models.yaml` gives mxbai-embed-large the 512
+  tokens of context its engine shows, not 8192. MO1-MO11 in the new
+  `tests/test_mycelium_route_contracts.py`.
 - The Mycelium's stores have their place: one per corpus,
   `opti_oignon/data/mycelium/<corpus>.db`, a corpus named by lowercase
   letters, digits, `_` and `-` (any other name is refused, so none leaves
   the folder); a store's own name that is a symbolic link is refused. The
   folder is one of the encryption command's: a store written there in
-  plaintext is encrypted with the platform's others. Nothing writes one yet: the
-  indexing route comes next. A store is read through a read-only
-  connection that makes no file and writes nothing -- no table, no stamp,
-  no migration --; a newer schema, a schema-1 store, another kind of
-  database, or one the platform's opener cannot open (a wrong key, a hot
-  journal) is refused by name. Forgetting a source removes everything of
-  it -- its files' parts, tokens, names and references, the vectors no
-  other part shares, its settings and its passes' records; the indexer
-  that forgets it also drops the documents' texts it kept to check their
-  citations --, then merges the index and rewrites the file, so its words
-  leave the store's bytes, and says whether that succeeded (a full disk
-  leaves them until the next time). The store's generation moves to a
-  value never read before, though a source indexed again under the same
-  name may take the same id back. The account wipe, for a single-user
-  install's one user, overwrites and removes every store, the files
-  SQLite keeps beside it and what an interrupted encryption left (a file
-  another name also holds is removed without its overwrite); the
-  plaintext copies an encryption run keeps, `plaintext-*`, stay, as for
-  every store. With several users, it names the stores as not covered.
+  plaintext is encrypted with the platform's others. A store is read
+  through a read-only connection that makes no file and writes nothing --
+  no table, no stamp, no migration --; a newer schema, a schema-1 store,
+  another kind of database, or one the platform's opener cannot open (a
+  wrong key, a hot journal) is refused by name. Forgetting a source
+  removes everything of it -- its files' parts, tokens, names and
+  references, the vectors no other part shares, its settings and its
+  passes' records; the indexer that forgets it also drops the documents'
+  texts it kept to check their citations --, then merges the index and
+  rewrites the file, so its words leave the store's bytes, and says
+  whether that succeeded (a full disk leaves them until the next time).
+  The store's generation moves to a value never read before, though a
+  source indexed again under the same name may take the same id back. The
+  account wipe, for a single-user install's one user, overwrites and
+  removes every store, the files SQLite keeps beside it and what an
+  interrupted encryption left (a file another name also holds is removed
+  without its overwrite); the plaintext copies an encryption run keeps,
+  `plaintext-*`, stay, as for every store. With several users, it names
+  the stores as not covered.
 - Ollama reads each model's prompts in the batch `backends.yaml` gives
   it (`ollama.num_batch`, a table of model to batch; shipped: 2048 for
   `qwen3.8:27b` and `qwen3.5:4b`; a model left out reads at Ollama's own,
@@ -112,59 +148,62 @@ package costs.
   read by one strict reader: each value of its type and within its bound,
   and a key no code reads refused by name.
 - The Mycelium's second layer: vectors (`opti_oignon/mycelium/vectors.py`,
-  the `vectors` section of `opti_oignon/config/mycelium.yaml`). Nothing
-  calls it yet. A vector pass asks the encoder the settings name
-  (EmbeddingGemma 2 as shipped, with the prefixes its model card asks for)
-  only through the inference registry, each batch admitted by the resource
-  governor as background work and sent under that admission; the question
-  is admitted as interactive work. A text is embedded once, however many
-  parts share it, and a pass with nothing to embed reads no file. Only a
-  text the engine refuses (HTTP 400, 413 or 422) is cut out of its batch
-  and counted; a model the engine does not serve, an engine that fails or
-  does not answer, an answer that cannot be read, or a refusal of the
-  governor that no wait lifts stops the pass at that request, by name, and
-  a busy engine holds it. A vector that is not finite, points nowhere or
-  has another dimension is never kept, and a pass the governor holds keeps
-  what it wrote. The store's lock is held to plan a pass and to write each
-  batch, never while the engine answers, and a text that left the store
-  meanwhile gets no vector. Two encoders never mix: the one a search reads
-  changes only once another covers every part, and then the old one's
-  vectors go; a store with no encoder read takes the first that covers some
-  part and lacks none but the texts the engine refused in that pass. The
-  search gains a third stage, exact cosine over the active encoder's
-  vectors, filtered by each source's sensitivity in its query; an encoder
-  that is missing, held, failing or without a vector the caller may read
-  leaves the search to its other stages and says why. The vectors' settings
-  are refused by name when malformed. A store of the first layer's schema
-  moves to the new one in one transaction, once even with two openers, and
-  is cut again at its next pass. The store now says that a part's vector is
-  kept, from which a model built for it can guess much of the text it was
-  embedded from; SQLCipher encrypts it with the rest. A search gives k
-  citations at most (it gave up to four times k).
+  the `vectors` section of `opti_oignon/config/mycelium.yaml`). Only the
+  owner's route calls it (above). A vector pass asks the encoder the
+  settings name (EmbeddingGemma 2 as shipped, with the prefixes its model
+  card asks for) only through the inference registry, each batch admitted
+  by the resource governor as background work and sent under that
+  admission; the question is admitted as interactive work. A text is
+  embedded once, however many parts share it, and a pass with nothing to
+  embed reads no file. Only a text the engine refuses (HTTP 400, 413 or
+  422) is cut out of its batch and counted; a model the engine does not
+  serve, an engine that fails or does not answer, an answer that cannot be
+  read, or a refusal of the governor that no wait lifts stops the pass at
+  that request, by name, and a busy engine holds it. A vector that is not
+  finite, points nowhere or has another dimension is never kept, and a
+  pass the governor holds keeps what it wrote. The store's lock is held to
+  plan a pass and to write each batch, never while the engine answers, and
+  a text that left the store meanwhile gets no vector. Two encoders never
+  mix: the one a search reads changes only once another covers every part,
+  and then the old one's vectors go; a store with no encoder read takes
+  the first that covers some part and lacks none but the texts the engine
+  refused in that pass. The search gains a third stage, exact cosine over
+  the active encoder's vectors, filtered by each source's sensitivity in
+  its query; an encoder that is missing, held, failing or without a vector
+  the caller may read leaves the search to its other stages and says why.
+  The vectors' settings are refused by name when malformed. A store of the
+  first layer's schema moves to the new one in one transaction, once even
+  with two openers, and is cut again at its next pass. The store now says
+  that a part's vector is kept, from which a model built for it can guess
+  much of the text it was embedded from; SQLCipher encrypts it with the
+  rest. A search gives k citations at most (it gave up to four times k).
 - The first layer of the Mycelium, the coming search of a project's code
-  and documents (`opti_oignon/mycelium/`). Nothing reaches it yet: no
-  route, no tool and no stage of the chat's search calls it. A folder, a
-  git repository -- its files read from git's own index file, without
-  running git -- or a set of documents is cut into parts a search can name
-  (Python by its syntax tree, Markdown by heading, YAML by key with the
-  comment above it) and indexed in one SQLite file per corpus, opened
-  through `safe_connect`. The full-text index keeps no text: a part is read
-  again from its source by path and lines, and a citation says fresh,
-  modified or gone by the sha256 of its own lines. What the store keeps of
-  a source is named: a file's first sentence, a heading's path, the names a
-  part defines and the tokens with their positions; freed pages are zeroed,
-  and the index is merged after a pass that removes a file, so its words
-  leave the store's bytes. A pass cuts again only what changed, reads a
-  file as a citation does (never through a link, never a FIFO, within a
-  size bound), and trusts a file's size and time only when the time is
-  older than the pass before. A root or a folder that cannot be listed, or
-  a root that lists nothing where its source held files, never empties the
-  source; one pass at a time writes a store. A walk skips dotfiles and the
-  files of secrets (keys, credentials, Terraform states and variables, key
-  folders), and so do the paths a caller names. A source keeps its
-  sensitivity until another is named, and a search filters each source's
-  sensitivity inside each stage's query, before its limit. A store of a
-  newer schema, or a database of another program, is refused untouched.
+  and documents (`opti_oignon/mycelium/`). Only the owner's route reaches
+  it (above): no tool and no stage of the chat's search calls it. A
+  folder, a git repository -- its files read from git's own index file,
+  without running git -- or a set of documents is cut into parts a search
+  can name (Python by its syntax tree, Markdown by heading, YAML by key
+  with the comment above it) and indexed in one SQLite file per corpus,
+  opened through `safe_connect`. The full-text index keeps no text: a part
+  is read again from its source by path and lines, and a citation says
+  fresh, modified or gone by the sha256 of its own lines. What the store
+  keeps of a source is named: a file's first sentence, a heading's path,
+  the names a part defines and the tokens with their positions; freed
+  pages are zeroed, and the index is merged after a pass that removes a
+  file; the owner's route rewrites the store after a pass that changes or
+  removes one (above), so the file's old words leave its bytes, which the
+  merge alone does not always do. A pass
+  cuts again only what changed, reads a file as a citation does (never
+  through a link, never a FIFO, within a size bound), and trusts a file's
+  size and time only when the time is older than the pass before. A root
+  or a folder that cannot be listed, or a root that lists nothing where
+  its source held files, never empties the source; one pass at a time
+  writes a store. A walk skips dotfiles and the files of secrets (keys,
+  credentials, Terraform states and variables, key folders), and so do the
+  paths a caller names. A source keeps its sensitivity until another is
+  named, and a search filters each source's sensitivity inside each
+  stage's query, before its limit. A store of a newer schema, or a
+  database of another program, is refused untouched.
 - [SECURITY] A conversation's automatic title may be refined by the local
   model, off as shipped (`refine` in `opti_oignon/config/titles.yaml`; a
   machine turns it on, or names its model, in `local.yaml`, never

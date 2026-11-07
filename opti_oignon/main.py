@@ -378,6 +378,19 @@ def cmd_rag(args):
 
 
 # =============================================================================
+# MYCELIUM COMMANDS
+# =============================================================================
+
+def cmd_mycelium(args):
+    """The Mycelium's owner's route: index a folder into a corpus, forget a source, say what the stores hold."""
+    from .mycelium import route
+
+    code = route.run(args)
+    if code:
+        sys.exit(code)
+
+
+# =============================================================================
 # CONFIG COMMANDS
 # =============================================================================
 
@@ -673,6 +686,8 @@ Examples:
   opti-oignon benchmark --interactive --confirm  Full benchmark with user scoring
   opti-oignon rag index ./docs --recursive    Index documents folder
   opti-oignon rag search "Shannon diversity"  Search indexed documents
+  opti-oignon mycelium index oo ./opti-oignon  Index a repository into the corpus oo
+  opti-oignon mycelium status                 Say what the Mycelium holds
   opti-oignon config show                     Show current configuration
   opti-oignon config set code.primary qwen3-coder:30b
   opti-oignon ask "How to calculate Shannon in R?"
@@ -872,6 +887,44 @@ Documentation: https://github.com/AntsAreRad/opti-oignon
     )
 
     # -------------------------------------------------------------------------
+    # Command: mycelium
+    # -------------------------------------------------------------------------
+    mycelium_parser = subparsers.add_parser(
+        "mycelium",
+        help="The Mycelium: index a folder, forget a source, say what is indexed",
+        description="The Mycelium's local index of code and documents: one store per corpus, in data/mycelium/."
+    )
+    mycelium_subparsers = mycelium_parser.add_subparsers(dest="mycelium_action", help="Mycelium actions")
+    mycelium_index = mycelium_subparsers.add_parser(
+        "index",
+        help="Index a folder into a corpus (only what changed), then its vectors"
+    )
+    mycelium_index.add_argument("corpus", help="The corpus: lowercase letters, digits, '_' and '-'")
+    mycelium_index.add_argument("folder", help="The folder (a repository: the files its index tracks)")
+    mycelium_index.add_argument("--source", help="The source's name in the corpus (default: the corpus's own)")
+    mycelium_index.add_argument(
+        "--sensitivity",
+        choices=["public", "private", "secret"],
+        help="The source's sensitivity (default: private when new, else kept)"
+    )
+    mycelium_index.add_argument(
+        "--no-vectors",
+        action="store_true",
+        help="Index only: the vectors are left to a later pass"
+    )
+    mycelium_forget = mycelium_subparsers.add_parser(
+        "forget",
+        help="Forget a source of a corpus: its words leave the store"
+    )
+    mycelium_forget.add_argument("corpus", help="The corpus")
+    mycelium_forget.add_argument("source", help="The source to forget")
+    mycelium_status = mycelium_subparsers.add_parser(
+        "status",
+        help="Say what each corpus holds (nothing written)"
+    )
+    mycelium_status.add_argument("corpus", nargs="?", help="Only this corpus")
+
+    # -------------------------------------------------------------------------
     # Command: config
     # -------------------------------------------------------------------------
     config_parser = subparsers.add_parser(
@@ -1024,6 +1077,7 @@ Documentation: https://github.com/AntsAreRad/opti-oignon
         "api": cmd_api,
         "benchmark": cmd_benchmark,
         "rag": cmd_rag,
+        "mycelium": cmd_mycelium,
         "config": cmd_config,
         "ask": cmd_ask,
         "presets": cmd_presets,
@@ -1038,6 +1092,9 @@ Documentation: https://github.com/AntsAreRad/opti-oignon
             sys.exit(1)
         if args.command == "config" and not hasattr(args, 'config_action'):
             config_parser.print_help()
+            sys.exit(1)
+        if args.command == "mycelium" and not getattr(args, "mycelium_action", None):
+            mycelium_parser.print_help()
             sys.exit(1)
 
         commands[args.command](args)

@@ -229,19 +229,26 @@ that waits, so nothing deleted meanwhile comes back with the migration.
 the command that moves it.
 
 The Mycelium's stores (the coming search of a project's code and
-documents), one `*.db` per corpus under `opti_oignon/data/mycelium/`, are
-opened through `safe_connect` and encrypted with SQLCipher like every
-other database, never in plaintext in Bulbe; one written in plaintext is
-taken by the encryption command with the others. They keep no source's
-text, but what they keep is drawn from it: each source's root, each
-file's path (a document's id) and first sentence, a heading's path, the
-names a part defines and names, the full-text index's tokens with their
-positions, and each part's vector, which gives much of its text back. A
-store is read through a read-only connection that writes nothing.
-Forgetting a source merges the index whole and rewrites the file, so its
-words leave the store's bytes once that succeeds (it says when it did
-not); in a store kept in plaintext, the journals of the forgetting hold
-its words and are removed, not overwritten. The account wipe, for a
+documents), one `*.db` per corpus under `opti_oignon/data/mycelium/`,
+are opened through `safe_connect` and encrypted with SQLCipher like
+every other database, never in plaintext in Bulbe; one written in
+plaintext is taken by the encryption command with the others. They keep
+no source's text, but what they keep is drawn from it: each source's
+root, each file's path (a document's id) and first sentence, a heading's
+path, the names a part defines and names, the full-text index's tokens
+with their positions, and each part's vector, which gives much of its
+text back. A store is read through a read-only connection that writes
+nothing (beside a store another program left in WAL, SQLite makes its
+`-wal` and `-shm` on reading), and written by one pass at a time, in the
+rollback journal. Forgetting a source merges the index whole and
+rewrites the file, and so does the owner's indexing route after a pass
+that changed, renamed or removed a file, so the dropped words leave the
+store's bytes once that succeeds; the rewrite is owed from the
+transaction that dropped them until it runs to its end, said when it did
+not, and done by the route's next pass. In a store kept in plaintext,
+the rollback journals of those passes and of the rewrite hold the
+dropped words and are removed, not overwritten. The route never indexes
+the package's data folder or a folder inside it. The account wipe, for a
 single-user install's one user, overwrites and removes every store; with
 several users, it names them as not covered. The plaintext copies an
 encryption run keeps beside the stores stay, as for every store.

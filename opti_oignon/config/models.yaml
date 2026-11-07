@@ -118,4 +118,4 @@ context_windows:
   "qwen3:32b": 262144
   "deepseek-r1:32b": 131072
   "nemotron-3-nano:30b": 1048576
-  "mxbai-embed-large": 8192
+  "mxbai-embed-large": 512

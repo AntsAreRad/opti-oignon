@@ -15,19 +15,28 @@ its heading's), a Markdown section's heading path, the names a part defines and 
 their positions -- from which a part's stemmed words could be read again in order --, and each part's vector, from
 which a model built for it can guess much of the text it was embedded from. The index keeps no text, but a
 deleted row is only marked until its segment is merged, and freed pages are zeroed (``PRAGMA secure_delete``): after
-a pass that removes a file the index is merged by a bounded number of pages (``Store.purge``), so the removed words
-leave the store's bytes as it merges -- with that pass, in a small store -- and a changed file's old words at the
-index's next merge. ``Store.purge(None)`` merges it whole.
+a pass that removes a file the index is merged by a bounded number of pages (``Store.purge``; whole when None).
+Even merged, the copies of rows the tables moved while they were written -- a removed or changed file's old names
+and words among them -- stay in their pages' free space, which ``secure_delete`` never zeroes, until the file is
+rewritten: ``Store.rewrite`` merges the index whole and rewrites the file (``VACUUM``). A pass that changed, renamed
+or removed a file, and a forgetting, owe a rewrite in their own transaction (``meta``); a forgetting does it at once,
+the owner's route after its pass -- the library's pass alone leaves it owed. It stays owed until one runs to its
+end; a recut, which drops no word the store does not hold again, owes none.
 
 A store written by a newer schema is refused by name, and so is a database of another kind (tables, no store's meta
 table: never stamped); a store cut by another version of the cutter is cut again at the next pass, and so is a store
 of schema 1 (its parts had no embedded text yet). The active encoder's card is kept in ``meta``: the dense stage
 reads its vectors, and only its, until another encoder covers every part. An episode holds counts, the meta table
-its own keys: neither takes a source's words. One pass at a time writes (``lock``)."""
+its own keys: neither takes a source's words. One pass at a time writes: in this process under ``lock``, and across
+connections and processes by the write lock each pass takes at its start (``begin``), before it reads what it will
+change; a store another connection writes refuses it by name (``StoreBusy``). Opening a store at this schema to write
+takes no lock and writes nothing. A store is written in the rollback journal: one left in WAL by another program is
+brought back to it when opened to write, and one another connection holds in WAL is refused by name."""
 import json
 import logging
 import os
 import re
+import secrets
 import threading
 import time
 
@@ -81,6 +90,10 @@ class StoreError(RuntimeError):
     """The store cannot be used as asked."""
 
 
+class StoreBusy(StoreError):
+    """Another connection or process writes the store: a pass is refused rather than interleaved."""
+
+
 def _safe_connect(path, read_only=False):
     from opti_oignon.db_utils import safe_connect
 
@@ -92,9 +105,9 @@ def _safe_connect(path, read_only=False):
 # The tables a store makes, the full-text index's own included: a database holding any other is not a store.
 OWN_TABLES = {"meta", "source", "file", "part", "symbol", "ref", "episode", "vector", "fts", "fts_config",
               "fts_data", "fts_docsize", "fts_idx"}
-# The meta table's keys: the schema, the vectors' count of changes and the active encoder's card, and per source the
-# cutter that cut it, the header its texts are embedded with and when its last pass began.
-META_KEY = re.compile(r"(schema|vectors|encoder|cutter:\d+|header:\d+|pass:\d+)\Z")
+# The meta table's keys: the schema, the vectors' count of changes, the active encoder's card and a rewrite owed, and
+# per source the cutter that cut it, the header its texts are embedded with and when its last pass began.
+META_KEY = re.compile(r"(schema|vectors|encoder|rewrite|cutter:\d+|header:\d+|pass:\d+)\Z")
 # The longest value the meta table keeps: the active encoder's card, as stored (``encoder_value``), is the longest.
 MAX_VALUE = 4096
 
@@ -102,6 +115,12 @@ MAX_VALUE = 4096
 def encoder_value(key, card):
     """The active encoder as the meta table keeps it."""
     return json.dumps({"key": key, "card": card}, sort_keys=True)
+
+
+def owed_mark():
+    """A rewrite owed, as the meta table keeps it under ``rewrite``: each marking its own value, so a rewrite clears
+    only the marking it read before it ran (``Store.rewrite``), never one a pass made meanwhile."""
+    return f"owed {secrets.token_hex(8)}"
 
 
 class Store:
@@ -127,11 +146,25 @@ class Store:
                 raise
             return
         self.db = (connect or _safe_connect)(self.path)
+        try:
+            self._opened_to_write()
+        except BaseException:
+            self.db.close()
+            raise
+
+    def _opened_to_write(self):
+        """The store made when new, moved from schema 1, brought back to the rollback journal; one at this schema is
+        opened and nothing written, no lock taken."""
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.execute("PRAGMA secure_delete = ON")
         held = self._version()
         if held is not None and held > SCHEMA_VERSION:
             raise StoreError(f"the store is at schema {held}, this code reads {SCHEMA_VERSION} and before")
+        tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if held is None and tables - OWN_TABLES:
+            raise StoreError(f"{self.path} holds tables a store does not make ({', '.join(sorted(tables - OWN_TABLES))}"
+                             f"): not a Mycelium store, left untouched")
+        self._rollback_journal()
         if held == 1:
             # Schema 1 had no embedded text: the column comes, and every source is cut again at its next pass; in
             # one transaction with the new stamp, so a crash leaves schema 1 whole, and the schema read again inside
@@ -142,13 +175,27 @@ class Store:
                 self.db.execute("DELETE FROM meta WHERE key LIKE 'cutter:%'")
                 self.db.execute("UPDATE meta SET value = '2' WHERE key = 'schema'")
             self.db.commit()
-        tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        if held is None and tables - OWN_TABLES:
-            raise StoreError(f"{self.path} holds tables a store does not make ({', '.join(sorted(tables - OWN_TABLES))}"
-                             f"): not a Mycelium store, left untouched")
+        if held == SCHEMA_VERSION:
+            return      # a store at this schema holds its tables and its stamp: nothing to write, no lock to take
         self.db.executescript(SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', ?)", (str(SCHEMA_VERSION),))
         self.db.commit()
+
+    def _rollback_journal(self):
+        """A store is written in the rollback journal: one left in WAL by another program is brought back to it (its
+        -wal and -shm go with its last connection); one another connection holds open in WAL cannot be, and is
+        refused by name, left as it is."""
+        mode = str(self.db.execute("PRAGMA journal_mode").fetchone()[0]).lower()
+        if mode != "wal":
+            return
+        try:
+            mode = str(self.db.execute("PRAGMA journal_mode = DELETE").fetchone()[0]).lower()
+        except Exception as exc:  # noqa: BLE001 - the drivers' error classes differ; the message says which
+            raise StoreError(f"{self.path} is in WAL mode and another connection holds it open: a store is written in "
+                             f"the rollback journal only, left as it is ({exc})") from exc
+        if mode == "wal":
+            raise StoreError(f"{self.path} is in WAL mode and another connection holds it open: a store is written in "
+                             f"the rollback journal only, left as it is")
 
     @classmethod
     def at(cls, path, read_only=False):
@@ -205,10 +252,52 @@ class Store:
     def close(self):
         self.db.close()
 
-    def source(self, name, root, kind="folder", sensitivity=None):
+    def begin(self):
+        """The store's write lock taken now (``BEGIN IMMEDIATE``), before a pass reads what it will change: a store
+        another connection or process writes refuses it, once the connection's wait is over (``StoreBusy``), nothing
+        written."""
+        try:
+            self.db.execute("BEGIN IMMEDIATE")
+        except Exception as exc:  # noqa: BLE001 - the drivers' error classes differ; the message says which
+            if "locked" in str(exc) or "busy" in str(exc):
+                raise StoreBusy(f"another pass writes the store {self.path}: try again once it ends") from exc
+            raise
+
+    def rewrite(self):
+        """The index merged whole and the file rewritten (``VACUUM``), so what was deleted leaves the store's bytes:
+        the pages a deleted row leaves are zeroed, but the copies of rows the tables moved while they were written stay
+        in their pages' free space until the file is rewritten. True once done; False when it failed -- a full disk,
+        a statement still running on the connection, another connection holding the store between the merge and the
+        rewrite --, said in the log. The rewrite is owed in the store's meta (``rewrite``, ``owed_mark``) by the very
+        transaction that dropped the rows -- a pass that changed, renamed or removed a file, a forgetting --, and stays
+        owed until a rewrite has run to its end: one that fails, or a process that ends before it does, leaves it owed
+        (the owner's route does it at its next pass). A rewrite clears only the marking it read just before it ran:
+        a pass that dropped rows after that leaves its own. Under the lock."""
+        with self.lock:
+            try:
+                self.purge(None)
+                self.db.commit()
+                held = self.meta("rewrite")
+                self.db.execute("VACUUM")
+            except Exception as exc:  # noqa: BLE001 - what was deleted stays in the pages until a rewrite succeeds
+                self.db.rollback()
+                logger.warning("mycelium: the store was not merged and rewritten, what was deleted stays in its pages "
+                               "until it is (%s)", exc)
+                return False
+            if held is None:
+                return True
+            try:
+                self.db.execute("DELETE FROM meta WHERE key = 'rewrite' AND value = ?", (held,))
+                self.db.commit()
+            except Exception as exc:  # noqa: BLE001 - done, but still owed: the next pass does it again, no harm
+                self.db.rollback()
+                logger.warning("mycelium: the store was rewritten and its rewrite stays owed (%s)", exc)
+            return True
+
+    def source(self, name, root, kind="folder", sensitivity=None, commit=True):
         """The id of the source ``name``, made if new (private unless a sensitivity is named); a known name keeps its
         root and its kind, and its sensitivity unless another is named -- taken then at once: its generation moves,
-        so no reader keeps what it allowed before."""
+        so no reader keeps what it allowed before. A pass asks it inside its own transaction (``commit`` False)."""
         with self.lock:     # the row and the commit wait for a pass that holds the store
             if sensitivity is not None and sensitivity not in SENSITIVITIES:
                 raise StoreError(f"sensitivity is one of {', '.join(SENSITIVITIES)}, not {sensitivity!r}")
@@ -221,33 +310,34 @@ class Store:
                 if sensitivity is not None and row[3] != sensitivity:
                     self.db.execute("UPDATE source SET sensitivity = ?, generation = generation + 1 WHERE id = ?",
                                     (sensitivity, row[0]))
-                    self.db.commit()
+                    if commit:
+                        self.db.commit()
                 return row[0]
             cur = self.db.execute("INSERT INTO source(name, root, kind, sensitivity) VALUES (?, ?, ?, ?)",
                                   (name, str(root), kind, sensitivity or "private"))
-            self.db.commit()
+            if commit:
+                self.db.commit()
             return cur.lastrowid
 
     def forget(self, name):
-        """The source ``name`` forgotten, in one transaction under the lock: its parts' tokens, its row (its files,
-        parts, names and references go with it), the vectors no part embeds any more, its own settings and episodes;
-        an episode 'forget' with its counts. Then the index is merged whole and the file rewritten (``VACUUM``), so
-        its words leave the store's bytes -- the pages a deleted row leaves zeroed, but the copies of rows the tables
-        moved while they were written stay in their pages' free space until the file is rewritten. The vectors'
-        count of changes moves even when no vector went: the generation never comes back to a value read before,
-        though SQLite may give a name indexed again the same id. An unknown name is refused. Returns the counts and
-        ``merged``: False when the merge or the rewrite failed (a full disk, a statement still running on the
-        connection, a reader that came between the two), said in the log -- the source is forgotten, its words stay
-        in the bytes until the next one succeeds. A reader in the middle of a statement when the forgetting begins
-        makes the forgetting itself wait, then fail with the driver's error (locked), nothing forgotten. In a store
-        kept in plaintext, the rollback journals of both hold the forgotten words, and are removed, not
-        overwritten."""
+        """The source ``name`` forgotten, in one transaction under the lock, the store's write lock taken at its start
+        (``begin``: a store another connection writes refuses it, nothing forgotten): its parts' tokens, its row (its
+        files, parts, names and references go with it), the vectors no part embeds any more, its own settings and
+        episodes; an episode 'forget' with its counts. Then the store is rewritten (``rewrite``), so its words leave
+        the store's bytes. The vectors' count of changes moves even when no vector went: the generation never comes
+        back to a value read before, though SQLite may give a name indexed again the same id. An unknown name is
+        refused. Returns the counts and ``merged``: False when the rewrite failed, said in the log -- the source is
+        forgotten, its words stay in the bytes until a rewrite succeeds, owed from the forgetting's own transaction.
+        A reader in the middle of a statement when the forgetting commits makes it wait, then fail with the driver's
+        error (locked), nothing forgotten. In a store kept in plaintext, the rollback journals of both hold the
+        forgotten words, and are removed, not overwritten."""
         with self.lock:
-            row = self.db.execute("SELECT id FROM source WHERE name = ?", (name,)).fetchone()
-            if row is None:
-                raise StoreError(f"no source named {name!r} in this store")
-            source = row[0]
+            self.begin()
             try:
+                row = self.db.execute("SELECT id FROM source WHERE name = ?", (name,)).fetchone()
+                if row is None:
+                    raise StoreError(f"no source named {name!r} in this store")
+                source = row[0]
                 parts = [r[0] for r in self.db.execute(
                     "SELECT p.id FROM part p JOIN file f ON f.id = p.file WHERE f.source = ?", (source,))]
                 files = self.db.execute("SELECT COUNT(*) FROM file WHERE source = ?", (source,)).fetchone()[0]
@@ -260,20 +350,12 @@ class Store:
                 self.vectors_changed()
                 counts = {"files": files, "parts": len(parts), "vectors": vectors}
                 self.episode("forget", None, counts)
+                self.meta("rewrite", owed_mark())   # until the rewrite below runs to its end
                 self.db.commit()
             except BaseException:
                 self.db.rollback()
                 raise
-            try:
-                self.purge(None)
-                self.db.commit()
-                self.db.execute("VACUUM")
-                counts["merged"] = True
-            except Exception as exc:  # noqa: BLE001 - the source is forgotten; its words wait for the next merge
-                self.db.rollback()
-                counts["merged"] = False
-                logger.warning("mycelium: the store was not merged and rewritten after a source was forgotten, its "
-                               "words stay in the store's pages until it is (%s)", exc)
+            counts["merged"] = self.rewrite()
             return counts
 
     def sources(self):

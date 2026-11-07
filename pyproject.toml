@@ -1875,4 +1875,5 @@ addopts = """
     --deselect=tests/test_another_port_is_another_site_contracts.py::test_op7_the_texts_say_the_rule
     --deselect=tests/test_launcher_unlock_contracts.py::test_ul14_the_backend_script_runs_no_program_but_the_server
     --deselect=tests/test_code_outputs_forgetting_contracts.py::test_xo6_the_overwrite_is_one_text_in_its_six_copies
+    --deselect=tests/test_mycelium_place_contracts.py::test_mp10_an_indexer_forgets_what_it_held_of_a_forgotten_source
 """

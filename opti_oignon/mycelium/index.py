@@ -9,7 +9,11 @@ with their tokens, definitions and references. A store cut by another version of
 The pass is one episode, written with what it did and how long it took.
 
 A source that is not a folder -- the onion's Cellar, notes, an archive -- is indexed the same way from
-``{doc_id: text}`` (``index_documents``), its citations checked through the reader it leaves behind.
+``{doc_id: text}`` (``index_documents``), its citations checked through the reader it leaves behind, which serves a
+document's text only while the store holds that document as it was given.
+
+Each pass, of a folder or of documents, takes the store's write lock at its start (``Store.begin``), before it reads
+the files and the generation it will change: a store another connection or process writes refuses it by name.
 
 Vectors are a pass of their own (``embed``), after the index: the parts whose embedded text has no vector under
 the encoder, read again from their source (a part whose lines changed since is left to the next index pass),
@@ -30,6 +34,7 @@ from pathlib import Path
 
 from .chunk import CHUNKER_VERSION, cut, language, module_doc
 from .lexis import subwords
+from .store import StoreBusy, owed_mark
 from .tracked import tracked_files
 from .vectors import EncoderMissing, Held, embedded_text, text_sha, to_blob
 
@@ -200,14 +205,21 @@ def text_lines(data):
         return None
 
 
-def _reader(mapping, whole):
-    """A source of documents read by id: its text; None when the source holds no such document; ``UNKNOWN`` when
-    the indexer never held the whole source and was not given this one."""
+def _reader(store, name, held):
+    """A source of documents read by id, as the store holds it now: the text this indexer was given (``held``:
+    {doc_id: (text, sha256)}), while the store holds that document at the same sha; None when the store holds no such
+    document -- never given, removed, or forgotten, by this indexer or another connection --; ``UNKNOWN`` when the
+    store holds it otherwise than this indexer was given it (changed by another, or never given to this one)."""
 
     def read(doc_id):
-        if doc_id in mapping:
-            return mapping[doc_id]
-        return None if whole else UNKNOWN
+        with store.lock:
+            row = store.db.execute(
+                "SELECT f.sha256 FROM file f JOIN source s ON s.id = f.source WHERE s.name = ? AND s.kind = "
+                "'documents' AND f.path = ?", (name, doc_id)).fetchone()
+        if row is None:
+            return None
+        kept = held.get(doc_id)
+        return kept[0] if kept is not None and kept[1] == row[0] else UNKNOWN
 
     return read
 
@@ -218,7 +230,7 @@ class Indexer:
         self.header = header
         self.last_stop = None   # why the last vector pass stopped (held, missing), said in the log too
         self.readers = {}
-        self._documents = {}    # name -> (the documents held, as given; whether they are the whole source)
+        self._documents = {}    # name -> {doc_id: (text, sha256)}: the documents held, as given
 
     def forget(self, name):
         """The source ``name`` forgotten in the store (``Store.forget``, its counts returned), and what this indexer
@@ -235,8 +247,9 @@ class Indexer:
         new one). One pass at a time on a store: its lock is held from the source's row to the commit."""
         root = Path(os.path.abspath(root))
         with self.store.lock:
-            source = self.store.source(name, root, kind, sensitivity)
+            self.store.begin()
             try:
+                source = self.store.source(name, root, kind, sensitivity, commit=False)
                 return self._index(source, root, paths)
             except BaseException:
                 # Nothing of a pass that fails stays: its drops and updates would otherwise be committed by the
@@ -359,6 +372,12 @@ class Indexer:
             store.meta(f"header:{source}", self.header)
             store.meta(f"pass:{source}", began_ns)
         counts["unreadable"] += unlooked
+        counts["blind"] = len(blind)
+        if counts["changed"] or counts["renamed"] or counts["removed"]:
+            # Words were dropped: copies of their rows may stay in the pages' free space until the file is rewritten.
+            # Owed in the pass's own transaction, so no end of the process loses it (``Store.rewrite``); a recut
+            # drops no word the store does not hold again, and owes none.
+            store.meta("rewrite", owed_mark())
         counts["seconds"] = round(time.perf_counter() - started, 2)
         store.episode("index", source, counts)
         db.commit()
@@ -381,14 +400,15 @@ class Indexer:
     def index_documents(self, name, documents, sensitivity=None, complete=True):
         """A source that is not a folder: ``documents`` is ``{doc_id: text}``, the whole source when ``complete``
         (a document not given is removed), else only what changed; cut by its id's suffix (none: text). Its
-        citations are checked through the mapping itself, kept as the source's reader until the next pass (a pass
-        that is not complete adds to the reader it finds: the documents it was not given stay readable; an indexer
-        that never held the whole source says it cannot check them). A document whose id or text cannot be kept is
+        citations are checked through the texts it was given, kept as the source's reader until the next pass, each
+        served only while the store holds it as given (``_reader``); a pass that is not complete adds to what it
+        holds, keeping only what the store still holds as it was. A document whose id or text cannot be kept is
         skipped. The reader changes only once the pass is committed. A cutter of another version cuts every document
         again; only a complete pass marks the source cut by it. ``sensitivity`` None keeps the source's own."""
         with self.store.lock:
-            source = self.store.source(name, DOCUMENTS + name, "documents", sensitivity)
+            self.store.begin()
             try:
+                source = self.store.source(name, DOCUMENTS + name, "documents", sensitivity, commit=False)
                 return self._index_documents(name, source, documents, complete)
             except BaseException:
                 self.store.db.rollback()
@@ -408,17 +428,18 @@ class Indexer:
                 if not isinstance(doc_id, str) or not isinstance(text, str):
                     raise TypeError("a document is a text under a name")
                 doc_id.encode("utf-8")
-                text.encode("utf-8")
+                data = text.encode("utf-8")
             except (UnicodeEncodeError, TypeError):
                 counts["skipped"] += 1      # an id or a text that cannot be kept or cited: the others are
                 continue
-            given[doc_id] = text
-        before, whole = self._documents.get(name, ({}, False))
+            given[doc_id] = (text, hashlib.sha256(data).hexdigest())
+        # What this indexer held that the store still holds as it was given: the rest was removed, forgotten or
+        # changed by another connection meanwhile, and is no longer this indexer's to serve.
+        before = {doc_id: kept for doc_id, kept in self._documents.get(name, {}).items()
+                  if doc_id in held and held[doc_id][1] == kept[1]}
         mapping = dict(given) if complete else {**before, **given}
-        whole = complete or whole
-        for doc_id, text in given.items():
+        for doc_id, (text, sha) in given.items():
             data = text.encode("utf-8")
-            sha = hashlib.sha256(data).hexdigest()
             old = held.get(doc_id)
             if old and old[1] == sha and not recut:
                 counts["unchanged"] += 1
@@ -453,11 +474,13 @@ class Indexer:
             # A complete pass cut every document by this cutter; so did a first one, whatever it was given.
             store.meta(f"cutter:{source}", CHUNKER_VERSION)
             store.meta(f"header:{source}", self.header)
+        if counts["changed"] or counts["removed"]:
+            store.meta("rewrite", owed_mark())  # words dropped: as a folder's pass does
         counts["seconds"] = round(time.perf_counter() - started, 2)
         store.episode("index", source, counts)
         db.commit()
-        self._documents[name] = (mapping, whole)
-        self.readers[name] = _reader(mapping, whole)
+        self._documents[name] = mapping
+        self.readers[name] = _reader(self.store, name, mapping)
         if counts["removed"]:
             self._merge()
         return counts
@@ -563,46 +586,67 @@ class Indexer:
             try:
                 vectors, _refused = embedder.texts([text for _sha, text in chunk])
             except Held as exc:
-                counts["held"], self.last_stop = True, str(exc)
-                logger.info("mycelium: the vector pass under %s is held: %s", key, exc)
+                self._stopped(counts, key, exc)
                 break
             except EncoderMissing as exc:
                 counts["missing"], self.last_stop = True, str(exc)
                 logger.warning("mycelium: the vector pass under %s stopped: %s", key, exc)
                 break
+            try:
+                with self._writing():
+                    batch_embedded, batch_refused = 0, set()
+                    for (embed_sha, _text), vector in zip(chunk, vectors):
+                        if vector is None:
+                            batch_refused.add(embed_sha)
+                            continue
+                        # A text that left the store while the engine answered (an index pass meanwhile) is not
+                        # kept.
+                        batch_embedded += db.execute(
+                            "INSERT OR REPLACE INTO vector(embed_sha, encoder, dim, data) SELECT ?, ?, ?, ? "
+                            "WHERE EXISTS (SELECT 1 FROM part WHERE embed_sha = ?)",
+                            (embed_sha, key, len(vector), to_blob(vector), embed_sha)).rowcount
+                    store.vectors_changed()
+            except StoreBusy as exc:
+                # Another connection writes the store: the batch is not kept, the pass stops as a held one does.
+                self._stopped(counts, key, exc)
+                break
+            counts["embedded"] += batch_embedded
+            counts["refused"] += len(batch_refused)
+            refused |= batch_refused
+        try:
             with self._writing():
-                for (embed_sha, _text), vector in zip(chunk, vectors):
-                    if vector is None:
-                        counts["refused"] += 1
-                        refused.add(embed_sha)
-                        continue
-                    # A text that left the store while the engine answered (an index pass meanwhile) is not kept.
-                    counts["embedded"] += db.execute(
-                        "INSERT OR REPLACE INTO vector(embed_sha, encoder, dim, data) SELECT ?, ?, ?, ? "
-                        "WHERE EXISTS (SELECT 1 FROM part WHERE embed_sha = ?)",
-                        (embed_sha, key, len(vector), to_blob(vector), embed_sha)).rowcount
-                store.vectors_changed()
-        with self._writing():
-            # While another encoder is read, this one replaces it only once it covers every part: its vectors go
-            # at the change. On a store with no encoder read, the texts the engine refused in this very pass and
-            # still lacking are set aside, if it covers anything. A part this indexer could not read again
-            # (another header, a reader it does not hold, a file changed since) is never set aside.
-            lacking = self._lacking(key)
-            counts["uncovered"] = len(lacking - refused)
-            active = store.active_encoder()
-            if not counts["held"] and not counts["missing"] and (active is None or active["key"] != key):
-                ready = not lacking if active is not None else not counts["uncovered"] and self._covers(key)
-                if ready:
-                    store.activate(key, embedder.encoder.card())
-                    counts["activated"] = True
-            counts["seconds"] = round(time.perf_counter() - started, 2)
-            store.episode("embed", None, counts)
+                # While another encoder is read, this one replaces it only once it covers every part: its vectors
+                # go at the change. On a store with no encoder read, the texts the engine refused in this very pass
+                # and still lacking are set aside, if it covers anything. A part this indexer could not read again
+                # (another header, a reader it does not hold, a file changed since) is never set aside.
+                lacking = self._lacking(key)
+                counts["uncovered"] = len(lacking - refused)
+                active = store.active_encoder()
+                if not counts["held"] and not counts["missing"] and (active is None or active["key"] != key):
+                    ready = not lacking if active is not None else not counts["uncovered"] and self._covers(key)
+                    if ready:
+                        store.activate(key, embedder.encoder.card())
+                        counts["activated"] = True
+                counts["seconds"] = round(time.perf_counter() - started, 2)
+                store.episode("embed", None, counts)
+        except StoreBusy as exc:
+            counts.pop("uncovered", None)
+            counts.pop("activated", None)
+            self._stopped(counts, key, exc)
         return counts
+
+    def _stopped(self, counts, key, exc):
+        """A vector pass held -- by the governor, a busy engine, or another connection writing the store --: what it
+        wrote is kept, the next pass takes up the rest."""
+        counts["held"], self.last_stop = True, str(exc)
+        logger.info("mycelium: the vector pass under %s is held: %s", key, exc)
 
     @contextmanager
     def _writing(self):
-        """The store's lock held while one batch of writes is made and committed, rolled back if it fails."""
+        """The store's lock and its write lock (``Store.begin``) held while one batch of writes is made and committed,
+        rolled back if it fails."""
         with self.store.lock:
+            self.store.begin()
             try:
                 yield
                 self.store.db.commit()

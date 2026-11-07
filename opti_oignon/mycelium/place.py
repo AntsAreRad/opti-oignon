@@ -5,16 +5,21 @@ folder of the encryption command (``db_encryption._STORE_FOLDERS``), which takes
 it takes every ``*.db`` of the platform. A corpus is named by lowercase letters, digits, '_' and '-', from a letter or a
 digit, at most 100 of them: a name never leaves the folder, and any other is refused by name. A store's own name that is
 a symbolic link is refused (the folder, like every store folder, may be one). Reading a corpus makes no folder and no
-file and writes nothing (``open_to_read``: ``Store(..., read_only=True)``); writing makes the folder, the owner's alone,
-and the store (``open_to_write``). The account wipe overwrites and removes every store, the files SQLite keeps beside
-one while it writes and what an interrupted encryption left beside it (``remove_every_store``; a file another name also
-holds, as an interrupted encryption's ``.restoring`` holds its kept copy's bytes, is removed without its overwrite, said
-in the log); the copies an encryption run keeps in ``plaintext-*`` folders are not removed, as for every store of the
-platform. The stores are the install's, not a user's: the wipe asks it for a single-user install's one user."""
+file and writes nothing (``open_to_read``: ``Store(..., read_only=True)``) -- but beside a store another program left in
+WAL, where SQLite makes its -wal and -shm on reading until the store is written again; writing makes the folder, the
+owner's alone, and the store (``open_to_write``), unless only an existing store is to be written. One vector pass runs
+at a time on the install's stores (``one_vector_pass``: the folder itself held, no file made). The account wipe
+overwrites and removes every store, the files SQLite keeps beside one while it writes and what an interrupted encryption
+left beside it (``remove_every_store``; a file another name also holds, as an interrupted encryption's ``.restoring``
+holds its kept copy's bytes, is removed without its overwrite, said in the log); the copies an encryption run keeps in
+``plaintext-*`` folders are not removed, as for every store of the platform. The stores are the install's, not a user's:
+the wipe asks it for a single-user install's one user."""
+import errno
 import logging
 import os
 import re
 import stat
+from contextlib import contextmanager
 from pathlib import Path
 
 from .store import Store, StoreError
@@ -33,6 +38,10 @@ CORPUS = re.compile(r"[a-z0-9][a-z0-9_-]{0,99}\Z")
 
 class NoStore(StoreError):
     """A corpus with no store: nothing is indexed under that name."""
+
+
+class AnotherVectorPass(StoreError):
+    """Another vector pass holds the install's stores: this one is left to a later pass."""
 
 
 def folder():
@@ -76,12 +85,45 @@ def open_to_read(corpus):
     return Store.at(path, read_only=True)
 
 
-def open_to_write(corpus):
-    """The store of ``corpus``, opened to be written, made with its folder (the owner's alone) when new."""
+def open_to_write(corpus, make=True):
+    """The store of ``corpus``, opened to be written, made with its folder (the owner's alone) when new; with
+    ``make`` False, only an existing store: a corpus with no store refused by its name (``NoStore``), nothing made."""
     path = path_for(corpus)
     _not_a_link(path)
+    if not make and not path.is_file():
+        raise NoStore(f"no store for the corpus {corpus!r}: nothing is indexed under that name")
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     return Store.at(path)
+
+
+@contextmanager
+def one_vector_pass():
+    """One vector pass at a time on the install's stores, whatever the process: an exclusive flock on the stores'
+    folder itself -- no file is made for it, and never a descriptor on a store, whose closing would let go of the
+    locks SQLite holds on it in this process --, taken without waiting, let go when the pass ends or its process
+    does. Another holder, in this process or another: ``AnotherVectorPass``; a folder that cannot be locked (a file
+    system or a platform without flock): refused by name."""
+    where = folder()
+    try:
+        import fcntl
+    except ImportError:
+        raise StoreError(f"the vector passes' lock cannot be held on {where}: this platform has no flock") from None
+    try:
+        fd = os.open(where, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    except OSError as exc:
+        raise StoreError(f"the vector passes' lock cannot be held on {where} ({type(exc).__name__})") from None
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise AnotherVectorPass(f"another vector pass is under way on the stores of {where}: the vectors are left "
+                                    f"to the next pass") from None
+        except OSError as exc:
+            raise StoreError(f"the vector passes' lock cannot be held on {where} "
+                             f"({errno.errorcode.get(exc.errno, type(exc).__name__)})") from None
+        yield
+    finally:
+        os.close(fd)
 
 
 def remove_every_store():
