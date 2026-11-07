@@ -193,7 +193,9 @@ def _real_app_harness():
 
     Returns (app module namespace dict, restore callable). The plugin
     loader and sync arming are replaced by recording spies; the memory
-    migration is replaced by a no-op. The run journal the boot tends is
+    migration is replaced by a no-op; the network manager's first check,
+    which the boot runs, by a recording spy too (it would ask the engine).
+    The run journal the boot tends is
     pointed at an empty directory of its own, so the boot reaches no data
     place, whether the session's firewall is there or the suite runs
     alone. The individual checklist checks are left to the caller.
@@ -203,12 +205,13 @@ def _real_app_harness():
     _purge_stub_package()
     import opti_oignon.api.app as app_mod
     import opti_oignon.memory.migration as mig
+    import opti_oignon.network_manager as nm
     import opti_oignon.plugin_loader as pl
     import opti_oignon.run_journal as journal
     import opti_oignon.startup_checks as sc
     import opti_oignon.veilid.sync_service as svc
 
-    calls = {"plugins": 0, "arm": 0}
+    calls = {"plugins": 0, "arm": 0, "network": 0}
     saved = {
         "arm": svc.arm_if_enabled,
         "reset": svc.reset_sync_service,
@@ -221,6 +224,14 @@ def _real_app_harness():
     svc.arm_if_enabled = _arm_spy
     svc.reset_sync_service = lambda: None
     mig.run_boot_migration = lambda: None
+    saved["network"] = None
+    if nm.network_manager is not None:
+        saved["network"] = nm.network_manager.first_check
+
+        def _network_spy():
+            calls["network"] += 1
+
+        nm.network_manager.first_check = _network_spy
     journal_data = tempfile.mkdtemp(prefix="oo-boot-journal-")
     saved["journal"] = journal.DATA_DIR
     journal.DATA_DIR = Path(journal_data)
@@ -240,6 +251,8 @@ def _real_app_harness():
         pl.plugin_loader.shutdown_all = lambda: None
 
     def restore():
+        if saved["network"] is not None:
+            nm.network_manager.first_check = saved["network"]
         svc.arm_if_enabled = saved["arm"]
         svc.reset_sync_service = saved["reset"]
         mig.run_boot_migration = saved["mig"]

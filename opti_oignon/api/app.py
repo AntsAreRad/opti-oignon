@@ -173,6 +173,18 @@ async def lifespan(app: FastAPI):
         init_backends_from_config()
     except Exception:  # noqa: BLE001 - boot must not break on backend config
         logger.warning("boot: backends.yaml could not be applied", exc_info=True)
+    # The first network check: importing the network manager reaches nothing,
+    # so the API runs its first health check here, off the event loop, and a
+    # check that fails is an offline status, never a boot that does not happen.
+    try:
+        import asyncio
+
+        from opti_oignon.network_manager import network_manager as _network
+
+        if _network is not None:
+            await asyncio.to_thread(_network.first_check)
+    except Exception:  # noqa: BLE001 - boot must not break on the network check
+        logger.warning("boot: the first network check could not run", exc_info=True)
     # Startup: singletons initialize on import; heavy deps lazy-loaded
     logger.info("Opti-Oignon API started")
     # Veilid sync auto-driver: armed only when explicitly opted in

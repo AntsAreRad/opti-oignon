@@ -3784,6 +3784,16 @@ package costs.
   origin. Contracts op1-op8 in
   `tests/test_another_port_is_another_site_contracts.py`; xs2 gives way
   to them.
+- Importing the network manager no longer reaches the inference engine.
+  Its module ran a health check when it was loaded, so importing the
+  executor, which imports it, asked the engine before anything ran. The
+  first check now runs when the API starts (its lifespan, off the event
+  loop; a check that fails is an offline status, never a boot that does
+  not happen), or else at the first read of `is_online` on a path with no
+  start, such as the command line's first question, once, under a lock;
+  a check that fails leaves the manager offline and checked, not retried
+  at each read. Contracts NI1-NI4 in
+  `tests/test_network_first_check_contracts.py`.
 - The Mycelium's vectors are computed on a machine that never ran its
   encoder. The resource governor read a model's parameter size in
   billions only, and Ollama shows the small models in millions

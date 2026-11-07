@@ -10,6 +10,10 @@ other components (executor, sync queue, UI) can react.
 Thread-safe status updates via threading.Lock. Background polling
 runs in a daemon thread that stops gracefully on shutdown.
 
+Importing this module reaches nothing: the first health check runs when the
+API starts (its lifespan calls ``first_check``), or else at the first read of
+``is_online`` (a path with no start, such as the CLI's first question), once.
+
 Configuration loaded from config/network.yaml with sensible defaults.
 
 Author: Leon
@@ -111,6 +115,10 @@ class NetworkManager:
 
         self._status = NetworkStatus()
         self._lock = threading.Lock()
+        # Whether a health check has run: before it, ``is_online`` runs the
+        # first one (``first_check``) rather than answer a default.
+        self._checked = False
+        self._first_lock = threading.Lock()
         self._stop_event = threading.Event()
         self._poll_thread: threading.Thread | None = None
         self._callbacks: list[Callable[[NetworkStatus, NetworkStatus], None]] = []
@@ -178,9 +186,32 @@ class NetworkManager:
 
     @property
     def is_online(self) -> bool:
-        """Whether Ollama is currently reachable."""
+        """Whether Ollama is currently reachable; before any health check, the
+        first one is run (``first_check``)."""
+        if not self.checked:
+            self.first_check()
         with self._lock:
             return self._status.online
+
+    @property
+    def checked(self) -> bool:
+        """Whether a health check has run."""
+        with self._lock:
+            return self._checked
+
+    def first_check(self) -> NetworkStatus:
+        """Run the first health check once: the API's start calls it, and the
+        first read of ``is_online`` when nothing did. A check already run is
+        not run again; the status is returned. Never raises."""
+        with self._first_lock:
+            if not self.checked:
+                try:
+                    self.poll_once()
+                except Exception as exc:  # noqa: BLE001 - a failed check is an offline status
+                    logger.debug("first network check failed: %s", exc)
+                    with self._lock:
+                        self._checked = True
+        return self.status
 
     @property
     def status(self) -> NetworkStatus:
@@ -327,6 +358,7 @@ class NetworkManager:
             self._status.embedding_reachable = embedding_ok
             self._status.last_check = now
             self._status.latency_ms = latency_ms
+            self._checked = True
 
             new_status = NetworkStatus(
                 online=self._status.online,
@@ -406,13 +438,9 @@ class NetworkManager:
 # =============================================================================
 
 try:
+    # No check here: importing the module reaches nothing. The first check
+    # runs at the API's start, or at the first read of ``is_online``.
     network_manager = NetworkManager(auto_start=False)
-    # Immediate connectivity check so we start in the correct state
-    # instead of defaulting to offline
-    try:
-        network_manager.poll_once()
-    except Exception:
-        pass  # Non-fatal: will retry on first request
 except Exception as e:
     logger.warning("Failed to create NetworkManager singleton: %s", e)
     network_manager = None  # type: ignore[assignment]
