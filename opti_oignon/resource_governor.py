@@ -309,22 +309,30 @@ def _read_meminfo_mb(meminfo_path: str | Path = "/proc/meminfo") -> tuple[float,
     return fields["MemAvailable:"], fields["MemTotal:"]
 
 
-def _parse_parameter_size_b(value: Any) -> float:
-    """Parse a parameter-size label ("7B", "3.2b", 7.0) to billions.
+# Billions per unit of a parameter-size label: none and B are billions.
+_SIZE_UNITS = {"": 1.0, "B": 1.0, "M": 1_000.0, "K": 1_000_000.0}
 
-    Returns 0.0 when missing or unparseable (fail-open: an unknown size is
-    never treated as too large -- the idiom restated by Section 3.1).
+
+def _parse_parameter_size_b(value: Any) -> float:
+    """Parse a parameter-size label ("7B", "3.2b", "271.00M", "1.5K", 7.0) to billions.
+
+    A label in millions (``M``) or thousands (``K``) -- how Ollama shows the
+    small models, an embedding encoder among them -- is read as the
+    billions it makes. Returns 0.0 when missing or unparseable (fail-open:
+    an unknown size is never treated as too large -- the idiom restated by
+    Section 3.1).
     """
     if isinstance(value, (int, float)):
         return float(value)
     if isinstance(value, str):
         text = value.strip().upper().replace(" ", "")
-        match = re.match(r"^([\d.]+)B?$", text)
+        match = re.match(r"^([\d.]+)([BMK]?)$", text)
         if match:
             try:
-                return float(match.group(1))
+                number = float(match.group(1))
             except ValueError:
                 return 0.0
+            return number / _SIZE_UNITS[match.group(2)]
     return 0.0
 
 

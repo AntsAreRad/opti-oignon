@@ -3784,6 +3784,16 @@ package costs.
   origin. Contracts op1-op8 in
   `tests/test_another_port_is_another_site_contracts.py`; xs2 gives way
   to them.
+- The Mycelium's vectors are computed on a machine that never ran its
+  encoder. The resource governor read a model's parameter size in
+  billions only, and Ollama shows the small models in millions
+  (`271.00M` for embeddinggemma-2): the encoder was sized at nothing, no
+  estimate was made, and with no load of it ever observed or learned the
+  vector pass, a background load, was refused for good as a cost unknown.
+  A size in millions (`M`) or thousands (`K`) is now read as the billions
+  it makes, and the static estimate prices the encoder; a label that is
+  no size still reads as none. Contracts GS1-GS3 in
+  `tests/test_governor_size_units_contracts.py`.
 - [SECURITY] Tries sent together are each counted. A login asked the
   limiter, checked the password, then counted the failure, so tries sent
   together all passed the limiter before the first was counted, as many
