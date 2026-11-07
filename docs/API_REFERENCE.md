@@ -473,7 +473,8 @@ only keep copies of the user's words: the response cache, the semantic
 cache, the offline queue, the old memory store, the coding agent's
 decision preferences, the humanizer's feedback, the learned router's
 queries and the model learned from them, the command line's history,
-the feedback store and the knowledge base's search log. What they held
+the feedback store, the knowledge base's search log, the code execution
+outputs and the Mycelium's stores. What they held
 is overwritten in each database's file, and in a file's bytes before it
 is removed; a database's journal is removed or emptied, not overwritten,
 and a read in progress when the wipe runs keeps a store's write-ahead

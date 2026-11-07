@@ -25,6 +25,8 @@ of schema 1 (its parts had no embedded text yet). The active encoder's card is k
 reads its vectors, and only its, until another encoder covers every part. An episode holds counts, the meta table
 its own keys: neither takes a source's words. One pass at a time writes (``lock``)."""
 import json
+import logging
+import os
 import re
 import threading
 import time
@@ -32,6 +34,8 @@ import time
 # New-module safety rule: any change this module drives through the system
 # must checkpoint first. Hardcoded, never overridable.
 checkpoint_before_apply = True
+
+logger = logging.getLogger(__name__)
 
 SCHEMA_VERSION = 2
 TOKENIZE = "porter unicode61 remove_diacritics 2 tokenchars '_'"
@@ -77,9 +81,11 @@ class StoreError(RuntimeError):
     """The store cannot be used as asked."""
 
 
-def _safe_connect(path):
+def _safe_connect(path, read_only=False):
     from opti_oignon.db_utils import safe_connect
 
+    if read_only:
+        return safe_connect(path, check_same_thread=False, read_only=True)
     return safe_connect(path, check_same_thread=False)
 
 
@@ -99,9 +105,27 @@ def encoder_value(key, card):
 
 
 class Store:
-    def __init__(self, path, connect=None):
+    def __init__(self, path, connect=None, read_only=False):
+        """The store at ``path``, made when new; with ``read_only``, an existing store read and nothing written --
+        opened through the platform's read-only connection (or ``connect``, which must open it so), no table made,
+        no stamp, no migration: a missing file, a newer schema, a schema-1 store and a database of another kind are
+        refused by name, left as they were."""
         self.path = str(path)
+        self.read_only = read_only
         self.lock = threading.RLock()
+        if read_only:
+            if not os.path.isfile(self.path):
+                raise StoreError(f"no store at {self.path}")
+            try:
+                self.db = connect(self.path) if connect else _safe_connect(self.path, read_only=True)
+            except Exception as exc:  # noqa: BLE001 - a wrong key, a hot journal, a file sealed otherwise: said
+                raise StoreError(f"{self.path} cannot be opened to be read: {exc}") from exc
+            try:
+                self._readable()
+            except BaseException:
+                self.db.close()
+                raise
+            return
         self.db = (connect or _safe_connect)(self.path)
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.execute("PRAGMA secure_delete = ON")
@@ -125,6 +149,28 @@ class Store:
         self.db.executescript(SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', ?)", (str(SCHEMA_VERSION),))
         self.db.commit()
+
+    @classmethod
+    def at(cls, path, read_only=False):
+        """The store at ``path``, as ``Store(path, read_only=read_only)``: the package makes a Mycelium store through
+        this. The garden's census of its own store (AF13 of tests/test_allium_surface_contracts.py) counts every call
+        spelled ``Store(...)`` in the package as the garden's, and this class is another: so spelled, the census stays
+        closed and exact."""
+        return cls(path, read_only=read_only)
+
+    def _readable(self):
+        """A store opened read-only: refused unless it is one this code reads as it is."""
+        held = self._version()
+        if held is None:
+            raise StoreError(f"{self.path} has no schema stamp: not a Mycelium store, left untouched")
+        if held > SCHEMA_VERSION:
+            raise StoreError(f"the store is at schema {held}, this code reads {SCHEMA_VERSION} and before")
+        if held < SCHEMA_VERSION:
+            raise StoreError(f"the store is at schema {held}: it is read once a pass has written it again")
+        tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+        if tables - OWN_TABLES or "source" not in tables:
+            raise StoreError(f"{self.path} holds tables a store does not make, or lacks its own: not a Mycelium "
+                             f"store, left untouched")
 
     def _version(self):
         try:
@@ -181,6 +227,54 @@ class Store:
                                   (name, str(root), kind, sensitivity or "private"))
             self.db.commit()
             return cur.lastrowid
+
+    def forget(self, name):
+        """The source ``name`` forgotten, in one transaction under the lock: its parts' tokens, its row (its files,
+        parts, names and references go with it), the vectors no part embeds any more, its own settings and episodes;
+        an episode 'forget' with its counts. Then the index is merged whole and the file rewritten (``VACUUM``), so
+        its words leave the store's bytes -- the pages a deleted row leaves zeroed, but the copies of rows the tables
+        moved while they were written stay in their pages' free space until the file is rewritten. The vectors'
+        count of changes moves even when no vector went: the generation never comes back to a value read before,
+        though SQLite may give a name indexed again the same id. An unknown name is refused. Returns the counts and
+        ``merged``: False when the merge or the rewrite failed (a full disk, a statement still running on the
+        connection, a reader that came between the two), said in the log -- the source is forgotten, its words stay
+        in the bytes until the next one succeeds. A reader in the middle of a statement when the forgetting begins
+        makes the forgetting itself wait, then fail with the driver's error (locked), nothing forgotten. In a store
+        kept in plaintext, the rollback journals of both hold the forgotten words, and are removed, not
+        overwritten."""
+        with self.lock:
+            row = self.db.execute("SELECT id FROM source WHERE name = ?", (name,)).fetchone()
+            if row is None:
+                raise StoreError(f"no source named {name!r} in this store")
+            source = row[0]
+            try:
+                parts = [r[0] for r in self.db.execute(
+                    "SELECT p.id FROM part p JOIN file f ON f.id = p.file WHERE f.source = ?", (source,))]
+                files = self.db.execute("SELECT COUNT(*) FROM file WHERE source = ?", (source,)).fetchone()[0]
+                self.db.executemany("DELETE FROM fts WHERE rowid = ?", [(i,) for i in parts])
+                self.db.execute("DELETE FROM source WHERE id = ?", (source,))
+                self.db.executemany("DELETE FROM meta WHERE key = ?",
+                                    [(f"{kind}:{source}",) for kind in ("cutter", "header", "pass")])
+                self.db.execute("DELETE FROM episode WHERE source = ?", (source,))
+                vectors = self.orphan_vectors()
+                self.vectors_changed()
+                counts = {"files": files, "parts": len(parts), "vectors": vectors}
+                self.episode("forget", None, counts)
+                self.db.commit()
+            except BaseException:
+                self.db.rollback()
+                raise
+            try:
+                self.purge(None)
+                self.db.commit()
+                self.db.execute("VACUUM")
+                counts["merged"] = True
+            except Exception as exc:  # noqa: BLE001 - the source is forgotten; its words wait for the next merge
+                self.db.rollback()
+                counts["merged"] = False
+                logger.warning("mycelium: the store was not merged and rewritten after a source was forgotten, its "
+                               "words stay in the store's pages until it is (%s)", exc)
+            return counts
 
     def sources(self):
         return [dict(zip(("id", "name", "root", "kind", "sensitivity", "generation"), row))

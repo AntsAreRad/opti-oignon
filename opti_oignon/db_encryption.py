@@ -444,10 +444,11 @@ _STORE_PLACES: Any = None
 # The stores the platform keeps outside the places, one by one. None reads
 # them from their configuration (``_lone_stores``): the sandbox's audit log.
 _LONE_STORES: Any = None
-# Below a place, the folder the platform keeps stores in too: the knowledge
-# base's. A plugin's own folder is none: its plugin opens its stores without
-# the platform's key, in plaintext, and they are left so.
-_STORE_FOLDERS = ("rag",)
+# Below a place, the folders the platform keeps stores in too: the knowledge
+# base's and the Mycelium's (one store per corpus). A plugin's own folder is
+# none: its plugin opens its stores without the platform's key, in plaintext,
+# and they are left so.
+_STORE_FOLDERS = ("rag", "mycelium")
 # The files SQLite keeps beside a database while it is open or recovering.
 _SIDECARS = ("-wal", "-shm", "-journal")
 # How every SQLite file no cipher wrote begins.

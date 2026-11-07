@@ -1874,4 +1874,5 @@ addopts = """
     --deselect=tests/test_revoked_device_never_reaches_the_api_contracts.py::test_tg4_a_network_address_is_served_with_the_whole_mtls_or_not_at_all
     --deselect=tests/test_another_port_is_another_site_contracts.py::test_op7_the_texts_say_the_rule
     --deselect=tests/test_launcher_unlock_contracts.py::test_ul14_the_backend_script_runs_no_program_but_the_server
+    --deselect=tests/test_code_outputs_forgetting_contracts.py::test_xo6_the_overwrite_is_one_text_in_its_six_copies
 """

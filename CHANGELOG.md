@@ -11,6 +11,30 @@ package costs.
 
 ### Added
 
+- The Mycelium's stores have their place: one per corpus,
+  `opti_oignon/data/mycelium/<corpus>.db`, a corpus named by lowercase
+  letters, digits, `_` and `-` (any other name is refused, so none leaves
+  the folder); a store's own name that is a symbolic link is refused. The
+  folder is one of the encryption command's: a store written there in
+  plaintext is encrypted with the platform's others. Nothing writes one yet: the
+  indexing route comes next. A store is read through a read-only
+  connection that makes no file and writes nothing -- no table, no stamp,
+  no migration --; a newer schema, a schema-1 store, another kind of
+  database, or one the platform's opener cannot open (a wrong key, a hot
+  journal) is refused by name. Forgetting a source removes everything of
+  it -- its files' parts, tokens, names and references, the vectors no
+  other part shares, its settings and its passes' records; the indexer
+  that forgets it also drops the documents' texts it kept to check their
+  citations --, then merges the index and rewrites the file, so its words
+  leave the store's bytes, and says whether that succeeded (a full disk
+  leaves them until the next time). The store's generation moves to a
+  value never read before, though a source indexed again under the same
+  name may take the same id back. The account wipe, for a single-user
+  install's one user, overwrites and removes every store, the files
+  SQLite keeps beside it and what an interrupted encryption left (a file
+  another name also holds is removed without its overwrite); the
+  plaintext copies an encryption run keeps, `plaintext-*`, stay, as for
+  every store. With several users, it names the stores as not covered.
 - Ollama reads each model's prompts in the batch `backends.yaml` gives
   it (`ollama.num_batch`, a table of model to batch; shipped: 2048 for
   `qwen3.8:27b` and `qwen3.5:4b`; a model left out reads at Ollama's own,

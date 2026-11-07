@@ -228,6 +228,24 @@ that waits, so nothing deleted meanwhile comes back with the migration.
 `python3 -m opti_oignon.db_encryption check` names each such store and
 the command that moves it.
 
+The Mycelium's stores (the coming search of a project's code and
+documents), one `*.db` per corpus under `opti_oignon/data/mycelium/`, are
+opened through `safe_connect` and encrypted with SQLCipher like every
+other database, never in plaintext in Bulbe; one written in plaintext is
+taken by the encryption command with the others. They keep no source's
+text, but what they keep is drawn from it: each source's root, each
+file's path (a document's id) and first sentence, a heading's path, the
+names a part defines and names, the full-text index's tokens with their
+positions, and each part's vector, which gives much of its text back. A
+store is read through a read-only connection that writes nothing.
+Forgetting a source merges the index whole and rewrites the file, so its
+words leave the store's bytes once that succeeds (it says when it did
+not); in a store kept in plaintext, the journals of the forgetting hold
+its words and are removed, not overwritten. The account wipe, for a
+single-user install's one user, overwrites and removes every store; with
+several users, it names them as not covered. The plaintext copies an
+encryption run keeps beside the stores stay, as for every store.
+
 Known exception (MP-01): enforcement of the model provenance seal at
 load is wired on the `llama_cpp` backend only. The Ollama backend (the
 default) and the llama-server backend load model weights without an

@@ -134,6 +134,9 @@ STORES: tuple[Entry, ...] = (
     Entry("coding history store", ("coding_history.db",), ("coding_history.py",), WORDS, NOT_COVERED),
     Entry("code execution outputs (the images and PDFs a run's code wrote, by conversation, not user-scoped)",
           ("exec_outputs",), ("code_executor.py",), DRAWN, ONE_USER, failures=("code execution outputs",)),
+    Entry("the Mycelium's indexes (each corpus's first sentences, headings, names, tokens and vectors; not "
+          "user-scoped)",
+          ("mycelium",), ("mycelium/place.py",), DRAWN, ONE_USER, failures=("the Mycelium's indexes",)),
     Entry("sandbox exports (the files copied out of a sandbox)", ("sandbox_exports",), ("api/routes_sandbox.py",),
           DRAWN, NOT_COVERED),
     Entry("skills (written by the user or accepted from the agent)", ("skills",), ("agent/skills.py",), WORDS,
@@ -233,8 +236,8 @@ NOT_STORES: dict[str, tuple[str, tuple[str, ...]]] = {
     "rag": ("the knowledge base's folder: its stores are listed by name",
             ("rag_store.py", "project_context.py", "rag/batch_ingest.py", "rag/config.py", "rag_dashboard.py",
              "user_data_manager.py")),
-    ".db": ("a suffix: the garden's beings' files end in it, the encryption tool finds every database by it, and "
-            "the Mycelium's indexer skips the files that end in it", ("allium/store.py", "db_encryption.py",
-                                                                      "mycelium/index.py")),
+    ".db": ("a suffix: the garden's beings' files and the Mycelium's stores end in it, the encryption tool finds "
+            "every database by it, and the Mycelium's indexer skips the files that end in it",
+            ("allium/store.py", "db_encryption.py", "mycelium/index.py", "mycelium/place.py")),
     ".sqlite": ("a suffix the Mycelium's indexer skips: a database is never indexed as text", ("mycelium/index.py",)),
 }

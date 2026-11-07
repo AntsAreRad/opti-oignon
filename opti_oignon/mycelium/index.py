@@ -220,6 +220,16 @@ class Indexer:
         self.readers = {}
         self._documents = {}    # name -> (the documents held, as given; whether they are the whole source)
 
+    def forget(self, name):
+        """The source ``name`` forgotten in the store (``Store.forget``, its counts returned), and what this indexer
+        held of it dropped with it: a source of documents' texts, kept to check its citations -- an old citation is
+        no longer read, by a searcher over ``readers`` too. Under the store's lock, as a pass."""
+        with self.store.lock:
+            counts = self.store.forget(name)
+            self.readers.pop(name, None)
+            self._documents.pop(name, None)
+            return counts
+
     def index(self, name, root, kind="folder", sensitivity=None, paths=None):
         """A pass over a folder (its root kept absolute); ``sensitivity`` None keeps the source's own (private for a
         new one). One pass at a time on a store: its lock is held from the source's row to the commit."""

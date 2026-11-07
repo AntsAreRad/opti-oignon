@@ -227,6 +227,15 @@ def _get_code_outputs() -> Any:
         return None
 
 
+def _get_mycelium_stores() -> Any:
+    """The Mycelium's stores: each corpus's first sentences, headings, names, tokens and vectors."""
+    try:
+        from opti_oignon.mycelium.place import remove_every_store
+        return remove_every_store
+    except ImportError:
+        return None
+
+
 def _get_feedback() -> Any:
     """The feedback store: each rating and its words, a conversation's or none."""
     try:
@@ -395,6 +404,7 @@ WIPE_NOT_COVERED = (
     "legacy vector folders (the documents' chunks in plain text until `db_encryption migrate`)",
     "coding history store",
     "code execution outputs (the images and PDFs a run's code wrote, by conversation, not user-scoped)",
+    "the Mycelium's indexes (each corpus's first sentences, headings, names, tokens and vectors; not user-scoped)",
     "sandbox exports (the files copied out of a sandbox)",
     "skills (written by the user or accepted from the agent)",
     "skills a paired device offered (waiting for this device's approval)",
@@ -433,6 +443,7 @@ WIPE_SINGLE_USER = (
     "the command line's history (questions and answers, not user-scoped)",
     "the knowledge base's search log (the queries, not user-scoped)",
     "code execution outputs (the images and PDFs a run's code wrote, by conversation, not user-scoped)",
+    "the Mycelium's indexes (each corpus's first sentences, headings, names, tokens and vectors; not user-scoped)",
 )
 
 # Stores the wipe removes only when the request names them, by the word it uses: in single-user mode, for the
@@ -1663,8 +1674,8 @@ class UserDataDeleter:
         """Single-user mode: the stores that only keep copies of the user's words emptied whole, overwritten -- the
         coding agent's decision preferences, the humanizer's feedback, the learned router's queries and its model,
         the command line's history, the feedback store, the knowledge base's search log, the code execution
-        outputs; each that could not be, named. A store whose file is not there holds none, and is not created; one
-        whose module does not load is not asked."""
+        outputs, the Mycelium's stores; each that could not be, named. A store whose file is not there holds none,
+        and is not created; one whose module does not load is not asked."""
         failed = []
         for label, held in (("decision preferences", _get_decision_preferences),
                             ("humanizer feedback", _get_humanizer_feedback),
@@ -1672,7 +1683,8 @@ class UserDataDeleter:
                             ("command line history", _get_command_line_history),
                             ("feedback store", _get_feedback),
                             ("knowledge base search log", _get_knowledge_base_searches),
-                            ("code execution outputs", _get_code_outputs)):
+                            ("code execution outputs", _get_code_outputs),
+                            ("the Mycelium's indexes", _get_mycelium_stores)):
             try:
                 empty = held()
                 if empty is not None:
