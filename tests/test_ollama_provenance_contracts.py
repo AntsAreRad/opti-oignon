@@ -71,6 +71,12 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(mp, "current_mode", lambda: "bulbe")
     monkeypatch.setattr(mp, "_load_config", lambda: {})
     monkeypatch.setattr(mp, "_said_ollama", set())
+    # The layers' verdict (256) of this test's own: a check in one contract never refuses a model in the next.
+    monkeypatch.setattr(mp, "_layers", {"state": "pending", "started_at": None, "finished_at": None, "checked": 0,
+                                        "manifest": None})
+    monkeypatch.setattr(mp, "_verdicts", {})
+    monkeypatch.setattr(mp, "_unchecked", {})
+    monkeypatch.setattr(mp, "_said_unchecked", set())
     models = tmp_path / "ollama"
     monkeypatch.setenv("OLLAMA_MODELS", str(models))
     w = _World(mp=mp, keys=keys, models=models, tmp=tmp_path)

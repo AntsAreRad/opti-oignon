@@ -79,6 +79,7 @@ import logging
 import os
 import re
 import stat
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -1523,6 +1524,11 @@ def verify_ollama(
     model and reason (each request of an observing host would say it again otherwise)."""
     enforcement = enforcement_mode(mode=mode, config=config)
     reason, listed = classify_ollama(name, digest, load_manifest(manifest_path), keys=keys, verifier=verifier)
+    if reason == REASON_VERIFIED:
+        # The digest holds; the last check of the layers may have seen one rewritten under it (256).
+        held = _verdicts.get(ollama_name(name))
+        if held is not None and held[1] == "changed" and held[2] == plain_digest(listed):
+            reason = REASON_LAYERS_CHANGED
     allowed = decide(reason, enforcement)
     if reason != REASON_VERIFIED and (ollama_name(name), reason + str(allowed)) not in _said_ollama:
         _said_ollama.add((ollama_name(name), reason + str(allowed)))
@@ -1548,38 +1554,112 @@ def ollama_models_dir() -> Path:
 
 def read_ollama_manifest(name: str, models_dir: Path | str | None = None) -> tuple[str, list[str]] | None:
     """(the sha256 of the model's manifest bytes, its layers' digests) read from the engine's folder, or None when
-    the folder or the manifest cannot be read (the library's registry and namespace assumed for a bare name)."""
+    the folder or the manifest cannot be read, or is not a manifest (the library's registry and namespace assumed for
+    a bare name)."""
+    status, held = _read_model_manifest(name, models_dir)
+    return held[:2] if status == "ok" else None
+
+
+class _Irregular(OSError):
+    """Something at a path that is not a regular file (a folder, a pipe, a device): never waited on, never read."""
+
+
+def _open_regular(path: Path) -> int:
+    """A descriptor on the regular file at ``path``, opened without waiting (a pipe is never waited on); raises
+    ``_Irregular`` for anything else, OSError when it cannot be opened."""
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+                 | getattr(os, "O_NOCTTY", 0))
+    kind = stat.S_IFMT(os.fstat(fd).st_mode)
+    if kind != stat.S_IFREG:
+        os.close(fd)
+        raise _Irregular(f"not a regular file but {_KINDS.get(kind, 'another kind of file')}")
+    return fd
+
+
+def _read_model_manifest(name: str, models_dir: Path | str | None) -> tuple[str, Any]:
+    """``(status, held)``: ``ok`` with (sha256 of the bytes, the layers' digests); ``absent`` (no manifest under that
+    name, or no folder); ``unreadable`` (it cannot be read: rights, I/O); ``irregular`` (not a regular file) and
+    ``malformed`` (not a manifest: not JSON, not an object), each with why; ``ok`` also gives each layer's size as
+    the manifest names it ({digest: size}). Never waits, never raises."""
     base = Path(models_dir) if models_dir is not None else ollama_models_dir()
     parts = _name_parts(name)
     if parts is None:
-        return None             # a name that could climb out of the engine's folder is no model's
+        return "malformed", "not a model's name (it could leave the engine's folder)"
     path = base.joinpath("manifests", *parts)
     try:
-        raw = path.read_bytes()
+        fd = _open_regular(path)
+        try:
+            with open(fd, "rb", closefd=False) as handle:
+                raw = handle.read()
+        finally:
+            os.close(fd)
+    except _Irregular as exc:
+        return "irregular", f"its manifest is {exc}"
+    except BlockingIOError:
+        return "irregular", "its manifest is held under a lease (the engine would wait, then read it)"
+    except (FileNotFoundError, NotADirectoryError):
+        return "absent", "its manifest is not in the engine's folder"
+    except OSError as exc:
+        return "unreadable", f"its manifest cannot be read ({type(exc).__name__})"
+    try:
         held = json.loads(raw)
-    except (OSError, ValueError):
-        return None
-    layers = [plain_digest(item.get("digest")) for item in [held.get("config") or {}, *(held.get("layers") or [])]
-              if isinstance(item, dict) and item.get("digest")]
-    return hashlib.sha256(raw).hexdigest(), layers
+    except ValueError:
+        return "malformed", "its manifest does not parse"
+    if not isinstance(held, dict):
+        return "malformed", "its manifest is not an object"
+    items = [held.get("config") or {}, *(held.get("layers") if isinstance(held.get("layers"), list) else [])]
+    items = [item for item in items if isinstance(item, dict) and item.get("digest")]
+    layers = [plain_digest(item.get("digest")) for item in items]
+    sizes = {plain_digest(item.get("digest")): item["size"] for item in items
+             if isinstance(item.get("size"), int) and not isinstance(item.get("size"), bool) and item["size"] >= 0}
+    return "ok", (hashlib.sha256(raw).hexdigest(), layers, sizes)
 
 
 def verify_ollama_layers(layers: list[str], models_dir: Path | str | None = None,
                          chunk_size: int = _CHUNK) -> list[str]:
     """The layers whose blob does not hash to its name (or cannot be read), each as ``<digest>: <why>``; [] when all
     hold. A blob is named by the sha256 of its bytes: one rewritten under its own name is seen here."""
+    return [f"{layer}: {why}" for layer, why, _seen in _layer_findings(layers, models_dir, chunk_size)]
+
+
+def _layer_findings(layers: list[str], models_dir: Path | str | None, chunk_size: int,
+                    sizes: dict[str, int] | None = None) -> list[tuple[str, str, bool]]:
+    """Each layer that does not hold: ``(digest, why, seen)``. Seen: its bytes hash to another digest; its size is
+    not the one its manifest names (``sizes``: told without reading it -- a huge or sparse file never holds the pass);
+    it is not a regular file, or a lease is held on it (the engine would wait, then read it); its blob is absent from
+    the folder the model's manifest was read in. Not seen: it could not be looked at (rights, I/O) -- a third state,
+    never a finding."""
     base = (Path(models_dir) if models_dir is not None else ollama_models_dir()) / "blobs"
-    bad = []
+    out = []
     for layer in layers:
         path = base / f"sha256-{plain_digest(layer)}"
         try:
-            held = compute_digest(path, chunk_size=chunk_size)
+            fd = _open_regular(path)
+            try:
+                expected = (sizes or {}).get(plain_digest(layer))
+                size = os.fstat(fd).st_size
+                if expected is not None and size != expected:
+                    out.append((plain_digest(layer), f"its size is {size}, its manifest names {expected}", True))
+                    continue
+                hasher = hashlib.sha256()
+                with open(fd, "rb", closefd=False) as handle:
+                    for block in iter(lambda: handle.read(chunk_size), b""):
+                        hasher.update(block)
+                held = hasher.hexdigest()
+            finally:
+                os.close(fd)
+        except _Irregular as exc:
+            out.append((plain_digest(layer), str(exc), True))     # a blob is a regular file: anything else is seen
+            continue
+        except BlockingIOError:
+            out.append((plain_digest(layer), "a lease is held on it (the engine would wait, then read it)", True))
+            continue
         except OSError as exc:
-            bad.append(f"{plain_digest(layer)}: unreadable ({type(exc).__name__})")
+            out.append((plain_digest(layer), f"unreadable ({type(exc).__name__})", isinstance(exc, FileNotFoundError)))
             continue
         if not _hmac.compare_digest(held, plain_digest(layer)):
-            bad.append(f"{plain_digest(layer)}: its bytes hash to {held}")
-    return bad
+            out.append((plain_digest(layer), f"its bytes hash to {held}", True))
+    return out
 
 
 def enroll_ollama_models(
@@ -1616,6 +1696,7 @@ def enroll_ollama_models(
         entries = dict(reading.entries)
     named = {ollama_name(n) for n in repin}
     enrolled, kept, repinned, changed, unchecked, broken = [], [], [], [], [], []
+    hashed = []     # (name, when its reading began): the models whose layers were hashed here and held
     for name, digest in models:
         full, listed = ollama_name(name), plain_digest(digest)
         if _name_parts(full) is None:
@@ -1627,12 +1708,14 @@ def enroll_ollama_models(
         held = entries.get(ollama_key(full))
         if isinstance(held, dict) and plain_digest(held.get("sha256")) == listed:
             # Kept as pinned -- but its layers hashed again: one rewritten in place since is refused here.
+            at = time.monotonic()
             read = read_ollama_manifest(full, models_dir)
             if read is not None:
                 bad = verify_ollama_layers(read[1], models_dir, chunk_size=chunk_size)
                 if read[0] != listed or bad:
                     broken.append(f"{full}: " + ("; ".join(bad) or f"its manifest on the disk hashes to {read[0]}"))
                     continue
+                hashed.append((full, at))
             kept.append(full)
             continue
         if isinstance(held, dict):
@@ -1640,6 +1723,7 @@ def enroll_ollama_models(
                 changed.append(full)
                 continue
             repinned.append(full)
+        at = time.monotonic()
         read = read_ollama_manifest(full, models_dir)
         layers: list[str] = []
         if read is None:
@@ -1653,6 +1737,7 @@ def enroll_ollama_models(
             if bad:
                 broken.append(f"{full}: " + "; ".join(bad))
                 continue
+            hashed.append((full, at))
         entries[ollama_key(full)] = {"sha256": listed, "kind": "ollama", "layers": layers,
                                      "recorded_at": time.time()}
         enrolled.append({"model": full, "sha256": listed})
@@ -1667,6 +1752,7 @@ def enroll_ollama_models(
         sealed = dict(payload)
         sealed["seal"] = compute_seal(payload, seal_keys, signer=signer)
         save_manifest(sealed, target)
+    _clear_layer_verdicts(hashed)
     logger.info("Enrolled %d Ollama model(s) under %s, %d kept", len(enrolled), seal_keys.scheme, len(kept))
     return {"enrolled": enrolled, "count": len(enrolled), "kept": kept, "repinned": repinned,
             "layers_unchecked": unchecked, "scheme": seal_keys.scheme, "written": written}
@@ -1682,28 +1768,212 @@ def verify_ollama_pins(
 ) -> list[str]:
     """The check on demand of every pinned Ollama model against the engine's folder: its manifest on the disk must
     hash to the pinned digest and every layer to its name; what does not, each as ``<name:tag>: <why>``; [] when all
-    hold. A manifest that does not verify here is itself the one line. The requests check the digest the engine lists,
-    never the layers' bytes: a layer rewritten in place after its enrolment is seen here, or at the next enrolment."""
+    hold. A manifest that does not verify here is itself the one line. The check's verdict replaces the one the gate
+    reads (``check_ollama_layers``): a model found changed is refused under enforcement until it holds again."""
+    result = check_ollama_layers(manifest_path=manifest_path, models_dir=models_dir, keys=keys, verifier=verifier,
+                                 chunk_size=chunk_size)
+    if result["manifest"] is not None:
+        return [f"the manifest: {result['manifest']}"]
+    found = {**result["unchecked"], **result["changed"]}
+    return [f"{name}: {why}" for name, why in sorted(found.items())]
+
+
+# ---------------------------------------------------------------------------
+# The layers checked without anyone asking (256)
+# ---------------------------------------------------------------------------
+# The gate compares the digest the engine lists, never the layers' bytes: a
+# blob rewritten in place keeps the manifest's digest. The check below hashes
+# every pinned model's layers -- in the background (start_layer_checks: at
+# once, then every LAYER_CHECK_INTERVAL_S) and on demand -- and keeps, per
+# model, the last thing SEEN of it and when it was read: "changed" (a layer
+# that no longer hashes to its name, a blob or a manifest that is not a
+# regular file or not a manifest, a blob absent from a folder that reads) or
+# "holds". A finding replaces a model's verdict only when that model was read
+# after the verdict's own time: a slow pass never undoes what a later pass or
+# an enrolment saw. What could not be looked at (rights, I/O, a folder
+# elsewhere, a check that failed) is never a verdict: not checked, said once,
+# the verdict before it kept. verify_ollama refuses, under enforcement, a
+# model whose verdict is "changed" under the digest still pinned
+# (REASON_LAYERS_CHANGED). Before the first check of a process, the gate has
+# the digest alone. Nothing is persisted: each process hashes again; each
+# process keeps its own verdict.
+# A TRIPWIRE, not a guarantee: the check runs under the account that can
+# write the engine's folder, and whatever can rewrite a blob can also fight
+# the check (the moment between two passes, a file it cannot be made to
+# read). It sees a rewrite that does not hide; the guarantee is a folder that
+# neither this account nor an attacker can write (SECURITY.md, MP-01).
+
+REASON_LAYERS_CHANGED = "layers_changed"   # its digest holds; a layer's bytes no longer hash to its name
+LAYER_CHECK_INTERVAL_S = 24 * 3600.0
+_layers_lock = threading.Lock()
+_layers: dict[str, Any] = {"state": "pending", "started_at": None, "finished_at": None, "checked": 0,
+                           "manifest": None}
+_verdicts: dict[str, tuple[float, str, str, str]] = {}   # name -> (read at, "changed"|"holds", pinned, why)
+_unchecked: dict[str, tuple[float, str]] = {}            # name -> (read at, why): the last reading could not look
+_running = [0]                                           # passes under way
+_said_unchecked: set[str] = set()
+_checker: dict[str, Any] = {}                            # the background thread and its stop event
+
+
+def _model_finding(name: str, pinned: str, models_dir, chunk_size: int) -> tuple[str, str]:
+    """``(outcome, why)`` for one pinned model: ``changed``, ``holds``, or ``unchecked`` (could not look)."""
+    status, held = _read_model_manifest(name, models_dir)
+    if status in ("absent", "unreadable"):
+        return "unchecked", held
+    if status != "ok":
+        return "changed", held                     # a manifest that is not one, or not a regular file: seen
+    if held[0] != pinned:
+        return "changed", f"its manifest on the disk hashes to {held[0]}, pinned {pinned}"
+    found = _layer_findings(held[1], models_dir, chunk_size, sizes=held[2])
+    if any(seen for _layer, _why, seen in found):
+        return "changed", "; ".join(f"{layer}: {why}" for layer, why, _seen in found)
+    if found:
+        return "unchecked", "; ".join(f"{layer}: {why}" for layer, why, _seen in found)
+    return "holds", ""
+
+
+def _layer_check(manifest_path, models_dir, keys, verifier, chunk_size) -> dict[str, Any]:
+    """One pass over the pinned Ollama models: ``found`` {name: (read at, outcome, pinned, why)}, ``checked`` (how
+    many pinned), ``manifest`` (why the manifest could not be read here, else None). One model's check that raises
+    is that model's ``unchecked``; the pass goes on."""
+    out: dict[str, Any] = {"found": {}, "checked": 0, "manifest": None}
     seal_keys = keys if keys is not None else resolve_seal_keys()
     if seal_keys is None:
-        return ["the manifest: no key to verify its seal"]
+        out["manifest"] = "no key to verify its seal"
+        return out
     target = Path(manifest_path) if manifest_path is not None else DEFAULT_MANIFEST_PATH
     reading = read_manifest(target, keys=seal_keys, verifier=verifier)
     if reading.status != REASON_VERIFIED:
-        return [f"the manifest: {reading.status}"]
-    out = []
+        out["manifest"] = reading.status
+        return out
     for key, entry in sorted(reading.entries.items()):
         if not str(key).startswith(OLLAMA_PREFIX):
             continue
         name = str(key)[len(OLLAMA_PREFIX):]
-        read = read_ollama_manifest(name, models_dir)
-        if read is None:
-            out.append(f"{name}: its manifest cannot be read in the engine's folder")
-            continue
-        if read[0] != plain_digest(entry.get("sha256")):
-            out.append(f"{name}: its manifest on the disk hashes to {read[0]}, pinned {plain_digest(entry.get('sha256'))}")
-            continue
-        bad = verify_ollama_layers(read[1], models_dir, chunk_size=chunk_size)
-        if bad:
-            out.append(f"{name}: " + "; ".join(bad))
+        pinned = plain_digest(entry.get("sha256")) if isinstance(entry, dict) else ""
+        out["checked"] += 1
+        at = time.monotonic()
+        try:
+            outcome, why = _model_finding(name, pinned, models_dir, chunk_size)
+        except Exception as exc:  # noqa: BLE001 - one model's check never ends the pass
+            outcome, why = "unchecked", f"its check failed ({type(exc).__name__}: {exc})"
+        out["found"][name] = (at, outcome, pinned, why)
+    # A model re-pinned while the pass ran was read against its old pin: what was seen of it says nothing now.
+    after = read_manifest(target, keys=seal_keys, verifier=verifier)
+    if after.status == REASON_VERIFIED:
+        for name, (at, outcome, pinned, why) in list(out["found"].items()):
+            now = after.entries.get(OLLAMA_PREFIX + name)
+            if not isinstance(now, dict) or plain_digest(now.get("sha256")) != pinned:
+                out["found"][name] = (at, "unchecked", pinned, "re-pinned or unpinned while the check ran")
     return out
+
+
+def check_ollama_layers(
+    *,
+    manifest_path: Path | str | None = None,
+    models_dir: Path | str | None = None,
+    keys: SealKeys | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
+    chunk_size: int = _CHUNK,
+) -> dict[str, Any]:
+    """Hash every pinned Ollama model's layers and fold what was seen into the verdict the gate reads (see the
+    section's note); returns the pass's ``changed`` and ``unchecked`` {name: why}, ``checked`` and ``manifest``."""
+    global _layers
+    started_at = time.time()
+    with _layers_lock:
+        _running[0] += 1
+    try:
+        result = _layer_check(manifest_path, models_dir, keys, verifier, chunk_size)
+    finally:
+        with _layers_lock:
+            _running[0] -= 1
+    changed, unchecked = {}, {}
+    with _layers_lock:
+        for name, (at, outcome, pinned, why) in result["found"].items():
+            held = _verdicts.get(name)
+            newer = held is None or held[0] < at
+            if outcome == "unchecked":
+                unchecked[name] = why
+                if newer and _unchecked.get(name, (float("-inf"),))[0] < at:
+                    _unchecked[name] = (at, why)
+                continue
+            if _unchecked.get(name, (float("-inf"),))[0] < at:
+                _unchecked.pop(name, None)
+            if newer:
+                _verdicts[name] = (at, outcome, pinned, why)
+            if outcome == "changed":
+                changed[name] = why
+        if _layers["finished_at"] is None or _layers["started_at"] is None or _layers["started_at"] <= started_at:
+            _layers = {"state": "done" if result["manifest"] is None else "unavailable", "started_at": started_at,
+                       "finished_at": time.time(), "checked": result["checked"], "manifest": result["manifest"]}
+    for name, why in sorted(changed.items()):
+        logger.error("Model provenance: the Ollama model %s has a layer changed since its enrolment: %s", name, why)
+    for name, why in sorted(unchecked.items()):
+        if name not in _said_unchecked:
+            _said_unchecked.add(name)
+            logger.warning("Model provenance: the layers of the Ollama model %s were not checked: %s", name, why)
+    if result["manifest"] is not None:
+        logger.warning("Model provenance: the Ollama layers were not checked: the manifest %s", result["manifest"])
+    return {"changed": changed, "unchecked": unchecked, "checked": result["checked"], "manifest": result["manifest"]}
+
+
+def _clear_layer_verdicts(read: list[tuple[str, float]]) -> None:
+    """The models whose layers their enrolment hashed and found holding, each with the time its reading began:
+    "holds" as of that reading -- a change a later reading saw is kept."""
+    with _layers_lock:
+        for name, at in read:
+            held = _verdicts.get(ollama_name(name))
+            if held is None or held[0] < at:
+                _verdicts[ollama_name(name)] = (at, "holds", held[2] if held else "", "")
+
+
+def layer_check_state() -> dict[str, Any]:
+    """The check of the Ollama layers in this process, as its gate reads it: ``state`` -- pending (no pass ended
+    yet), running (a pass under way), done or unavailable (the last pass to end) --, when that pass started and
+    finished, how many pinned models it read, why the manifest could not be read; the models whose verdict is
+    ``changed`` (refused under enforcement under the digest they were seen with, until a later reading sees them hold)
+    and those the last reading could not look at."""
+    with _layers_lock:
+        held = dict(_layers)
+        if _running[0]:
+            held["state"] = "running"
+        changed = {name: v[3] for name, v in _verdicts.items() if v[1] == "changed"}
+        unchecked = {name: v[1] for name, v in _unchecked.items()}
+    return {**held, "changed": changed, "unchecked": unchecked}
+
+
+def _quiet_check(stop: threading.Event) -> None:
+    """The background thread: its own priority lowered (Linux), a check at once and every LAYER_CHECK_INTERVAL_S
+    until ``stop``; a check that raises is logged, and the next one still runs."""
+    try:
+        os.setpriority(os.PRIO_PROCESS, threading.get_native_id(), 19)
+    except (AttributeError, OSError) as exc:
+        logger.info("Model provenance: the layer check runs at normal priority (%s)", type(exc).__name__)
+    while not stop.is_set():
+        try:
+            check_ollama_layers()
+        except Exception as exc:  # noqa: BLE001 - a check that fails is said; the thread lives on
+            logger.error("Model provenance: the check of the Ollama layers failed: %s", exc)
+        stop.wait(LAYER_CHECK_INTERVAL_S)
+
+
+def start_layer_checks() -> bool:
+    """Start the background check of the Ollama layers, once per process (a checker already running, not asked to
+    stop, is kept); True when a thread was started. Called by every process that serves requests through the gate:
+    the API, the core daemon, the CLI's chat."""
+    with _layers_lock:
+        thread, stop = _checker.get("thread"), _checker.get("stop")
+        if thread is not None and thread.is_alive() and stop is not None and not stop.is_set():
+            return False
+        stop = threading.Event()
+        thread = threading.Thread(target=_quiet_check, args=(stop,), name="ollama-layer-check", daemon=True)
+        _checker.update(thread=thread, stop=stop)
+    thread.start()
+    return True
+
+
+def stop_layer_checks() -> None:
+    """Stop the background check: a pass under way ends on its own (its thread is a daemon); no new one starts."""
+    stop = _checker.get("stop")
+    if stop is not None:
+        stop.set()

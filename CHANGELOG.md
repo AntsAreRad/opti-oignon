@@ -11,6 +11,32 @@ package costs.
 
 ### Added
 
+- [SECURITY] The layers of the pinned Ollama models are hashed without
+  anyone asking: in the background at start and every day after, on a
+  thread of low priority, in the API, the core daemon and the CLI's chat
+  (a one-off command or a script has the digest alone), and by `POST
+  /api/security/pqc/verify-ollama-models`. The gate compares the digest
+  the engine lists, which a blob rewritten in place under its name keeps;
+  the verdict, held per model by each process with the time the model
+  was read, makes the gate refuse such a model under Bulbe
+  (`layers_changed`) and observe it in Daily, until a later reading sees
+  it hold or it is enrolled again. A blob that is not the size its
+  manifest names (told without reading it), is gone from a folder that
+  reads, is not a regular file (never waited on) or is held under a
+  lease, or a manifest that is not a manifest, is seen as changed; a
+  blob or a folder that cannot be read is reported not checked, never
+  refused, and lifts no refusal; one model's check that fails never ends
+  the pass; a model re-pinned while a pass runs is left out of it. `GET
+  /api/security/pqc/ollama-layers` says the verdict. The check on demand
+  and the enrolment of the Ollama models now run off the event loop.
+  Limits: a tripwire, not a guarantee -- the check runs under the
+  account that can write the engine's folder, so whatever can rewrite a
+  blob can fight it; a layer rewritten between two checks passes until
+  the next one; the digest alone is checked before the first check of a
+  process; with the core daemon on, the API's routes do not reach the
+  daemon's verdict; each process hashes every pinned blob again.
+  Contracts LV1-LV7.
+
 - [SECURITY] The model provenance seal covers the Ollama backend (MP-01):
   each Ollama model is pinned by the sha256 of its manifest -- which
   names every layer by the sha256 of its bytes -- under the same seal as

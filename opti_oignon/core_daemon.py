@@ -314,6 +314,14 @@ def serve(config_path=None):
 
     init_backends_from_config()
     server = make_server(config, CoreService(token=config.token))
+    # The daemon serves requests through the Ollama gate (the API sends its own here when the daemon is on): the
+    # layers of the pinned models are checked in this process too, in the background (MP-01).
+    try:
+        from opti_oignon import model_provenance as _provenance
+
+        _provenance.start_layer_checks()
+    except Exception:  # noqa: BLE001 - the daemon serves on, the gate keeps the digest
+        logger.warning("the check of the Ollama layers could not start", exc_info=True)
     logger.info("core daemon listening on %s", config.base_url)
     try:
         server.serve_forever()

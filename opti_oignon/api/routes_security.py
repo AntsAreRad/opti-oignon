@@ -2300,21 +2300,24 @@ async def enroll_ollama_models_route(request: EnrollOllamaModelsRequest | None =
     if not PROVENANCE_SEAL_AVAILABLE:
         raise HTTPException(status_code=503, detail="Model provenance is not available")
 
+    import asyncio
+
     from opti_oignon.model_provenance import enroll_ollama_models
 
     try:
         from opti_oignon.inference_backend import get_backend_registry
 
-        # The registered Ollama backend, whichever backend is active: per-model routing reaches it too.
+        # The registered Ollama backend, whichever backend is active: per-model routing reaches it too. The engine's
+        # list and the layers' hashing run off the event loop.
         backend = get_backend_registry().get("ollama")
-        listed = backend.listed_digests() if hasattr(backend, "listed_digests") else {}
+        listed = await asyncio.to_thread(backend.listed_digests) if hasattr(backend, "listed_digests") else {}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Model discovery failed: {exc}") from exc
     if not listed:
         return {"success": True, "count": 0, "enrolled": [],
                 "message": "No Ollama backend is registered, or its engine lists no model."}
     try:
-        result = enroll_ollama_models(sorted(listed.items()), repin=ask.repin)
+        result = await asyncio.to_thread(enroll_ollama_models, sorted(listed.items()), repin=ask.repin)
     except ProvenanceError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except Exception as exc:
@@ -2324,18 +2327,36 @@ async def enroll_ollama_models_route(request: EnrollOllamaModelsRequest | None =
 
 @router.post("/pqc/verify-ollama-models")
 async def verify_ollama_models_route() -> dict[str, Any]:
-    """Check every pinned Ollama model against the engine's folder (MP-01): its manifest on the disk must hash to the
-    pinned digest and every layer to its name. The requests compare the digest the engine lists, never the layers'
-    bytes: a layer rewritten in place after its enrolment is found here, or at the next enrolment. Nothing written."""
+    """Check every pinned Ollama model against the engine's folder (MP-01) now: its manifest on the disk must hash to
+    the pinned digest and every layer to its name. What it sees becomes the verdict this process's gate reads (a
+    model found changed is refused under enforcement until a later reading sees it hold, or its enrolment); the same
+    check runs in the background at start and every day. With the core daemon on, the daemon gates the requests and
+    keeps its own verdict, from its own checks: this route does not reach it. The hashing runs off the event loop.
+    Nothing written."""
     if not PROVENANCE_SEAL_AVAILABLE:
         raise HTTPException(status_code=503, detail="Model provenance is not available")
+    import asyncio
+
     from opti_oignon.model_provenance import verify_ollama_pins
 
     try:
-        problems = verify_ollama_pins()
+        problems = await asyncio.to_thread(verify_ollama_pins)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"The check failed: {exc}") from exc
     return {"success": not problems, "problems": problems}
+
+
+@router.get("/pqc/ollama-layers")
+async def ollama_layers_route() -> dict[str, Any]:
+    """The check of the pinned Ollama models' layers in this process, as its gate reads it: its state (pending until
+    a first pass ends, running while one is under way, else done or unavailable), when the last pass ran, the models
+    whose verdict is changed (refused under enforcement) and those the last reading could not look at (never refused,
+    not checked). With the core daemon on, the daemon's own verdict is not this one. Reads nothing on the disk."""
+    if not PROVENANCE_SEAL_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Model provenance is not available")
+    from opti_oignon.model_provenance import layer_check_state
+
+    return layer_check_state()
 
 
 # =========================================================================

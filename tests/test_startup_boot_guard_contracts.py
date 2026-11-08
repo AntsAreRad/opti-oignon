@@ -198,25 +198,37 @@ def _real_app_harness():
     The run journal the boot tends is
     pointed at an empty directory of its own, so the boot reaches no data
     place, whether the session's firewall is there or the suite runs
-    alone. The individual checklist checks are left to the caller.
+    alone. The background check of the Ollama layers (256) is a recording
+    spy too: started for real, it would read the provenance manifest and
+    write the process's verdict while later contracts run. The individual
+    checklist checks are left to the caller.
     """
     if str(_REPO) not in sys.path:
         sys.path.insert(0, str(_REPO))
     _purge_stub_package()
     import opti_oignon.api.app as app_mod
     import opti_oignon.memory.migration as mig
+    import opti_oignon.model_provenance as provenance
     import opti_oignon.network_manager as nm
     import opti_oignon.plugin_loader as pl
     import opti_oignon.run_journal as journal
     import opti_oignon.startup_checks as sc
     import opti_oignon.veilid.sync_service as svc
 
-    calls = {"plugins": 0, "arm": 0, "network": 0}
+    calls = {"plugins": 0, "arm": 0, "network": 0, "layers": 0}
     saved = {
         "arm": svc.arm_if_enabled,
         "reset": svc.reset_sync_service,
         "mig": mig.run_boot_migration,
+        "layers": (provenance.start_layer_checks, provenance.stop_layer_checks),
     }
+
+    def _layers_spy():
+        calls["layers"] += 1
+        return False
+
+    provenance.start_layer_checks = _layers_spy
+    provenance.stop_layer_checks = lambda: None
 
     def _arm_spy():
         calls["arm"] += 1
@@ -256,6 +268,7 @@ def _real_app_harness():
         svc.arm_if_enabled = saved["arm"]
         svc.reset_sync_service = saved["reset"]
         mig.run_boot_migration = saved["mig"]
+        provenance.start_layer_checks, provenance.stop_layer_checks = saved["layers"]
         if saved_pl is not None:
             pl.plugin_loader.load_all_enabled = saved_pl[0]
             pl.plugin_loader.shutdown_all = saved_pl[1]

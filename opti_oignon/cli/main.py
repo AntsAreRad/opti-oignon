@@ -313,6 +313,16 @@ def _default_chat_session(model: str | None, conversation_id: str | None):
     from .session import ChatSession
 
     init_backends_from_config()
+    # This process sends its own requests through the Ollama gate: the layers of the pinned models are checked here
+    # too, in the background (MP-01); a check that cannot start never stops the chat.
+    try:
+        from opti_oignon import model_provenance as _provenance
+
+        _provenance.start_layer_checks()
+    except Exception:  # noqa: BLE001 - the chat goes on, the gate keeps the digest
+        import logging
+
+        logging.getLogger(__name__).warning("the check of the Ollama layers could not start", exc_info=True)
     return ChatSession(model=model, conversation_id=conversation_id)
 
 

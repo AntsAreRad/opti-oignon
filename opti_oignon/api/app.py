@@ -239,6 +239,16 @@ async def lifespan(app: FastAPI):
         trash = asyncio.create_task(_trash_retention())
     except Exception:  # noqa: BLE001 - startup must not break on the trash
         logger.warning("boot: the facts' trash could not be tended", exc_info=True)
+    # The layers of the pinned Ollama models are hashed in the background, at
+    # start and every day after: a blob rewritten in place under its name
+    # keeps the manifest's digest the gate compares, so only its bytes show
+    # it (MP-01). Its own low-priority thread; a check that fails is said,
+    # never a boot that does not happen.
+    try:
+        from opti_oignon import model_provenance as _provenance
+        _provenance.start_layer_checks()
+    except Exception:  # noqa: BLE001 - startup must not break on the layer check
+        logger.warning("boot: the check of the Ollama layers could not start", exc_info=True)
     # The sync change feed keeps one version of each record, each append
     # erasing the ones before: the versions an older build left are erased
     # now, overwritten. A feed whose file is not there is not created.
@@ -289,6 +299,11 @@ async def lifespan(app: FastAPI):
     yield
     if retention is not None:
         retention.cancel()
+    try:
+        from opti_oignon import model_provenance as _provenance
+        _provenance.stop_layer_checks()
+    except Exception:  # noqa: BLE001 - shutdown goes on
+        logger.warning("shutdown: the check of the Ollama layers could not be stopped", exc_info=True)
     if trash is not None:
         trash.cancel()
     # Shutdown: stop the sync driver if it was armed (a no-op otherwise).

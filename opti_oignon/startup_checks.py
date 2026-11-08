@@ -841,7 +841,9 @@ def _check_backend_provenance_coverage() -> CheckItem:
                 passed=True,
                 severity="info",
                 detail=f"Active backend '{backend}' verifies model "
-                       "provenance " + ("at load" if backend == "llama_cpp" else "before each request"),
+                       "provenance " + ("at load" if backend == "llama_cpp" else
+                                        "before each request; its pinned models' layers are hashed in the "
+                                        "background at start and every day (GET /api/security/pqc/ollama-layers)"),
                 score_impact=0,
             )
         # Active backend not gated: advisory warning, never blocking --

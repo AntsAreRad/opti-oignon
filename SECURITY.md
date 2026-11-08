@@ -279,11 +279,30 @@ checked against the digest the engine lists for it now -- refused under
 Bulbe when it is not pinned or differs, observed in Daily by default.
 Enrolment reads the model's manifest and layers from the engine's
 folder and refuses a layer that does not hash to its name, for the
-models already pinned too; the same check runs on demand (`POST
-/api/security/pqc/verify-ollama-models`). The requests compare the
-digest the engine lists, never the layers' bytes: a layer rewritten in
-place after its enrolment passes the requests until one of those checks
-runs. The escalation preflight refuses Bulbe on an Ollama host (named in
+models already pinned too. The requests compare the digest the engine
+lists, never the layers' bytes, so the pinned models' layers are also
+hashed in the background at start and every day after (on a thread of
+low priority, in the API, the core daemon and the CLI's chat; a one-off
+command such as `ask` or `benchmark`, or a script, has the digest
+alone), and on demand (`POST /api/security/pqc/verify-ollama-models`); a
+model whose layer no longer hashes to its name, is not the size its
+manifest names, is gone from a folder that reads, is not a regular file
+or is held under a lease -- or whose manifest is not a manifest -- is
+refused under Bulbe, observed in Daily, until a later reading sees it
+hold or it is enrolled again (`GET /api/security/pqc/ollama-layers` says
+the verdict). Each process keeps its own verdict: with the core daemon
+on, the daemon gates the requests from its own checks, and the API's
+routes do not reach it (restart the daemon after enrolling again). A
+reading replaces a model's verdict only when it was made after that
+verdict. This check is a tripwire, not a guarantee: it runs under the
+account that can write the engine's folder, and whatever can rewrite a
+blob can also fight it -- a layer rewritten between two checks passes
+until the next one, and one this account cannot be made to read is
+reported not checked, never refused, lifting no refusal (an engine
+installed under another account is not covered by it). Before the first
+check of a process, the digest alone is checked, and each process
+hashes every pinned blob again. The guarantee is a models folder that
+neither the application's account nor an attacker can write. The escalation preflight refuses Bulbe on an Ollama host (named in
 `backends.yaml`, or the registry's default when none is) whose manifest
 pins no Ollama model, and on a `llama_cpp` host whose manifest pins no
 GGUF file. The limits: the seal
