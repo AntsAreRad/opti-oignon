@@ -582,15 +582,15 @@ def _load_config() -> dict[str, Any]:
 
 
 # The backends whose seam actually calls a gate. Measured, not assumed:
-# LlamaCppBackend._get_or_load calls guard_model_load, and OllamaBackend calls
-# guard_ollama before every request (MP-01). llama-server loads weights with no
-# provenance check, so a host that
-# serves loads through them is not BRICKED by escalation -- it is a weaker
-# posture, documented as a gap, not an escalation refusal that would buy no
-# security. The escalation preflight keys off this set to tell a real brick from
-# that gap; when the gate is wired into another backend, its name MUST join this
-# set or the preflight stops protecting against the brick that wiring causes.
-PROVENANCE_GATED_BACKENDS = frozenset({"llama_cpp", "ollama"})
+# LlamaCppBackend._get_or_load calls guard_model_load, OllamaBackend calls
+# guard_ollama before every request (MP-01), and LlamaServerBackend calls
+# guard_served before every request (259). A backend outside this set is not
+# BRICKED by escalation -- a weaker posture, documented as a gap, not an
+# escalation refusal that would buy no security. The escalation preflight keys
+# off this set to tell a real brick from that gap; when the gate is wired into
+# another backend, its name MUST join this set or the preflight stops protecting
+# against the brick that wiring causes.
+PROVENANCE_GATED_BACKENDS = frozenset({"llama_cpp", "ollama", "llama_server"})
 
 
 def backend_enforces_provenance(backend: str | None) -> bool:
@@ -1315,11 +1315,14 @@ def classify_model(
     keys: SealKeys | None = None,
     verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
     chunk_size: int = _CHUNK,
+    digest_of: Callable[[Path], str] | None = None,
 ) -> tuple[str, str | None]:
     """Classify one model against a manifest. Pure: no policy, no raise.
 
     Returns (reason, digest). The digest is None whenever the file was never
     hashed, which is every outcome decided before the bytes are read.
+    ``digest_of`` hashes the file when given (the file a llama-server serves:
+    its digest kept by the file's identity, 259); the whole file otherwise.
     """
     resolved = Path(model_path)
 
@@ -1344,7 +1347,7 @@ def classify_model(
         return REASON_UNPINNED, None
 
     try:
-        digest = compute_digest(resolved, chunk_size=chunk_size)
+        digest = digest_of(resolved) if digest_of is not None else compute_digest(resolved, chunk_size=chunk_size)
     except OSError as exc:
         logger.warning("Model file unreadable for hashing: %s", exc)
         return REASON_FILE_UNREADABLE, None
@@ -1410,6 +1413,156 @@ def guard_model_load(
     decision = verify_model(
         model_path, manifest_path=manifest_path, mode=mode, config=config
     )
+    if not decision.allowed:
+        raise ProvenanceRefusal(decision)
+    return decision
+
+
+# ---------------------------------------------------------------------------
+# The file a llama-server serves (259)
+# ---------------------------------------------------------------------------
+#
+# A llama-server runs outside this process and loads the GGUF it was started with: this process never loads it. The
+# server says which file it serves (``/props``, ``model_path``); the gate classifies that file as the in-process load
+# seam classifies a GGUF (its name -> its entry, the sha256 of the whole file), every shard of a split model, before
+# each request, and refuses a server that applies adapters (``/lora-adapters``) no pin covers. A GGUF is gigabytes:
+# its sha256 is kept by the file's identity (device, inode, size, mtime and ctime in ns), read again only when the
+# identity changes -- the first request of a process for a file reads it whole, one reader at a time per file. The
+# limits: the gate checks the file at the path the server names AS IT IS NOW, never the bytes the server loaded when
+# it started -- a file swapped before the server's (re)start and put back after passes; the guarantee is a models
+# folder no account but the engine's can write (257's check); the gate believes the server about the file it names (a
+# hostile server, or one in another mount namespace, may name another); a server off this machine names a file of its
+# own, never checked here.
+
+REASON_NOT_SERVED = "not_served"        # the server names no file it serves, or not by an absolute path on this machine
+REASON_ADAPTERS = "adapters_unverified"     # the server applies adapters (LoRA) that no pin covers
+_SPLIT = re.compile(r"-(\d{5})-of-(\d{5})\.gguf\Z")
+_kept_lock = threading.Lock()
+_kept: dict[str, tuple[tuple[int, int, int, int, int], str]] = {}     # path -> (identity, sha256)
+_path_locks: dict[str, threading.Lock] = {}
+_said_served: set[tuple[str, str]] = set()
+
+
+def _identity(st: os.stat_result) -> tuple[int, int, int, int, int]:
+    """A file's identity: device, inode, size, mtime and ctime in ns (no unprivileged call sets a ctime back)."""
+    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns)
+
+
+def kept_digest(path: Path | str, chunk_size: int = _CHUNK) -> str:
+    """The sha256 of the regular file at ``path``, kept by its identity: a file whose identity holds is not read
+    again; one whose identity changed is. One reader at a time per path: a second caller waits, then finds it kept. A
+    file whose identity changed while it was read is hashed but not kept. Raises OSError when it cannot be read, or is
+    not a regular file (opened without waiting)."""
+    key = str(path)
+    with _kept_lock:
+        lock = _path_locks.setdefault(key, threading.Lock())
+    with lock:
+        fd = _open_regular(Path(path))
+        try:
+            before = _identity(os.fstat(fd))
+            with _kept_lock:
+                held = _kept.get(key)
+            if held is not None and held[0] == before:
+                return held[1]
+            hasher = hashlib.sha256()
+            with open(fd, "rb", closefd=False) as handle:
+                for block in iter(lambda: handle.read(chunk_size), b""):
+                    hasher.update(block)
+            after = _identity(os.fstat(fd))
+        finally:
+            os.close(fd)
+        digest = hasher.hexdigest()
+        if after == before:
+            with _kept_lock:
+                _kept[key] = (before, digest)
+        return digest
+
+
+def _shards(path: Path) -> list[Path]:
+    """Every file a model at ``path`` loads: its shards when its name says it is split (``-00001-of-00003.gguf``, as
+    llama.cpp's loader opens them), else itself."""
+    split = _SPLIT.search(path.name)
+    if split is None:
+        return [path]
+    total = int(split.group(2))
+    stem = path.name[:split.start()]
+    return [path.with_name(f"{stem}-{i:05d}-of-{total:05d}.gguf") for i in range(1, total + 1)]
+
+
+def classify_served(
+    path: Any,
+    manifest: dict[str, Any] | None,
+    *,
+    adapters: Any = None,
+    keys: SealKeys | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
+    chunk_size: int = _CHUNK,
+) -> tuple[str, str | None, str]:
+    """``(reason, digest, the file named)`` of the file a llama-server serves, against the GGUF pins. Pure: no policy,
+    no raise. ``path`` may be a callable that asks the server: it is called only once the manifest is found sealed
+    under a seal that verifies -- a manifest missing or not verified is decided without asking the server anything.
+    Every shard of a split model must verify. ``adapters`` (or a callable that asks the server) lists the adapters the
+    server applies: any is ``adapters_unverified``; None, or not a list, is taken for none (a server that cannot say)."""
+    if manifest is None:
+        return REASON_MANIFEST_MISSING, None, ""
+    if not manifest:
+        return REASON_MANIFEST_UNREADABLE, None, ""
+    seal_keys = keys if keys is not None else resolve_seal_keys()
+    if seal_keys is None:
+        return REASON_KEY_UNAVAILABLE, None, ""
+    seal_reason = verify_seal(_payload_of(manifest), manifest.get("seal"), seal_keys, verifier=verifier)
+    if seal_reason != REASON_VERIFIED:
+        return seal_reason, None, ""
+    named = str((path() if callable(path) else path) or "")
+    if not named or "\x00" in named or not Path(named).is_absolute():
+        return REASON_NOT_SERVED, None, named
+    first = None
+    for shard in _shards(Path(named)):
+        try:
+            reason, digest = classify_model(shard, manifest, keys=seal_keys, verifier=verifier, chunk_size=chunk_size,
+                                            digest_of=lambda p: kept_digest(p, chunk_size=chunk_size))
+        except ValueError:      # a name this machine cannot open (one that does not encode)
+            return REASON_NOT_SERVED, None, named
+        if reason != REASON_VERIFIED:
+            return reason, digest, str(shard)
+        first = first or digest
+    applied = adapters() if callable(adapters) else adapters
+    if isinstance(applied, list) and applied:
+        return REASON_ADAPTERS, first, named
+    return REASON_VERIFIED, first, named
+
+
+def verify_served(
+    path: Any,
+    *,
+    adapters: Any = None,
+    manifest_path: Path | str | None = None,
+    mode: str | None = None,
+    config: dict[str, Any] | None = None,
+    keys: SealKeys | None = None,
+    verifier: Callable[[bytes, bytes, bytes], bool] | None = None,
+    chunk_size: int = _CHUNK,
+) -> ProvenanceDecision:
+    """Classify the file a llama-server says it serves (``path``, or a callable that asks it) against the GGUF pins and
+    apply the policy: refused under enforcement (Bulbe always) unless verified, observed in Daily; said once per file
+    and reason. A server that names no file, or not by an absolute path, is ``not_served``; a file this process cannot
+    read, ``file_unreadable``."""
+    enforcement = enforcement_mode(mode=mode, config=config)
+    reason, digest, named = classify_served(path, load_manifest(manifest_path), adapters=adapters, keys=keys,
+                                            verifier=verifier, chunk_size=chunk_size)
+    allowed = decide(reason, enforcement)
+    if reason != REASON_VERIFIED and (named, reason + str(allowed)) not in _said_served:
+        _said_served.add((named, reason + str(allowed)))
+        (logger.error if not allowed else logger.warning)(
+            "Model provenance %s for the file llama-server serves (%r): %s",
+            "REFUSED" if not allowed else "not verified (observing)", named or "not asked or none named", reason)
+    return ProvenanceDecision(allowed=allowed, reason=reason, enforcement=enforcement,
+                              model=Path(named).name if named else "", digest=digest)
+
+
+def guard_served(path: str | None, **kwargs: Any) -> ProvenanceDecision:
+    """The gate the llama-server backend calls before a request leaves. Raises to refuse."""
+    decision = verify_served(path, **kwargs)
     if not decision.allowed:
         raise ProvenanceRefusal(decision)
     return decision

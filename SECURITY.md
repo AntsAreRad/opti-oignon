@@ -342,14 +342,32 @@ Windows, an engine started by hand), run the engine under another
 account. An engine started with another `OLLAMA_MODELS` keeps its
 models where this check does not look. The escalation preflight refuses Bulbe on an Ollama host (named in
 `backends.yaml`, or the registry's default when none is) whose manifest
-pins no Ollama model, and on a `llama_cpp` host whose manifest pins no
-GGUF file. The limits: the seal
-proves where the weights come from, never that they are harmless --
-weights poisoned in training pass a valid seal; the key is the local
-account's; the digest the engine lists is kept five seconds, and between
-the check and the engine's load, which happens by name in another
-process, a window remains. Known exception (MP-01, what remains): the
-llama-server backend loads weights without an integrity check; the
+pins no Ollama model, and on a `llama_cpp` or llama-server host whose
+manifest pins no GGUF file. Since block 259 the seal covers the
+llama-server backend before each request too: the server runs outside
+this process and loads the GGUF it was started with, so the gate asks it
+for the file it serves (`/props`, kept five seconds) and classifies the
+file the server says it serves as the in-process load classifies a GGUF
+-- its name to its pin, the sha256 of the whole file, every shard of a
+split model -- and refuses a server that applies adapters (LoRA, from
+`/lora-adapters`): refused under Bulbe unless verified (a server that
+names no file, by a relative path, or a file this process cannot read,
+included), observed in Daily; the server is asked only once the
+manifest's seal verifies, and a server off this machine has no file
+checked here. A GGUF's sha256 is kept by the file's identity (device,
+inode, size, mtime and ctime) and read again when the identity changes:
+the first request of a process for a file reads it whole, one reader at
+a time. The limits: the seal proves where the weights come from, never
+that they are harmless -- weights poisoned in training pass a valid
+seal; the key is the local account's; the digest the engine lists is
+kept five seconds, and between the check and the engine's load, which
+happens by name in another process, a window remains; the gate believes
+llama-server about the file it serves (a hostile server may name
+another), and it checks the file at that path as it is now, never the
+bytes the server loaded when it started -- a file swapped before the
+server's restart and put back after passes, so the file's identity is a
+tripwire and the guarantee is a models folder no account but the
+engine's can write. The
 startup security checklist reports the active backend's provenance
 coverage.
 

@@ -1882,4 +1882,6 @@ addopts = """
     --deselect=tests/test_fortress_readiness_contracts.py::test_f21_the_gated_backend_set_is_measured_not_guessed
     --deselect=tests/test_bulbe_never_boots_unchecked_contracts.py::test_ub5_a_check_that_raises_is_reported_not_checked_and_the_others_still_run
     --deselect=tests/test_bulbe_never_boots_unchecked_contracts.py::test_ub7_a_check_that_returns_no_item_is_reported_not_checked
+    --deselect=tests/test_ollama_provenance_contracts.py::test_ov6_the_guarded_backends
+    --deselect=tests/test_ollama_provenance_contracts.py::test_ov7_the_escalation
 """

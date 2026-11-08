@@ -815,13 +815,14 @@ def _check_backend_provenance_coverage() -> CheckItem:
     severity "critical", so it can never set the blocked flag.
 
     The model-provenance gate is wired on the llama_cpp backend at load
-    (guard_model_load) and on the Ollama backend at every request
-    (guard_ollama) -- model_provenance.PROVENANCE_GATED_BACKENDS. The
-    llama-server backend loads weights with no integrity check, so when it
-    is the active backend the "only a verified model loads" posture is not
-    in force for the weights actually loaded -- including under bulbe,
-    where that posture is otherwise strongest. Naming the gap here keeps
-    the checklist honest instead of implying a coverage the code does not
+    (guard_model_load), on the Ollama backend at every request
+    (guard_ollama) and on the llama-server backend at every request
+    (guard_served, 259) -- model_provenance.PROVENANCE_GATED_BACKENDS. A
+    backend outside that set loads weights with no integrity check, and when
+    it is the active backend the "only a verified model loads" posture is not
+    in force for the weights actually loaded -- including under bulbe, where
+    that posture is otherwise strongest. Naming the gap here keeps the
+    checklist honest instead of implying a coverage the code does not
     provide; this check only reports the state. Never raises.
     """
     try:
@@ -848,6 +849,9 @@ def _check_backend_provenance_coverage() -> CheckItem:
                 severity="info",
                 detail=f"Active backend '{backend}' verifies model "
                        "provenance " + ("at load" if backend == "llama_cpp" else
+                                        "before each request: the file the server says it serves, against the "
+                                        "GGUF pins (its sha256 kept by the file's identity)"
+                                        if backend == "llama_server" else
                                         "before each request; its pinned models' layers are hashed in the "
                                         "background at start and every day (GET /api/security/pqc/ollama-layers)"),
                 score_impact=0,

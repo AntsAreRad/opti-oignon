@@ -848,7 +848,8 @@ class SecurityModeManager:
         that cannot be read, make it readable. Nothing is written.
 
         Scoped to the brick on purpose. A backend whose load seam never calls
-        the gate (llama-server today) is not bricked by escalation, so
+        the gate (none today: llama_cpp, Ollama and llama-server all do) is not
+        bricked by escalation, so
         its manifest -- absent, sealed with a MAC, or forged -- earns no blocker
         even though loading unverified weights in a fortress is its own
         weakness. That weakness is documented as a gap; turning it into an

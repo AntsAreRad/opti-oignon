@@ -32,6 +32,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from _isolation import isolate, source  # noqa: E402
+from _provenance_stand_in import provenance_seed  # noqa: E402
 
 _BACKEND = "opti_oignon.inference_backend"
 _REMOTE = "http://10.9.8.7:8080"
@@ -93,7 +94,9 @@ def _governor():
 
 
 def _open(mode=None, governor=None):
-    seeded = {"opti_oignon.resource_governor": governor} if governor is not None else None
+    seeded = {"opti_oignon.resource_governor": governor} if governor is not None else {}
+    # The provenance gates stood in (MP-01): this suite holds the host rule, not the served file's provenance.
+    seeded.update(provenance_seed())
     loaded, restore = isolate(targets={_BACKEND: source("inference_backend.py")}, seeded=seeded, packages=("opti_oignon",))
     mod = loaded[_BACKEND]
     transport = _Transport()

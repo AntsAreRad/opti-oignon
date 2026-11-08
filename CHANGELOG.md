@@ -11,6 +11,30 @@ package costs.
 
 ### Added
 
+- [SECURITY] The provenance seal covers the llama-server backend
+  (MP-01, what remained): before each request, the gate asks the
+  external server which file it serves (`/props`, kept five seconds)
+  and classifies that file against the GGUF pins as the in-process load
+  does, every shard of a split model, and refuses a server that applies
+  adapters (`/lora-adapters`) -- refused under Bulbe unless verified,
+  observed in Daily, said once per file and reason. A server that names
+  no file, names it by a relative path, or serves a file this process
+  cannot read is not verified; a server off this machine has no file
+  checked here; the server is asked only once the manifest's seal
+  verifies, and a server that answers oddly is never a raise. A GGUF's
+  sha256 is kept by the file's identity (device, inode, size, mtime and
+  ctime in ns) and read again when it changes, one reader at a time per
+  file (the first request of a process reads it whole); a file that is
+  not a regular one is never waited on. The guarded backends are llama_cpp,
+  Ollama and llama-server; the escalation preflight holds a llama-server
+  host whose manifest pins no GGUF file; the startup checklist says what
+  llama-server verifies. Limits: the gate believes the server about the
+  file it serves, and checks the file at that path as it is now, never
+  the bytes the server loaded at its start (a file swapped before a
+  restart and put back passes): the identity is a tripwire, the
+  guarantee a models folder no other account can write. Contracts SG1-SG8 (SG5
+  and SG6 supersede OV6 and OV7, which held llama-server unguarded).
+
 - [SECURITY] The layer check and the enrolment of the Ollama models
   read the engine's folder on a system install: when `OLLAMA_MODELS` is
   not set, both `~/.ollama/models` and, on Linux,

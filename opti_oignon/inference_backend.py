@@ -2374,6 +2374,76 @@ class LlamaServerBackend(InferenceBackend):
     def endpoint(self) -> str | None:
         return self._host
 
+    # The file the server says it serves, kept SERVED_TTL_S seconds: a request asks ``/props`` at most that often (the
+    # window a file swapped behind the server may still be served for, said in SECURITY.md).
+    SERVED_TTL_S = 5.0
+
+    def served_path(self) -> str | None:
+        """The model file the server says it serves (``/props`` -> ``model_path``); None when it names none or cannot
+        be asked."""
+        try:
+            data = self._request("/props")
+        except Exception as exc:  # noqa: BLE001 - a server that does not answer names no file
+            logger.debug("llama-server /props failed, no file named: %s", type(exc).__name__)
+            return None
+        path = data.get("model_path") if isinstance(data, dict) else None
+        return path if isinstance(path, str) and path else None
+
+    def served_adapters(self) -> list | None:
+        """The adapters (LoRA) the server applies (``/lora-adapters``): a list, empty when none; None when it cannot
+        say (an older server, an error)."""
+        try:
+            data = self._request("/lora-adapters")
+        except Exception as exc:  # noqa: BLE001 - a server that cannot say is taken for one with none
+            logger.debug("llama-server /lora-adapters failed: %s", type(exc).__name__)
+            return None
+        return data if isinstance(data, list) else None
+
+    def _served_path(self) -> str | None:
+        """``served_path`` kept SERVED_TTL_S seconds."""
+        import time as _time
+
+        now = _time.monotonic()
+        held = getattr(self, "_served", None)
+        if held is not None and now - held[1] < self.SERVED_TTL_S:
+            return held[0]
+        path = self.served_path()
+        self._served = (path, now)
+        return path
+
+    def _served_adapters(self) -> list | None:
+        """``served_adapters`` kept SERVED_TTL_S seconds."""
+        import time as _time
+
+        now = _time.monotonic()
+        held = getattr(self, "_adapters", None)
+        if held is not None and now - held[1] < self.SERVED_TTL_S:
+            return held[0]
+        adapters = self.served_adapters()
+        self._adapters = (adapters, now)
+        return adapters
+
+    def _provenance_gate(self, model: str) -> None:
+        """The served file's provenance, checked before a request leaves (MP-01, 259): the file the server says it
+        serves against the GGUF pins of the sealed manifest; refused under enforcement (Bulbe always), observed in
+        Daily. The caller applies the host rule first (``_bulbe_gate``); a provenance module that cannot be imported
+        refuses whenever the mode enforces."""
+        try:
+            from opti_oignon import model_provenance as _provenance
+        except Exception as exc:
+            if _live_mode() != "daily":
+                raise RuntimeError(
+                    "Model provenance verification is unavailable and the current security mode enforces it; "
+                    f"refusing to send a request for {model}") from exc
+            logger.warning("Model provenance unavailable; the request for %s continues unverified: %s", model, exc)
+            return
+        # One mode per request, read by this module's reader, as the host rule reads it. A server off this machine
+        # names a file of its own: none is opened here for it (not served, said).
+        if not _is_on_this_machine(self._host):
+            _provenance.guard_served(None, mode=_live_mode())
+            return
+        _provenance.guard_served(self._served_path, adapters=self._served_adapters, mode=_live_mode())
+
     def _bulbe_gate(self) -> None:
         """Refuse by name, before anything is built, a request Bulbe mode keeps on the machine."""
         refusal = _bulbe_refusal_for("llama-server", self.endpoint(), " (set in backends.yaml)")
@@ -2499,9 +2569,11 @@ class LlamaServerBackend(InferenceBackend):
             msgs.append({"role": "user", "content": str(prompt)})
         engine_options, schema, tools = _split_extras(options)
         engine_options, timeout = _pop_timeout(engine_options)
-        # A request Bulbe keeps on the machine is refused before the
-        # governor is asked for room it will never use.
+        # A request Bulbe keeps on the machine, or for a file not verified
+        # under enforcement, is refused before the governor is asked for
+        # room it will never use: the host first, then the served file.
         self._bulbe_gate()
+        self._provenance_gate(model)
         # Admission before anything leaves. A refusal that arrives after the
         # request has gone to the server is a log line, not a refusal.
         _governor_admission(model, options)
@@ -2576,6 +2648,7 @@ class LlamaServerBackend(InferenceBackend):
         engine_options, schema, tools = _split_extras(options)
         engine_options, timeout = _pop_timeout(engine_options)
         self._bulbe_gate()
+        self._provenance_gate(model)
         # Same gate as the whole-answer head, and for the same reason. A
         # generator body runs at first iteration, so the caller's first
         # ``next`` is where admission is decided.
