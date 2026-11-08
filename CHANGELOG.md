@@ -11,6 +11,24 @@ package costs.
 
 ### Added
 
+- [SECURITY] The layer check and the enrolment of the Ollama models
+  read the engine's folder on a system install: when `OLLAMA_MODELS` is
+  not set, both `~/.ollama/models` and, on Linux,
+  `/usr/share/ollama/.ollama/models` (the official install's engine,
+  under its own account) are read; when it is set, the folder it names
+  alone, as before. A model is judged in each folder whose manifest
+  holds its pinned digest, and a layer rewritten in any of them is a
+  change; a manifest that is not a regular file is a change wherever it
+  is; a manifest at another digest, or that does not parse, beside one
+  that holds is an old copy, never a refusal, but it keeps the verdict
+  from "holds" (not checked), as does a folder or a layer that cannot be
+  looked at -- and the enrolment then lifts no change seen before (a
+  kept model left so is listed in `kept_unchecked`; a layer that cannot
+  be read is not checked at enrolment, never a refusal).
+  The engine under another account is covered now when its folder can
+  be read. The startup check `ollama_models_writable` names the folders
+  the layer check reads. Contracts MD1-MD7.
+
 - [SECURITY] The startup checklist looks for the ways this account
   could write the folder the Ollama engine keeps its models in
   (`ollama_models_writable`) -- a detector, not a certificate: it names

@@ -1693,6 +1693,17 @@ def ollama_models_folders() -> list[Path]:
     return folders
 
 
+def layer_check_folders(models_dir: Path | str | None = None) -> list[Path]:
+    """The folders the layer check and the enrolment read a model from (258): ``models_dir`` when given; else the one
+    ``OLLAMA_MODELS`` names when it is set (the operator named it); else every folder the engine may keep its models
+    in (``ollama_models_folders``: ``~/.ollama/models`` and, on Linux, the system install's)."""
+    if models_dir is not None:
+        return [Path(models_dir)]
+    if os.environ.get("OLLAMA_MODELS"):
+        return [Path(ollama_models_dir())]
+    return ollama_models_folders()
+
+
 def ollama_folder_reach(folder: Path | str, *, bound: int = REACH_BOUND) -> tuple[str, list[str]]:
     """``(state, why)`` of one models folder for this process's effective account -- a detector, not a certificate.
 
@@ -1952,6 +1963,43 @@ def _layer_findings(layers: list[str], models_dir: Path | str | None, chunk_size
     return out
 
 
+def _enrolment_reading(full: str, listed: str, models_dir, chunk_size: int) -> tuple[str, Any]:
+    """What the enrolment reads of ``full`` in each folder of ``layer_check_folders`` (258): ``("held", (layers, all
+    looked at))`` when no layer seen in a folder holding the listed digest fails to hash to its name -- ``all looked
+    at`` False when something could not be looked at (a folder, a manifest that cannot be read, is not a regular file
+    or not a manifest, a layer that cannot be read) or an old copy at another digest sits beside: then nothing is
+    lifted; ``("broken", why)`` when a layer seen does not hold, or the only manifests found are at another digest;
+    ``("unchecked", None)`` when no manifest holding it could be read."""
+    folders = layer_check_folders(models_dir)
+    where = (lambda folder: f"its manifest in {folder}") if len(folders) > 1 else (lambda folder: "its manifest")
+    holding, other, closed = [], [], False
+    for folder in folders:
+        status, held = _read_model_manifest(full, folder)
+        if status != "ok":
+            closed = closed or status != "absent"
+            continue
+        if held[0] != listed:
+            other.append(f"{where(folder)} on the disk hashes to {held[0]}, the engine lists {listed}")
+            continue
+        holding.append((folder, held))
+    if not holding:
+        if other:
+            return "broken", "; ".join(other) + ("" if len(folders) == 1 else
+                                                 " (an old copy the engine does not read: remove it, or point "
+                                                 "OLLAMA_MODELS at the folder the engine reads)")
+        return "unchecked", None
+    bad, unseen = [], False
+    for folder, held in holding:
+        for layer, why, seen in _layer_findings(held[1], folder, chunk_size, sizes=held[2]):
+            if seen:
+                bad.append(f"{folder}: {layer}: {why}" if len(folders) > 1 else f"{layer}: {why}")
+            else:
+                unseen = True
+    if bad:
+        return "broken", "; ".join(bad)
+    return "held", (holding[0][1][1], not (closed or unseen or other))
+
+
 def enroll_ollama_models(
     models: list[tuple[str, str]],
     *,
@@ -1972,7 +2020,8 @@ def enroll_ollama_models(
     hash to its name (``verify_ollama_layers``), or the model is refused by name, nothing written; a folder that
     cannot be read pins the listed digest alone, said in ``layers_unchecked``."""
     if not models:
-        return {"enrolled": [], "count": 0, "kept": [], "repinned": [], "layers_unchecked": [], "written": False}
+        return {"enrolled": [], "count": 0, "kept": [], "repinned": [], "layers_unchecked": [], "kept_unchecked": [],
+                "written": False}
     seal_keys = keys if keys is not None else resolve_seal_keys()
     if seal_keys is None:
         raise ProvenanceError("No key material available to seal the model provenance manifest")
@@ -1986,6 +2035,7 @@ def enroll_ollama_models(
         entries = dict(reading.entries)
     named = {ollama_name(n) for n in repin}
     enrolled, kept, repinned, changed, unchecked, broken = [], [], [], [], [], []
+    kept_unchecked: list[str] = []
     hashed = []     # (name, when its reading began): the models whose layers were hashed here and held
     for name, digest in models:
         full, listed = ollama_name(name), plain_digest(digest)
@@ -1999,13 +2049,14 @@ def enroll_ollama_models(
         if isinstance(held, dict) and plain_digest(held.get("sha256")) == listed:
             # Kept as pinned -- but its layers hashed again: one rewritten in place since is refused here.
             at = time.monotonic()
-            read = read_ollama_manifest(full, models_dir)
-            if read is not None:
-                bad = verify_ollama_layers(read[1], models_dir, chunk_size=chunk_size)
-                if read[0] != listed or bad:
-                    broken.append(f"{full}: " + ("; ".join(bad) or f"its manifest on the disk hashes to {read[0]}"))
-                    continue
+            state, read = _enrolment_reading(full, listed, models_dir, chunk_size)
+            if state == "broken":
+                broken.append(f"{full}: {read}")
+                continue
+            if state == "held" and read[1]:
                 hashed.append((full, at))
+            else:
+                kept_unchecked.append(full)     # kept, but its layers not all looked at: nothing lifted, said
             kept.append(full)
             continue
         if isinstance(held, dict):
@@ -2014,20 +2065,19 @@ def enroll_ollama_models(
                 continue
             repinned.append(full)
         at = time.monotonic()
-        read = read_ollama_manifest(full, models_dir)
+        state, read = _enrolment_reading(full, listed, models_dir, chunk_size)
         layers: list[str] = []
-        if read is None:
+        if state == "broken":
+            broken.append(f"{full}: {read}")
+            continue
+        if state == "unchecked":
             unchecked.append(full)
         else:
-            on_disk, layers = read
-            if on_disk != listed:
-                broken.append(f"{full}: its manifest on the disk hashes to {on_disk}, the engine lists {listed}")
-                continue
-            bad = verify_ollama_layers(layers, models_dir, chunk_size=chunk_size)
-            if bad:
-                broken.append(f"{full}: " + "; ".join(bad))
-                continue
-            hashed.append((full, at))
+            layers, all_looked_at = read
+            if all_looked_at:
+                hashed.append((full, at))
+            else:
+                unchecked.append(full)
         entries[ollama_key(full)] = {"sha256": listed, "kind": "ollama", "layers": layers,
                                      "recorded_at": time.time()}
         enrolled.append({"model": full, "sha256": listed})
@@ -2045,7 +2095,8 @@ def enroll_ollama_models(
     _clear_layer_verdicts(hashed)
     logger.info("Enrolled %d Ollama model(s) under %s, %d kept", len(enrolled), seal_keys.scheme, len(kept))
     return {"enrolled": enrolled, "count": len(enrolled), "kept": kept, "repinned": repinned,
-            "layers_unchecked": unchecked, "scheme": seal_keys.scheme, "written": written}
+            "layers_unchecked": unchecked, "kept_unchecked": kept_unchecked, "scheme": seal_keys.scheme,
+            "written": written}
 
 
 def verify_ollama_pins(
@@ -2105,20 +2156,51 @@ _said_unchecked: set[str] = set()
 _checker: dict[str, Any] = {}                            # the background thread and its stop event
 
 
+_OLD_COPY = " (an old copy beside the pinned one: remove it, or point OLLAMA_MODELS at the folder the engine reads)"
+
+
 def _model_finding(name: str, pinned: str, models_dir, chunk_size: int) -> tuple[str, str]:
-    """``(outcome, why)`` for one pinned model: ``changed``, ``holds``, or ``unchecked`` (could not look)."""
-    status, held = _read_model_manifest(name, models_dir)
-    if status in ("absent", "unreadable"):
-        return "unchecked", held
-    if status != "ok":
-        return "changed", held                     # a manifest that is not one, or not a regular file: seen
-    if held[0] != pinned:
-        return "changed", f"its manifest on the disk hashes to {held[0]}, pinned {pinned}"
-    found = _layer_findings(held[1], models_dir, chunk_size, sizes=held[2])
-    if any(seen for _layer, _why, seen in found):
-        return "changed", "; ".join(f"{layer}: {why}" for layer, why, _seen in found)
-    if found:
-        return "unchecked", "; ".join(f"{layer}: {why}" for layer, why, _seen in found)
+    """``(outcome, why)`` for one pinned model: ``changed``, ``holds``, or ``unchecked`` (could not look), read in each
+    folder of ``layer_check_folders`` (258). A folder whose manifest hashes to the pinned digest is one the engine can
+    read the model from: its layers are hashed there, in each such folder, and one changed is the verdict. A manifest
+    that is not a regular file (a pipe, one held under a lease) is seen wherever it is: changed -- the engine would
+    read through it. Beside a folder that holds the pinned one, a manifest at another digest, or that does not parse,
+    is an old copy: never a refusal, and it keeps the verdict from "holds" (it lifts nothing); alone, it is the
+    verdict, changed. A folder that cannot be looked at keeps the verdict from "holds": the engine may read there."""
+    folders = layer_check_folders(models_dir)
+    where = (lambda folder: f"{folder}: ") if len(folders) > 1 else (lambda folder: "")
+    holding, seen, other, unseen, closed = [], [], [], [], []
+    for folder in folders:
+        status, held = _read_model_manifest(name, folder)
+        if status in ("absent", "unreadable"):
+            unseen.append(where(folder) + held)
+            if status == "unreadable":
+                closed.append(where(folder) + held)
+        elif status == "irregular":
+            seen.append(where(folder) + held)      # not a regular file: the engine would wait, then read through it
+        elif status != "ok":
+            other.append(where(folder) + held)     # a manifest that is not one
+        elif held[0] != pinned:
+            other.append(where(folder) + f"its manifest on the disk hashes to {held[0]}, pinned {pinned}")
+        else:
+            holding.append((folder, held))
+    if seen:
+        return "changed", "; ".join(seen)
+    if not holding:
+        if other:
+            return "changed", "; ".join(other)
+        return "unchecked", "; ".join(unseen)
+    changed, unchecked = [], closed + [why + _OLD_COPY for why in other]
+    for folder, held in holding:
+        found = _layer_findings(held[1], folder, chunk_size, sizes=held[2])
+        if any(seen for _layer, _why, seen in found):
+            changed.append(where(folder) + "; ".join(f"{layer}: {why}" for layer, why, _seen in found))
+        elif found:
+            unchecked.append(where(folder) + "; ".join(f"{layer}: {why}" for layer, why, _seen in found))
+    if changed:
+        return "changed", "; ".join(changed)
+    if unchecked:
+        return "unchecked", "; ".join(unchecked)
     return "holds", ""
 
 

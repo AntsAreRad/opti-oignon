@@ -279,7 +279,14 @@ checked against the digest the engine lists for it now -- refused under
 Bulbe when it is not pinned or differs, observed in Daily by default.
 Enrolment reads the model's manifest and layers from the engine's
 folder and refuses a layer that does not hash to its name, for the
-models already pinned too. The requests compare the digest the engine
+models already pinned too. The engine's folder is the one
+`OLLAMA_MODELS` names when it is set; otherwise both `~/.ollama/models`
+and, on Linux, the system install's (`/usr/share/ollama/.ollama/models`,
+the engine under its own account) are read, and a model is judged in
+each folder whose manifest holds its pinned digest -- a copy at another
+digest beside one that holds is an old copy, never a refusal, but it
+keeps the verdict from holding (not checked) until it is removed; a
+manifest that is not a regular file is a change wherever it is. The requests compare the digest the engine
 lists, never the layers' bytes, so the pinned models' layers are also
 hashed in the background at start and every day after (on a thread of
 low priority, in the API, the core daemon and the CLI's chat; a one-off
@@ -299,7 +306,8 @@ account that can write the engine's folder, and whatever can rewrite a
 blob can also fight it -- a layer rewritten between two checks passes
 until the next one, and one this account cannot be made to read is
 reported not checked, never refused, lifting no refusal (an engine
-installed under another account is not covered by it). Before the first
+installed under another account is covered when its folder can be
+read, and not checked otherwise). Before the first
 check of a process, the digest alone is checked, and each process
 hashes every pinned blob again. The guarantee is a models folder that
 neither the application's account nor an attacker can write. The
@@ -328,8 +336,8 @@ own account (the official install's `ollama` service, its models in
 `/usr/share/ollama/.ollama/models`), the folder and its files that
 account's alone, with no write for a group this account belongs to;
 point `OLLAMA_MODELS`, in the platform's environment, at the folder the
-engine reads, so the layer check reads it too, and remove an old
-`~/.ollama/models` the engine no longer reads. Elsewhere (macOS,
+engine reads when it is elsewhere, so the layer check reads it, and
+remove an old `~/.ollama/models` the engine no longer reads. Elsewhere (macOS,
 Windows, an engine started by hand), run the engine under another
 account. An engine started with another `OLLAMA_MODELS` keeps its
 models where this check does not look. The escalation preflight refuses Bulbe on an Ollama host (named in

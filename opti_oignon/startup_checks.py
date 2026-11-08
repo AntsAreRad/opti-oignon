@@ -988,9 +988,9 @@ def _check_ollama_models_writable() -> CheckItem:
     name = "ollama_models_writable"
     elsewhere = "an engine started with another OLLAMA_MODELS keeps its models where this process does not look"
     try:
-        from opti_oignon.model_provenance import ollama_models_dir, ollama_models_reach
+        from opti_oignon.model_provenance import layer_check_folders, ollama_models_reach
 
-        layer_folder = Path(ollama_models_dir())
+        layer_folders = layer_check_folders()
         if _reach_walk and _reach_walk[0].is_alive():
             raise TimeoutError("an earlier walk has not ended")
         answer: list[Any] = []
@@ -1057,7 +1057,8 @@ def _check_ollama_models_writable() -> CheckItem:
                    + (". No way for this account to write it found: " + "; ".join(found_none) if found_none else ""),
         )
     if found_none:
-        reads = any(folder == layer_folder for folder, state, _why in verdicts if state == "none_found")
+        unread = [folder for folder, state, _why in verdicts if state == "none_found" and folder not in layer_folders]
+        reads = not unread
         return CheckItem(
             name=name,
             passed=True,
@@ -1066,7 +1067,10 @@ def _check_ollama_models_writable() -> CheckItem:
                    "an entry on the way to it, or what it holds, by its rights, its groups or its capabilities. "
                    + not_judged + ". "
                    + ("The background check of the layers reads it." if reads else
-                      f"The background check of the layers reads {layer_folder}, not this folder.")
+                      "The background check of the layers reads "
+                      + ", ".join(str(folder) for folder in layer_folders) + ", not "
+                      + ("this folder." if len(unread) == len(found_none) == 1 else
+                         ", ".join(str(folder) for folder in unread) + "."))
                    + f" ({elsewhere}.)",
             tips=[] if reads else [point],
         )
