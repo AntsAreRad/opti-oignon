@@ -529,7 +529,8 @@ def get_live_metrics(
 
 
 def reset_live_metrics() -> None:
-    """Reset the singleton (for testing)."""
+    """Stop the singleton's sampler and forget it: the next ``get_live_metrics`` starts a new one. The API's lifespan
+    calls it at shutdown (260), so no sampler outlives the app; the contracts call it too."""
     global _collector
     with _init_lock:
         if _collector is not None:

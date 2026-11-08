@@ -2956,7 +2956,9 @@ async def get_startup_checks(force: bool = False) -> dict[str, Any]:
     """
     try:
         from opti_oignon.startup_checks import run_startup_checks
-        result = run_startup_checks(force=force)
+        # Off the event loop: the checks are synchronous, and a forced run walks the models folder (up to ten
+        # seconds, 257); the other requests are served meanwhile (260).
+        result = await run_in_threadpool(run_startup_checks, force=force)
         return result.to_dict()
     except ImportError:
         raise HTTPException(

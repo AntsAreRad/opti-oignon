@@ -2570,6 +2570,14 @@ package costs.
 
 ### Changed
 
+- The live metrics' sampler stops when the API's lifespan ends (it was a
+  singleton started by the first reading and never stopped, so its
+  thread outlived the app and read the memory through a module a
+  contract's window may stand in); the next reading starts a new one.
+  `GET /api/security/startup-checks?force=true` runs the checklist off
+  the event loop. Contracts TB1-TB3 (TB2 supersedes HW16, which counted
+  every thread's readings of the memory).
+
 - The anchors of the onion's held receipts are ranked by BM25 over their
   own words as shown rather than by the share of the question's terms they
   hold (`memory/peels.py`, `anchor_bm25`): BM25 is asked the question's

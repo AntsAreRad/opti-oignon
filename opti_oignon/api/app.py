@@ -21,6 +21,7 @@ from opti_oignon.process_secrets import take as take_secrets
 take_secrets()
 
 import logging
+import sys
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -304,6 +305,14 @@ async def lifespan(app: FastAPI):
         _provenance.stop_layer_checks()
     except Exception:  # noqa: BLE001 - shutdown goes on
         logger.warning("shutdown: the check of the Ollama layers could not be stopped", exc_info=True)
+    # The live metrics' sampler, started by the first reading (the telemetry, a route), stops with the app: a lifespan
+    # that ends leaves no sampler behind, and the next one starts its own (260). Never imported: nothing started.
+    live = sys.modules.get("opti_oignon.live_metrics")
+    if live is not None:
+        try:
+            live.reset_live_metrics()
+        except Exception:  # noqa: BLE001 - shutdown goes on
+            logger.warning("shutdown: the live metrics sampler could not be stopped", exc_info=True)
     if trash is not None:
         trash.cancel()
     # Shutdown: stop the sync driver if it was armed (a no-op otherwise).
