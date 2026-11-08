@@ -862,11 +862,13 @@ class ProjectIndexer:
 
         return True
 
-    def reindex_project(self, project_id: str) -> list[IndexResult]:
+    def reindex_project(self, project_id: str, left_out: list[str] | None = None) -> list[IndexResult]:
         """Reindex all files in a project.
 
         Args:
             project_id: The project ID.
+            left_out: when given, extended with what the project's Mycelium store could not be given, even for a
+                project with no file (no result to carry it).
 
         Returns:
             List of IndexResult for each file.
@@ -884,6 +886,8 @@ class ProjectIndexer:
         left = self.index_mycelium(project_id)
         if results:
             results[-1].mycelium = left
+        if left_out is not None:
+            left_out.extend(left)
 
         return results
 

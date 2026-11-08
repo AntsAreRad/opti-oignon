@@ -2608,6 +2608,23 @@ package costs.
 
 ### Changed
 
+- A chat turn's search stops at its deadline (BACKLOG 254 b): past it
+  the lexical stages answered, but the whole search ran on to its end
+  on its own thread, its bridge's and its judge's questions still sent
+  to the shared model and its vector to the encoder, their answers
+  unused. From the deadline on no new question leaves: the bridge's
+  next question is refused -- its asker checks once more after its
+  admission, just before the question leaves, the admission handed
+  back --, the vector and the judging stages are left out, each said in
+  its silences, the vector's request checked again once the store's
+  vectors are read; a question already in flight runs to its end, its
+  answer unused. A searcher made without a stop (the agent's
+  `mycelium_search`) is unchanged. And what a project's Mycelium store
+  could not be given is in the answer of `POST .../files/{id}/index`
+  (`mycelium`, and in the detail of a failed indexation) and of
+  `POST .../reindex` (a project with no file included), not in the log
+  alone (BACKLOG 253 a). Contracts SI1-SI6.
+
 - The live metrics' sampler stops when the API's lifespan ends (it was a
   singleton started by the first reading and never stopped, so its
   thread outlived the app and read the memory through a module a

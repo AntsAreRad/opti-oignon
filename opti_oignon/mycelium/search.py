@@ -45,11 +45,13 @@ class Searcher:
     TESTS_KEEP = 0.7
 
     def __init__(self, store, allow=("public", "private"), lexical_query=None, timeout_s=120.0, bridge=None,
-                 reranker=None, readers=None, sources=None):
+                 reranker=None, readers=None, sources=None, stop=None):
         """``bridge`` (``bridge.Bridge``) gives the words-matching lists their English and a second, rewritten,
         full-text list; ``reranker`` (``rerank.Reranker``) judges the first passages when a search asks it;
         ``readers`` read a source of documents (``Indexer.readers``); ``sources``, when given, the names of the only
-        sources every stage and every citation read back may read (the agent's tool: those of the run's workspace)."""
+        sources every stage and every citation read back may read (the agent's tool: those of the run's workspace);
+        ``stop`` (a ``threading.Event``), once set, leaves out the stages that would call the encoder or the judge
+        (a chat turn past its deadline), said."""
         if bridge is not None and lexical_query is not None:
             raise ValueError("a searcher takes a bridge or a lexical_query, not both: the bridge gives the words")
         self.store = store
@@ -58,6 +60,7 @@ class Searcher:
         self.lexical_query = lexical_query
         self.timeout_s = timeout_s
         self.bridge, self.reranker, self.readers = bridge, reranker, readers
+        self.stop = stop
         self.silent = {}
         self._searching = threading.local()     # the silences of the search this thread runs (``find``)
 
@@ -148,6 +151,9 @@ class Searcher:
         if not ids:
             silent["dense"] = f"the active encoder {active['key']} has no vector this search may read"
             return []
+        if self.stop is not None and self.stop.is_set():      # checked after the matrix, which may outlast it
+            silent["dense"] = "the search's deadline passed: the vectors are left out"
+            return []
         try:
             vector = Embedder(Encoder(**active["card"]), self.timeout_s).query(query)
         except VectorError as exc:
@@ -190,7 +196,7 @@ class Searcher:
             if said and said != worded:
                 lists["rewritten"] = self.lexical(said)
         if "dense" in stages:
-            lists["dense"] = self.dense(query)
+            lists["dense"] = self.dense(query)      # left out once ``stop`` is set (``dense``)
         fused, why = {}, {}
         for stage, ranked in lists.items():
             for place, (part_id, _score) in enumerate(ranked, 1):
@@ -205,7 +211,9 @@ class Searcher:
         want = 0 if k <= 0 else max(k, self.reranker.settings.depth if judging else 0)
         cited = (self.cite(part_id, fused[part_id], why[part_id]) for part_id in order[:want * 4])
         hits = list(itertools.islice((c for c in cited if c is not None), want))
-        if judging and hits:
+        if judging and hits and self.stop is not None and self.stop.is_set():
+            silent["rerank"] = "the search's deadline passed: the passages keep their fused order"
+        elif judging and hits:
             hits = self.reranker(query, hits, self.read, silent)
         return Found(hits[:max(0, k)], silent)
 

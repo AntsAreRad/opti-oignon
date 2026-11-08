@@ -509,10 +509,13 @@ def index_project_file(project_id: str, file_id: str) -> dict:
         raise HTTPException(status_code=404, detail="File not found")
 
     result = project_indexer.index_file(project_id, file_id)
+    # What the project's Mycelium store could not be given (253 a): named in the answer, not only in the log.
+    left = list(result.mycelium)
     if not result.success:
         raise HTTPException(
             status_code=422,
-            detail=f"Indexation failed: {result.error}",
+            detail=f"Indexation failed: {result.error}"
+            + (f"; the project's Mycelium store could not be given: {'; '.join(left)}" if left else ""),
         )
 
     return {
@@ -522,6 +525,7 @@ def index_project_file(project_id: str, file_id: str) -> dict:
         "chunk_count": result.chunk_count,
         "summary_length": len(result.summary),
         "key_terms_count": len(result.key_terms),
+        "mycelium": left,
     }
 
 
@@ -544,7 +548,8 @@ def reindex_project(project_id: str) -> dict:
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    results = project_indexer.reindex_project(project_id)
+    left: list[str] = []
+    results = project_indexer.reindex_project(project_id, left_out=left)
     succeeded = [r for r in results if r.success]
     failed = [r for r in results if not r.success]
 
@@ -559,6 +564,8 @@ def reindex_project(project_id: str) -> dict:
             {"file_id": r.file_id, "filename": r.filename, "error": r.error}
             for r in failed
         ],
+        # What the project's Mycelium store could not be given (253 a), its one pass for every file.
+        "mycelium": left,
     }
 
 

@@ -186,9 +186,10 @@ class Asker:
     def __init__(self, model, timeout_s, caller=CALLER):
         self.model, self.timeout_s, self.caller = model, timeout_s, caller
 
-    def ask(self, prompt, num_predict, system=None, timeout_s=None):
+    def ask(self, prompt, num_predict, system=None, timeout_s=None, stop=None):
         """The model's answer, within ``timeout_s`` (the asker's own when None) for the resolution and the call
-        together."""
+        together; ``stop`` (a ``threading.Event``), set before the call leaves -- the backend resolved and the
+        admission given --, sends nothing, the admission handed back (a chat turn past its deadline, 263)."""
         model = self.model
         seconds = self.timeout_s if timeout_s is None else timeout_s
         vectors.machine_rule()      # its first import paid here, never on the call's own time
@@ -235,6 +236,10 @@ class Asker:
         def call():
             with vectors._holding(decision):
                 return backend.generate(model, messages, options=options, think=False, **extra)
+
+        if stop is not None and stop.is_set():
+            _hand_back(governor, decision)
+            raise AskError("the turn's deadline passed before the question left: not asked")
 
         finished, said, error = _within(left, model, call)
         if not finished:
