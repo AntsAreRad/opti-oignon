@@ -57,6 +57,17 @@
 		reserve: { label: 'Reserve', color: 'var(--oo-fg-muted)' },
 	};
 
+	// Where the last turn's project passages came from, by the strategy its
+	// zone reports; a strategy this table does not know (none: no passage
+	// kept, no source asked) says nothing.
+	const projectSources: Record<string, string> = {
+		mycelium: "from the project's Mycelium store",
+		'mycelium+rag': "from the project's Mycelium store and the knowledge base",
+		rag: 'from the knowledge base',
+		unreadable: "none, the project's Mycelium store could not be read or searched",
+		withheld: 'none, its text was withheld: nothing could wrap it as data',
+	};
+
 	// -------------------------------------------------------------------------
 	// Lifecycle
 	// -------------------------------------------------------------------------
@@ -434,6 +445,13 @@
 									{/each}
 								</div>
 							</div>
+
+							<!-- The project's source, and what its turn said -->
+							{#each lastReport.zones.filter((z) => z.zone === 'project' && projectSources[z.strategy]) as zone}
+								<p class="text-xs text-surface-300">
+									Project context: {projectSources[zone.strategy]}.{zone.detail ? ` ${zone.detail}` : ''}
+								</p>
+							{/each}
 
 							<!-- Trim summary -->
 							{#if lastReport.total_trimmed > 0}

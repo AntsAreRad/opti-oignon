@@ -205,23 +205,39 @@ export async function listProjectConversations(
 // CONTEXT (INDEXATION + TRIGGERS + RAG)
 // =========================================================================
 
-/** Index a single file into the knowledge base's store. */
-export async function indexProjectFile(
-	projectId: string,
-	fileId: string
-): Promise<{ status: string; chunks: number; summary: string; key_terms: string[] }> {
-	return apiPost<{ status: string; chunks: number; summary: string; key_terms: string[] }>(
-		`/api/projects/${projectId}/files/${fileId}/index`
-	);
+/** A file's index pass, as the server answers it. */
+export interface FileIndexResult {
+	status: string;
+	file_id: string;
+	filename: string;
+	chunk_count: number;
+	summary_length: number;
+	key_terms_count: number;
+	/** What the project's Mycelium store could not be given, one line each; empty when it took everything. */
+	mycelium: string[];
+}
+
+/** A project's reindex, as the server answers it. */
+export interface ReindexResult {
+	status: string;
+	project_id: string;
+	total_files: number;
+	indexed: number;
+	failed: number;
+	total_chunks: number;
+	errors: { file_id: string; filename: string; error: string }[];
+	/** What the project's Mycelium store could not be given, one line each; empty when it took everything. */
+	mycelium: string[];
+}
+
+/** Index a single file into the knowledge base's store and the project's Mycelium store. */
+export async function indexProjectFile(projectId: string, fileId: string): Promise<FileIndexResult> {
+	return apiPost<FileIndexResult>(`/api/projects/${projectId}/files/${fileId}/index`);
 }
 
 /** Reindex all project files. */
-export async function reindexProject(
-	projectId: string
-): Promise<{ status: string; indexed: number; failed: number; results: Record<string, unknown>[] }> {
-	return apiPost<{ status: string; indexed: number; failed: number; results: Record<string, unknown>[] }>(
-		`/api/projects/${projectId}/reindex`
-	);
+export async function reindexProject(projectId: string): Promise<ReindexResult> {
+	return apiPost<ReindexResult>(`/api/projects/${projectId}/reindex`);
 }
 
 /** Preview context injection for a query. */

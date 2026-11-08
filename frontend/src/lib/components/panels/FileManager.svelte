@@ -113,11 +113,17 @@
 		if (fileInput) fileInput.value = '';
 	}
 
+	/** What the project's Mycelium store could not be given, said after an index pass. */
+	function myceliumLeft(lines: string[]): string {
+		return `The project's Mycelium store could not be given everything: ${lines.join('; ')}`;
+	}
+
 	async function handleIndex(fileId: string, filename: string) {
 		indexingId = fileId;
 		try {
 			const result = await indexFile(projectId, fileId);
 			toastSuccess(`Indexed "${filename}": ${result.chunks} chunks`);
+			if (result.mycelium.length > 0) toastWarning(myceliumLeft(result.mycelium), 12000);
 		} catch (e) {
 			toastError(e instanceof Error ? e.message : 'Indexing failed');
 		} finally {

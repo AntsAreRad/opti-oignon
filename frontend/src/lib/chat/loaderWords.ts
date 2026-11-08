@@ -24,6 +24,22 @@ export const WORDS: Record<string, string> = {
 	web_off: 'Web search skipped: the search kill switch is on',
 	project_reading: 'Reading project context',
 	project_passages: 'Project context: {n} passages',
+	project_passages_mycelium: 'Project context: {passages} from its Mycelium store',
+	project_passages_rag: 'Project context: {passages} from the knowledge base',
+	project_passages_both: 'Project context: {passages} from its Mycelium store and the knowledge base',
+	project_passages_cut: 'Project context: {passages}, cut to fit the window',
+	project_unreadable: 'Project context: its Mycelium store cannot be read, no project passage',
+	project_search_failed: 'Project context: its Mycelium search failed, no project passage',
+	project_rag_serves: 'Project context: its Mycelium store holds none of its files, the knowledge base serves it',
+	project_lexical: 'Project context: the search ran past {s} s, names and full text answered',
+	project_left: 'Project context: {files} left to the knowledge base',
+	project_lexical_left:
+		'Project context: the search ran past {s} s, names and full text answered, {files} left to the knowledge base',
+	project_left_out: 'Project context left out: no room in the window',
+	count_file: '1 file',
+	count_files: '{n} files',
+	count_passage: '1 passage',
+	count_passages: '{n} passages',
 	fitting: 'Fitting the history into the context',
 	cache: 'Found in the cache',
 	offline: 'Ollama is offline: not sent',
@@ -116,6 +132,48 @@ export const UNITS: Record<string, string> = {
 
 type Values = Record<string, string | number>;
 
+/** `1 file`, `3 files`: a count of files, never their names. */
+function files(count: string): string {
+	const n = Number(count);
+	return n === 1 ? WORDS.count_file : fill(WORDS.count_files, { n });
+}
+
+/** `1 passage`, `3 passages`. */
+function passages(count: string): string {
+	const n = Number(count);
+	return n === 1 ? WORDS.count_passage : fill(WORDS.count_passages, { n });
+}
+
+/**
+ * What a project's turn says of its context, each closed form whole: a form
+ * the table does not know has no words. The files the knowledge base serves
+ * are counted, never named.
+ */
+const PROJECT_SAID: readonly [RegExp, string, ((match: RegExpMatchArray) => Values)?][] = [
+	[/^the project's Mycelium store cannot be read \(\w+\): no project passage$/, 'project_unreadable'],
+	[/^the project's Mycelium search failed \(\w+\)$/, 'project_search_failed'],
+	[/^the project holds files its Mycelium store does not: the knowledge base serves it$/, 'project_rag_serves'],
+	[/^the search took longer than (\d+(?:\.\d+)?) s: the lexical stages answered$/, 'project_lexical', (m) => ({ s: m[1] })],
+	[
+		/^the project holds (\d+) file\(s\) its Mycelium store does not \([\s\S]*\): those are left to the knowledge base$/,
+		'project_left',
+		(m) => ({ files: files(m[1]) }),
+	],
+	[
+		/^the search took longer than (\d+(?:\.\d+)?) s: the lexical stages answered; the project holds (\d+) file\(s\) its Mycelium store does not \([\s\S]*\): those are left to the knowledge base$/,
+		'project_lexical_left',
+		(m) => ({ s: m[1], files: files(m[2]) }),
+	],
+];
+
+function projectSaid(said: string): Line | null {
+	for (const [pattern, key, values] of PROJECT_SAID) {
+		const match = said.match(pattern);
+		if (match) return values ? { key, values: values(match) } : { key };
+	}
+	return null;
+}
+
 /**
  * The server's statuses the table says, by their fixed openings. The runner's
  * own step line is not among them: the terminal reads it, the loader does not.
@@ -127,7 +185,31 @@ const STATUSES: readonly [RegExp, string, ((match: RegExpMatchArray) => Values)?
 	[/^\[!\] Web search failed/, 'web_failed'],
 	[/^\[!\] Web search skipped \(kill switch engaged\)/, 'web_off'],
 	[/^\[>\] Project context:/, 'project_reading'],
+	[
+		/^\[OK\] Project context injected: (\d+) chunks, ~\d+ tokens, from the project's Mycelium store$/,
+		'project_passages_mycelium',
+		(m) => ({ passages: passages(m[1]) }),
+	],
+	[
+		/^\[OK\] Project context injected: (\d+) chunks, ~\d+ tokens, from the knowledge base$/,
+		'project_passages_rag',
+		(m) => ({ passages: passages(m[1]) }),
+	],
+	[
+		/^\[OK\] Project context injected: (\d+) chunks, ~\d+ tokens, from the project's Mycelium store and the knowledge base$/,
+		'project_passages_both',
+		(m) => ({ passages: passages(m[1]) }),
+	],
+	[
+		/^\[OK\] Project context injected: (\d+) chunks, ~\d+ tokens, cut to its share of the window$/,
+		'project_passages_cut',
+		(m) => ({ passages: passages(m[1]) }),
+	],
 	[/^\[OK\] Project context injected: (\d+) chunks/, 'project_passages', (m) => ({ n: Number(m[1]) })],
+	[
+		/^\[!\] Project context left out: (?:its share of the window holds no chunk|over its share of the window)$/,
+		'project_left_out',
+	],
 	[/^\[>\] (?:Archive retrieval|Optimizer|Multi-turn):/, 'fitting'],
 	[/^\[(?:CACHE|SEMANTIC|CACHE-X)\]/, 'cache'],
 	[/^\[!\] Ollama offline -- request not sent/, 'offline'],
@@ -199,6 +281,8 @@ export function said(line: Line): string {
 
 /** The words for a server status, or null when the table does not map it. */
 export function statusLine(message: string): Line | null {
+	const told = message.match(/^\[!\] Project context: ([\s\S]+)$/);
+	if (told) return projectSaid(told[1]);
 	for (const [pattern, key, values] of STATUSES) {
 		const match = message.match(pattern);
 		if (match) return values ? { key, values: values(match) } : { key };

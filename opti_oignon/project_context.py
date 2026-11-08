@@ -294,6 +294,10 @@ class RetrievedChunk:
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
+# The key that marks, in a chunk's metadata, a chunk the knowledge base served beside the project's Mycelium store.
+_SERVED_BY = "served_by"
+
+
 @dataclass
 class ProjectContext:
     """Built context ready for injection into an LLM call."""
@@ -1278,6 +1282,7 @@ class ProjectContextBuilder:
         selected_parts = []
         total_chunk_tokens = 0
         source_files = set()
+        kept_chunks = []
 
         for chunk in chunks:
             chunk_tokens = _estimate_tokens(chunk.content)
@@ -1293,6 +1298,7 @@ class ProjectContextBuilder:
                         f"[{cut_label}] {truncated}..."
                     )
                     source_files.add(Path(chunk.source_file).name)
+                    kept_chunks.append(chunk)
                 break
 
             source_label = Path(chunk.source_file).name
@@ -1301,9 +1307,16 @@ class ProjectContextBuilder:
             selected_parts.append(f"[{source_label}]\n{chunk.content}")
             total_chunk_tokens += chunk_tokens
             source_files.add(Path(chunk.source_file).name)
+            kept_chunks.append(chunk)
 
         ctx.chunks_used = len(selected_parts)
         ctx.source_files = sorted(source_files)
+        if ctx.source == "mycelium+rag":
+            # Both sources were asked; the source said is where the passages kept came from: the knowledge base may
+            # give none of the files the store does not hold, the budget may cut them, the store may find nothing.
+            from_rag = sum(1 for c in kept_chunks if (c.metadata or {}).get(_SERVED_BY) == "rag")
+            ctx.source = ("mycelium+rag" if 0 < from_rag < len(kept_chunks)
+                          else "rag" if from_rag else "mycelium")
 
         # Build final context text
         parts = []
@@ -1338,6 +1351,9 @@ class ProjectContextBuilder:
             wanted = set(turn.uncovered)
             kept = max(1, int(self._config.get("max_chunks_per_query", 10)) // 2)
             served = [c for c in self.retrieve_chunks(project_id, query, max_chunks=20) if c.source_file in wanted]
+            # Marked, so that the source said is where the passages kept came from (see ``build_context``).
+            for chunk in served[:kept]:
+                chunk.metadata = {**(chunk.metadata or {}), _SERVED_BY: "rag"}
             return chunks + served[:kept]
         if turn is not None and turn.state == "unreadable":
             ctx.source, ctx.said = "", turn.said

@@ -19,7 +19,7 @@
 		formatFileSize,
 	} from '$lib/stores/projects';
 	import { downloadProjectOutput } from '$lib/api/projects';
-	import { toastSuccess, toastError } from '$lib/stores/notifications';
+	import { toastSuccess, toastError, toastWarning } from '$lib/stores/notifications';
 	import type { ProjectContextPreview } from '$lib/types';
 	import FileManager from './FileManager.svelte';
 
@@ -127,6 +127,12 @@
 		try {
 			const result = await reindexAll(detail.id);
 			toastSuccess(`Reindexed: ${result.indexed} files (${result.failed} failed)`);
+			if (result.mycelium.length > 0) {
+				toastWarning(
+					`The project's Mycelium store could not be given everything: ${result.mycelium.join('; ')}`,
+					12000
+				);
+			}
 		} catch (e) {
 			toastError(e instanceof Error ? e.message : 'Reindex failed');
 		} finally {

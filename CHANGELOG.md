@@ -11,6 +11,31 @@ package costs.
 
 ### Added
 
+- The web interface says where a project's context came from, and what
+  the Mycelium was not given. The passages' status line names its source
+  (the project's Mycelium store, the knowledge base, or both) instead of
+  a line of its own the chat's loader did not map, one passage said as
+  one; the source is where the passages kept came from (both sources
+  asked, the knowledge base may give none of the files the store does
+  not hold, or the store find nothing). What the turn says of its context
+  now follows the passages' line rather than going before it, which took
+  its place at once: the loader's closed table says each form in its
+  words (a store that cannot be read, a search that failed, a store
+  holding none of the files, the lexical stages answering past the
+  deadline, files left to the knowledge base, counted and never named);
+  a form the table does not know is still not said. With the context
+  optimizer on (the shipped default), the executor now says these lines
+  too, from the optimizer's project zone, after its own line; before, the
+  loader got no project line at all on that path. On the onion journal's
+  path the passages' line is said once the text is fitted to its share of
+  the window, and a text the fit cut names no source and is said cut. The
+  window's two "left out" lines are said too. The settings' optimizer
+  panel shows the project zone's source and its detail, and names no
+  source when no passage was kept or the text was withheld. After an index pass or a reindex, the projects panel
+  says, line by line, what the project's Mycelium store could not be
+  given; the file's index answer is typed as the server gives it (its
+  chunk count was read from a field the answer does not have).
+  Contracts LD24-LD32.
 - The Mycelium's map gets its file cards (P20, phase 2, stage 2):
   `opti-oignon mycelium cards CORPUS [--source S] [--limit N]` asks a
   local model (`mycelium.yaml`, section `cards`: the bench's

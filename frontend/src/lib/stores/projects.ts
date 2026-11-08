@@ -210,11 +210,15 @@ export async function deleteFile(projectId: string, fileId: string): Promise<str
 	}
 }
 
-/** Index a single file. Updates its indexed status in the store. */
+/**
+ * Index a single file. Updates its indexed status and chunk count in the
+ * store; its summary and key terms stay as they were until the project is
+ * read again (the answer counts them, it does not carry them).
+ */
 export async function indexFile(
 	projectId: string,
 	fileId: string
-): Promise<{ chunks: number; summary: string; key_terms: string[] }> {
+): Promise<{ chunks: number; mycelium: string[] }> {
 	projectError.set(null);
 	try {
 		const result = await api.indexProjectFile(projectId, fileId);
@@ -226,21 +230,13 @@ export async function indexFile(
 					? {
 							...d,
 							files: d.files.map((f) =>
-								f.id === fileId
-									? {
-											...f,
-											indexed: true,
-											chunk_count: result.chunks,
-											summary: result.summary,
-											key_terms: result.key_terms,
-										}
-									: f
+								f.id === fileId ? { ...f, indexed: true, chunk_count: result.chunk_count } : f
 							),
 						}
 					: d
 			);
 		}
-		return result;
+		return { chunks: result.chunk_count, mycelium: result.mycelium ?? [] };
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : 'Failed to index file';
 		projectError.set(msg);
@@ -249,13 +245,15 @@ export async function indexFile(
 }
 
 /** Reindex all files in a project. */
-export async function reindexAll(projectId: string): Promise<{ indexed: number; failed: number }> {
+export async function reindexAll(
+	projectId: string
+): Promise<{ indexed: number; failed: number; mycelium: string[] }> {
 	projectError.set(null);
 	try {
 		const result = await api.reindexProject(projectId);
 		// Reload full detail to get updated index status
 		await selectProject(projectId);
-		return { indexed: result.indexed, failed: result.failed };
+		return { indexed: result.indexed, failed: result.failed, mycelium: result.mycelium ?? [] };
 	} catch (err: unknown) {
 		const msg = err instanceof Error ? err.message : 'Failed to reindex';
 		projectError.set(msg);

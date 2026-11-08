@@ -146,6 +146,9 @@ class ZoneReport:
         strategy: Strategy applied to this zone (none, compressed,
             sliding_window, truncated).
         detail: Human-readable detail about what happened.
+        passages: The project zone's passages kept (0 when its text was
+            withheld), and ``said`` what its turn said of them: what the
+            executor's status lines say, never in the API's report.
     """
     zone: str
     budgeted_tokens: int = 0
@@ -153,6 +156,8 @@ class ZoneReport:
     trimmed_tokens: int = 0
     strategy: str = "none"
     detail: str = ""
+    passages: int = 0
+    said: str = ""
 
     @property
     def within_budget(self) -> bool:
@@ -637,6 +642,7 @@ class ContextOptimizer:
                     "Retrieved context withheld: the untrusted-data wrapper is unavailable"
                 )
                 project_zone.detail = (project_zone.detail or "") + " | withheld: no wrapper"
+                project_zone.passages, project_zone.strategy = 0, "withheld"
 
         zones.append(project_zone)
 
@@ -976,11 +982,18 @@ class ContextOptimizer:
             text = ctx.context_text or ""
             actual = self._estimate_tokens(text, model)
             zone.actual_tokens = actual
-            # Where the chunks came from (``ProjectContext.source``): the project's Mycelium store, the knowledge
-            # base, or, for a store that cannot be read, none; what the turn says of it goes with the detail.
+            # Where the passages kept came from (``ProjectContext.source``): the project's Mycelium store, the
+            # knowledge base, or both; none when no passage was kept or no source asked (a budget that holds no
+            # chunk, a project that is not there), or, said, a store that could not be read or searched. What the
+            # turn says of it goes with the detail.
             source, said = getattr(ctx, "source", "rag"), getattr(ctx, "said", "")
-            zone.strategy = (source if source in ("mycelium", "mycelium+rag")
-                             else ("unreadable" if not source and said else "rag"))
+            if not source:
+                zone.strategy = "unreadable" if said else "none"
+            elif not ctx.chunks_used:
+                zone.strategy = "none"
+            else:
+                zone.strategy = source if source in ("mycelium", "mycelium+rag") else "rag"
+            zone.passages, zone.said = (ctx.chunks_used if text else 0), said
             zone.detail = (
                 f"{ctx.chunks_used} chunks, ~{ctx.total_tokens_estimate}t" + (f"; {said}" if said else "")
             )

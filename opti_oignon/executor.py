@@ -482,6 +482,36 @@ except ImportError:
     _trigger_detector = None
     _project_store = None
 
+# Where a project's passages came from (``ProjectContext.source``), as the
+# passages' status line says it; the chat loader's table maps these words.
+_PROJECT_SOURCES = {
+    "mycelium": "the project's Mycelium store",
+    "rag": "the knowledge base",
+    "mycelium+rag": "the project's Mycelium store and the knowledge base",
+}
+
+
+def _project_zone_lines(report: Any) -> list[str]:
+    """The project's status lines on the optimizer's path, from its project
+    zone, as the executor's own path says them: the passages kept with their
+    source, then what the turn said; nothing for a zone the unified layer
+    filled or for no zone."""
+    zone = next((z for z in getattr(report, "zones", ()) or () if getattr(z, "zone", "") == "project"), None)
+    if zone is None or getattr(zone, "strategy", "") == "unified":
+        return []
+    lines = []
+    source = _PROJECT_SOURCES.get(getattr(zone, "strategy", ""))
+    passages = getattr(zone, "passages", 0)
+    if source and passages:
+        lines.append(
+            f"[OK] Project context injected: {passages} chunks, ~{getattr(zone, 'actual_tokens', 0)} tokens, "
+            f"from {source}"
+        )
+    said = getattr(zone, "said", "")
+    if said:
+        lines.append(f"[!] Project context: {said}")
+    return lines
+
 # Prompt optimization (v1.6.4)
 try:
     from .prompt_optimization import (
@@ -2324,6 +2354,7 @@ class Executor:
         conversation_id: str | None,
         on_status: Callable[[str], None] | None = None,
         budget_tokens: int | None = None,
+        fit: Callable[[str], str] | None = None,
     ) -> str:
         """The project context text for this turn, or an empty string.
 
@@ -2340,6 +2371,10 @@ class Executor:
             budget_tokens: The most the retrieval may take, in tokens, when
                 its caller sizes it (the onion's journal, by its share of the
                 tail); the builder's own budget otherwise.
+            fit: What fits the text to its share of the window as the window
+                counts it (the onion's journal), applied before its lines are
+                said: a text it cuts names no source (the passages it drops
+                are the last, the knowledge base's) and is said cut.
 
         Returns:
             the retrieved context text, or an empty string when there is
@@ -2398,23 +2433,29 @@ class Executor:
                     if budget_tokens is None
                     else _project_context_builder.build_context(project_id, question, budget_tokens=budget_tokens)
                 )
-                if getattr(ctx, "said", ""):
-                    _status(f"[!] Project context: {ctx.said}")
             else:
                 # Fallback: system_instructions only (always for project convos)
                 ctx = _project_context_builder.build_system_instructions_only(project_id)
 
-            if ctx.context_text:
-                source = {"mycelium": "the project's Mycelium store", "rag": "the knowledge base",
-                          "mycelium+rag": "the project's Mycelium store and the knowledge base"}.get(
-                    getattr(ctx, "source", ""))
-                if source and ctx.chunks_used:
-                    _status(f"[>] Project context from {source}")
+            # The passages' line says where they came from; what the turn
+            # says of its context (a store left unread, the knowledge base
+            # serving, the lexical stages answering, files left to the
+            # knowledge base) follows it, the project's last line.
+            text = ctx.context_text
+            if text and fit is not None:
+                text = fit(text)
+            cut = text != ctx.context_text
+            if text:
+                source = _PROJECT_SOURCES.get(getattr(ctx, "source", "")) if ctx.chunks_used else None
                 _status(
                     f"[OK] Project context injected: "
                     f"{ctx.chunks_used} chunks, ~{ctx.total_tokens_estimate} tokens"
+                    + (", cut to its share of the window" if cut else f", from {source}" if source else "")
                 )
-                return ctx.context_text
+            if getattr(ctx, "said", ""):
+                _status(f"[!] Project context: {ctx.said}")
+            if text:
+                return text
 
         except Exception as e:
             logger.warning("Project context injection failed: %s", e)
@@ -3394,13 +3435,16 @@ class Executor:
                 _shell = self._estimate_tokens(_wrap_untrusted(".", source=_UNTRUSTED_SOURCE_FILE), routing.model)
                 _per = max(self._estimate_tokens("x" * 4000, routing.model) / 1000, 1.0) * 1.2
                 _rag_room = max(int((_rag_room - _shell) / _per), 0)
-            _rag_text = self._compose_project_context(
-                question, conversation_id, on_status=status, budget_tokens=_rag_room,
+            # What the builder returns, fitted to the share as the window
+            # counts it before its lines are said: never asked again, which
+            # would run its trigger again.
+            _rag_fit = (
+                (lambda text, _share=_onion_room["rag"]: self._onion_fit(text, _share, routing.model))
+                if _onion_room.get("rag") is not None and _wrap_untrusted is not None else None
             )
-            # What the builder returned, fitted to the share as the window
-            # counts it: never asked again, which would run its trigger again.
-            if _rag_text and _onion_room.get("rag") is not None and _wrap_untrusted is not None:
-                _rag_text = self._onion_fit(_rag_text, _onion_room["rag"], routing.model)
+            _rag_text = self._compose_project_context(
+                question, conversation_id, on_status=status, budget_tokens=_rag_room, fit=_rag_fit,
+            )
             if _rag_text:
                 _onion_tail.append({"kind": "rag", "items": [
                     (_rag_text, (["file"], ["file:" + hashlib.sha256(_rag_text.encode("utf-8")).hexdigest()])),
@@ -3800,6 +3844,8 @@ class Executor:
                         f"trimmed={rpt.total_trimmed}t, "
                         f"{rpt.duration_ms:.0f}ms)"
                     )
+                    for line in _project_zone_lines(rpt):
+                        status(line)
                 except Exception as e:
                     # The optimizer's request is given up: its label leaves
                     # with it, and the fallback's is read where it is sent.
