@@ -84,7 +84,7 @@ SESSION_STATE_TOOLS = frozenset({"todo"})
 # Reads on this machine of what the owner indexed: the Mycelium's search of the
 # run's workspace corpus, its public and private sources. Present in both modes;
 # in Bulbe each call rides the per-call approval like the sandboxed tools.
-READ_TOOLS = frozenset({"mycelium_search"})
+READ_TOOLS = frozenset({"mycelium_search", "mycelium_map"})
 
 # The bounded subagent tool: loop-managed, present in
 # both modes. The call itself launches nothing ungated -- the child registry

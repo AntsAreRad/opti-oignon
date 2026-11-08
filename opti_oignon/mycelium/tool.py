@@ -31,6 +31,7 @@ import os
 import threading
 
 from . import gate, place
+from . import map as mycelium_map
 
 # New-module safety rule: any change this module drives through the system
 # must checkpoint first. Hardcoded, never overridable.
@@ -39,6 +40,8 @@ checkpoint_before_apply = True
 logger = logging.getLogger(__name__)
 
 TOOL = "mycelium_search"
+MAP_TOOL = "mycelium_map"
+MAX_MAP_PATH = 1000     # a path asked of the map, at most
 ALLOW = ("public", "private")
 DEFAULT_K = 5
 MAX_K = 10
@@ -219,6 +222,9 @@ def card(sandbox):
             "the lines you use as [path:first-last] (or [path:line]), in the sentence that says what they hold: "
             "your final answer's citations are checked against the lines this search gave you (where they point, "
             "not whether what you say of them is right), and the verdict is shown with it. A passage marked modified or gone no longer says what the file says now. "
+            "mycelium_map walks the same corpus's map without reading any file: a folder's sub-folders and files, a "
+            "file's parts (with their lines), what it defines, the settings it reads, its tests, docs and users -- "
+            "to find where to search, not something to cite. "
             "Its sources:\n" + "\n".join(lines))
 
 
@@ -416,4 +422,63 @@ def make_handler(sandbox):
 
     handle.shown = shown
     handle.delivered = shown.delivered
+    return handle
+
+
+def _bounded(text):
+    """``text`` held to an answer's bounds (``MAX_BYTES``, ``MAX_LINES``, a line longer than ``MAX_LINE_CHARS`` cut),
+    what is cut said."""
+    lines = text.splitlines()
+    out, size = [], 0
+    for at, line in enumerate(lines):
+        if len(line) > MAX_LINE_CHARS:
+            line = line[:MAX_LINE_CHARS] + " [line cut]"
+        if len(out) >= MAX_LINES - 1 or size + _size(line) > MAX_BYTES - 100:
+            out.append(f"... {len(lines) - at} more lines not shown")
+            break
+        out.append(line)
+        size += _size(line)
+    return "\n".join(out)
+
+
+def make_map_handler(sandbox):
+    """The run's handler of ``mycelium_map``: the map of one source of the corpus that holds the run's workspace
+    (``map.branch``) -- a folder's sub-folders and files, a file's parts and links --, drawn from the store alone: the
+    same corpus, the same public or private sources, the same store and lock as the search; held to the same bounds.
+    ``path`` is a folder or a file relative to the source's root (empty: the root); ``source`` names one of the run's
+    sources, needed only when it has several. Never raises."""
+    state, root = _workspace(sandbox)
+
+    def handle(arguments):
+        try:
+            arguments = arguments if isinstance(arguments, dict) else {}
+            path = arguments.get("path") or ""
+            source = arguments.get("source")
+            if not isinstance(path, str) or len(path) > MAX_MAP_PATH:
+                return ("mycelium_map: path is a folder or a file of the corpus, relative to its root, at most "
+                        f"{MAX_MAP_PATH} characters (empty: the root).")
+            if source is not None and not isinstance(source, str):
+                return "mycelium_map: source is the name of one of this run's sources, as the Mycelium line says it."
+            if state == "none":
+                return NO_WORKSPACE
+            if state == "uploaded":
+                return UPLOADED
+            refused = {}
+            held = corpus_for(root, refused)
+            if held is None:
+                return _not_found(root, refused)
+            _corpus, store, names = held
+            if not source:
+                if len(names) > 1:
+                    return "mycelium_map needs a source: this run's are " + ", ".join(names) + "."
+                source = names[0]
+            if source not in names:
+                return (f"mycelium_map: no source named {json.dumps(source)} among this run's ("
+                        + ", ".join(names) + ").")
+            with store.lock:        # the store's one connection, one reader at a time
+                return _bounded(mycelium_map.branch(store, source, path))
+        except Exception as exc:  # noqa: BLE001 - a tool's failure is said to the model, never raised into the run
+            logger.warning("mycelium: the agent's map walk failed (%s)", type(exc).__name__)
+            return f"The Mycelium could not walk its map this time ({type(exc).__name__})."
+
     return handle

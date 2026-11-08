@@ -11,6 +11,29 @@ package costs.
 
 ### Added
 
+- The Mycelium's map (P20, phase 2, stage 1): `mycelium/map.py` walks a
+  corpus as the tree of its folders and files, each node said in a few
+  lines drawn from the store's index alone -- no model writes any of
+  it: a folder's sub-folders and files, biggest first, with how many
+  files, parts and which languages, a file's first sentence; a file's
+  parts with their lines, what it defines, the settings it reads (only
+  names that are surely settings), and the tests, docs and other files
+  of its own source that name what it defines. The agent walks it with
+  `mycelium_map(path?, source?)` beside `mycelium_search`: the same
+  corpus of the run's workspace, its public and private sources only,
+  read-only, held to the search's bounds, class none, asked per call in
+  Bulbe, neutralized on the eval path; the corpus card names it as a way
+  to find where to search, not something to cite; a run that walked
+  the map and no search still has its answer's citations checked, a
+  line the map named but no search gave said unseen. Everything the
+  map says of a file -- its users, the settings it reads, the counts
+  that bound them -- comes from the file's own source: another source
+  of the same store, a secret one included, changes nothing of it, and
+  a source marked secret is refused at each call. A folder whose name
+  holds a LIKE wildcard, or differs from another only by case, lists
+  its own files only. Contracts MA1-MA8 (MA6 and MA7 supersede MY2 and
+  MY3, which counted fourteen tools).
+
 - [SECURITY] The provenance seal covers the llama-server backend
   (MP-01, what remained): before each request, the gate asks the
   external server which file it serves (`/props`, kept five seconds)

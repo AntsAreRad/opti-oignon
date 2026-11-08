@@ -255,7 +255,13 @@ may read; never a root or a path the citation carries. The agent's
 `mycelium_search` reads only the public and private sources rooted at
 the folder its run's workspace was cloned from, read-only, a connection
 opened again when the security mode changed; in Bulbe each call is
-asked. The account wipe, for a single-user install's one user,
+asked. Its map, `mycelium_map`, reads the same sources the same way,
+from the store's index alone (never a file): a folder's sub-folders and
+files, a file's parts and the files of its own source that name what it
+defines. Every query of the map is bound to the run's source: another
+source of the same store, a secret one included, changes nothing of what
+it says, and a source marked secret since the run began is refused at
+the next call. The account wipe, for a single-user install's one user,
 overwrites and removes every store; with several users, it names them as
 not covered. The plaintext copies an encryption run keeps beside the
 stores stay, as for every store. A project's files are indexed into

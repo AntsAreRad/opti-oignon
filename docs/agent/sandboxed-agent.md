@@ -36,7 +36,13 @@ index`), its public and private sources only -- no other folder indexed beside
 it -- and returns cited passages, bounded under the loop's observation caps
 (bytes and lines);
 the tools section of the run's prompt says which corpus, or that none is
-indexed.
+indexed. Its map, `mycelium_map`, walks the same corpus without reading
+any file: a folder gives its sub-folders and files with one line each, a
+file its parts with their lines, what it defines, the settings it reads
+and the tests, docs and files of its source that use it -- to find where
+to search; its answers are not cited, and a run that walked the map is
+checked by the citation gate as one that searched: a line the map named
+but no search gave reads unseen.
 It is present in both modes, each call asked in Bulbe, and neutralized in the
 evaluation harness. When the run's search gave the model passages, its final
 answer then goes through the citation gate: each `[path:first-last]` it gives

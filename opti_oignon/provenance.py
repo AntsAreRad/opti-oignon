@@ -121,6 +121,8 @@ TOOL_EFFECTS: Mapping[str, str] = MappingProxyType({
     "task": SESSION,
     # The Mycelium's search: reads on this machine, nothing changed anywhere.
     "mycelium_search": NONE,
+    # Its map: reads the store's index on this machine, never a file, nothing changed.
+    "mycelium_map": NONE,
     # The chat: the four built-ins that run only in a sandbox session, and
     # the sandbox session's own four.
     "execute_code": SANDBOX,

@@ -139,8 +139,10 @@ _READ_ACTIONS = {
 }
 
 
-# The Mycelium's search, by the name the agent's tools declare it under (a tool set without it binds nothing).
+# The Mycelium's search and its map, by the names the agent's tools declare them under (a tool set without one binds
+# nothing for it).
 _MYCELIUM_SEARCH = "mycelium_search"
+_MYCELIUM_MAP = "mycelium_map"
 
 
 def _mycelium_for_run(sandbox: Any) -> tuple[Callable[[dict[str, Any]], str], str] | None:
@@ -152,6 +154,18 @@ def _mycelium_for_run(sandbox: Any) -> tuple[Callable[[dict[str, Any]], str], st
         return mycelium_tool.make_handler(sandbox), mycelium_tool.card(sandbox)
     except Exception:  # noqa: BLE001 - the run goes on without the Mycelium's corpus
         logger.debug("the Mycelium's search could not be bound to the run", exc_info=True)
+        return None
+
+
+def _mycelium_map_for_run(sandbox: Any) -> Callable[[dict[str, Any]], str] | None:
+    """The run's ``mycelium_map`` handler, or None when the Mycelium cannot be loaded here (the process-level handler
+    then says that no corpus is walked)."""
+    try:
+        from opti_oignon.mycelium import tool as mycelium_tool
+
+        return mycelium_tool.make_map_handler(sandbox)
+    except Exception:  # noqa: BLE001 - the run goes on without the Mycelium's map
+        logger.debug("the Mycelium's map could not be bound to the run", exc_info=True)
         return None
 
 
@@ -199,6 +213,9 @@ class AgentRunManager:
         # its final answer's citations are checked against them; None when
         # the run has no Mycelium search.
         self._shown: Any = None
+        # Whether the active run walked its Mycelium map: its answer is checked
+        # then too, every citation of lines it was never shown said so.
+        self._mapped = False
 
     # status / control
 
@@ -277,26 +294,41 @@ class AgentRunManager:
     def _citations_checked(self, data: dict) -> dict:
         """The ``done`` event's data with the citation gate's verdict: when the run's Mycelium search gave the model
         passages (lines the loop delivered), the verdict paragraph is added after the final text -- never in its
-        place, the model's words kept whole -- and the verdicts given as ``citations``. Unchanged otherwise -- a run
-        that never searched, one with no workspace, whatever its answer cites --, and when the gate cannot run."""
+        place, the model's words kept whole -- and the verdicts given as ``citations``; a run that walked its map
+        (261) is checked too, a citation of lines the map named but no search gave said unseen. Unchanged otherwise --
+        a run that neither searched nor walked, one with no workspace, whatever its answer cites --, and when the gate
+        cannot run."""
         with self._lock:
-            shown = self._shown
-        if shown is None or not shown.any():
+            shown, mapped = self._shown, self._mapped
+        if not mapped and (shown is None or not shown.any()):
             return data
         try:
             from opti_oignon.mycelium import gate as citation_gate
             from opti_oignon.mycelium.index import file_lines
 
+            if shown is None:
+                shown = citation_gate.Shown()
             text = data.get("final_text")
             text = text if isinstance(text, str) else ""
             result = citation_gate.check(text, shown, file_lines)
-            paragraph = citation_gate.said(result, True)
+            paragraph = citation_gate.said(result, shown.any())
             if not paragraph:
                 return data
             return dict(data, final_text=(text + "\n\n" + paragraph) if text else paragraph, citations=result)
         except Exception:  # noqa: BLE001 - the gate never breaks the run's end
             logger.debug("the citation gate could not check the run's answer", exc_info=True)
             return data
+
+    def _walked(self, walker: Callable[[dict], str]) -> Callable[[dict], str]:
+        """``walker`` (the run's ``mycelium_map``) that marks the run as having walked its map, so that its answer's
+        citations are checked even when no search showed it a passage."""
+
+        def walk(arguments: dict) -> str:
+            with self._lock:
+                self._mapped = True
+            return walker(arguments)
+
+        return walk
 
     def _note_read(self, data: dict) -> None:
         """Record a reading tool whose result the run read; one that did not run returned nothing to read."""
@@ -432,6 +464,7 @@ class AgentRunManager:
             self._running = True
             self._journal = None
             self._shown = None
+            self._mapped = False
         run_id = uuid.uuid4().hex[:12]
         try:
             tool_set = agent_tools.build_tool_set(mode)
@@ -470,6 +503,10 @@ class AgentRunManager:
                     handlers[_MYCELIUM_SEARCH], mycelium_card = mycelium
                     with self._lock:
                         self._shown = getattr(handlers[_MYCELIUM_SEARCH], "shown", None)
+            if _MYCELIUM_MAP in handlers:
+                walker = _mycelium_map_for_run(sandbox)
+                if walker is not None:
+                    handlers[_MYCELIUM_MAP] = self._walked(walker)
             # manage_skills (Daily only) proposes into this run's own review
             # gate, with the run's sandbox for verification steps: no one is
             # asked during the run, the person reviews the whole text later.
@@ -577,6 +614,7 @@ class AgentRunManager:
                 self._running = False
                 self._journal = None
                 self._shown = None
+                self._mapped = False
 
     def _detach_owned_sandbox(self) -> None:
         """Release the conversation-bound session, never destroying it.
