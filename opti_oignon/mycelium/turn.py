@@ -4,8 +4,11 @@
 project context comes from:
 
 * ``none``: the project has no store (never indexed, or no file the Mycelium reads): the knowledge base serves it;
-* ``rag``: the project's rows name a file its store does not hold, a secret's name aside (a PDF, a document, a sheet,
-  an image, a file not indexed yet): the knowledge base serves the whole project, said;
+* ``rag``: the store holds none of the files the project's rows name, a secret's name aside: the knowledge base
+  serves the whole project, said;
+* ``both`` (262): the store holds some of them and not others (a PDF, a document, a sheet, an image, a file not
+  indexed yet, one the Mycelium does not read): the passages of the files it holds, as in ``ok``, and the paths of
+  the others (``uncovered``), which the knowledge base serves, said;
 * ``unreadable``: the store is there and cannot be opened or searched: nothing of the Mycelium, said in the turn and
   in the log once per project, reason and process, and never the knowledge base in its place;
 * ``ok``: the passages, widened as the agent's tool widens them, each with the name the file was added under, its
@@ -38,6 +41,7 @@ DEFAULT_K = 8
 DEADLINE_S = 10.0                   # the whole search of a turn
 VECTOR_S = 5.0                      # the question's vector
 LEXICAL = ("symbols", "lexical")
+MAX_UNCOVERED_SAID = 5              # the files the knowledge base serves, named in a turn
 
 _lock = threading.Lock()
 _said = set()                       # (project, why) an unreadable store was said for
@@ -48,6 +52,7 @@ class Turn:
     state: str
     passages: list = field(default_factory=list)    # {"name", "first", "last", "text", "state"}
     said: str = ""
+    uncovered: tuple = ()       # in "both": the paths of the project's files the store does not hold
 
 
 def _settings_or_none(load, make):
@@ -82,8 +87,9 @@ def _unreadable(project_id, why):
 
 
 def _covered(corpus, paths):
-    """Whether the store holds every file the rows name, a secret's name aside (never indexed, never searched here);
-    ``None`` when there is no store."""
+    """``(how many of the files the rows name the store holds, the paths of those it does not)``, a secret's name
+    aside on both sides (never indexed, never searched here, never handed to the knowledge base by this rule); ``None``
+    when there is no store."""
     try:
         store = place.open_to_read(corpus)
     except place.NoStore:
@@ -94,8 +100,13 @@ def _covered(corpus, paths):
         store.close()
     from .index import secret_name
 
-    named = {p.rsplit("/", 1)[-1] for p in paths}
-    return {n for n in named if not (secret_name(n) or secret_name(projects._original(n)))} <= held
+    named = {}
+    for path in paths:
+        name = path.rsplit("/", 1)[-1]
+        if not (secret_name(name) or secret_name(projects._original(name))):
+            named[path] = name
+    uncovered = tuple(sorted(path for path, name in named.items() if name not in held))
+    return len(named) - len(uncovered), uncovered
 
 
 def _search(corpus, query, k, lexical):
@@ -138,7 +149,8 @@ def passages(project_id, paths, query, k=DEFAULT_K):
         return _unreadable(project_id, type(exc).__name__)
     if covered is None:
         return Turn("none")
-    if not covered:
+    held, uncovered = covered
+    if uncovered and not held:
         return Turn("rag", said="the project holds files its Mycelium store does not: the knowledge base serves it")
     done, result = threading.Event(), {}
 
@@ -164,4 +176,11 @@ def passages(project_id, paths, query, k=DEFAULT_K):
         said = f"the search took longer than {DEADLINE_S:g} s: the lexical stages answered"
     if silent:
         logger.info("project %s: stages left out of its turn's search: %s", project_id, ", ".join(sorted(silent)))
+    if uncovered:
+        names = [projects._original(path.rsplit("/", 1)[-1]) for path in uncovered]
+        shown = ", ".join(names[:MAX_UNCOVERED_SAID]) + (f" and {len(names) - MAX_UNCOVERED_SAID} more"
+                                                          if len(names) > MAX_UNCOVERED_SAID else "")
+        told = (f"the project holds {len(names)} file(s) its Mycelium store does not ({shown}): those are left to "
+                "the knowledge base")
+        return Turn("both", passages=found, said="; ".join(part for part in (said, told) if part), uncovered=uncovered)
     return Turn("ok", passages=found, said=said)

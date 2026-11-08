@@ -1207,10 +1207,12 @@ class ProjectContextBuilder:
         Retrieves relevant chunks, assembles them within the token
         budget, and prepends the project's system_instructions. The
         chunks come from the project's Mycelium store when it holds every
-        file of the project (``mycelium.turn``); from the knowledge base when the project has
-        no store or holds a file its store does not; and none when the store
-        cannot be read (said in ``ctx.said``; never the knowledge base in
-        its place).
+        file of the project (``mycelium.turn``); from both when it holds some
+        of them -- the store's passages, then the knowledge base's chunks of
+        the files the store does not hold, and of those alone (262); from the
+        knowledge base when the project has no store or the store holds none
+        of its files; and none when the store cannot be read (said in
+        ``ctx.said``; never the knowledge base in its place).
 
         Args:
             project_id: The project ID.
@@ -1303,12 +1305,22 @@ class ProjectContextBuilder:
         """The turn's chunks, ``ctx.source`` and ``ctx.said`` set (see ``build_context``)."""
         paths = [pf.file_path for pf in self._store.list_files(project_id)] if self._store is not None else []
         turn = _turn_passages(project_id, paths, query)
-        if turn is not None and turn.state == "ok":
-            ctx.source, ctx.said = "mycelium", turn.said
-            return [RetrievedChunk(content=p["text"], source_file=p["name"],
-                                   section_name=f"lines {p['first']}-{p['last']}"
-                                   + ("" if p["state"] == "fresh" else f", {p['state']}"))
-                    for p in turn.passages]
+        if turn is not None and turn.state in ("ok", "both"):
+            ctx.said = turn.said
+            chunks = [RetrievedChunk(content=p["text"], source_file=p["name"],
+                                     section_name=f"lines {p['first']}-{p['last']}"
+                                     + ("" if p["state"] == "fresh" else f", {p['state']}"))
+                      for p in turn.passages]
+            if turn.state == "ok":
+                ctx.source = "mycelium"
+                return chunks
+            # Both (262): the store's passages first, then the knowledge base's chunks of the files the store does
+            # not hold, and of those alone -- never a second copy of a file the store serves.
+            ctx.source = "mycelium+rag"
+            wanted = set(turn.uncovered)
+            kept = max(1, int(self._config.get("max_chunks_per_query", 10)) // 2)
+            served = [c for c in self.retrieve_chunks(project_id, query, max_chunks=20) if c.source_file in wanted]
+            return chunks + served[:kept]
         if turn is not None and turn.state == "unreadable":
             ctx.source, ctx.said = "", turn.said
             return []

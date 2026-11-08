@@ -2405,7 +2405,8 @@ class Executor:
                 ctx = _project_context_builder.build_system_instructions_only(project_id)
 
             if ctx.context_text:
-                source = {"mycelium": "the project's Mycelium store", "rag": "the knowledge base"}.get(
+                source = {"mycelium": "the project's Mycelium store", "rag": "the knowledge base",
+                          "mycelium+rag": "the project's Mycelium store and the knowledge base"}.get(
                     getattr(ctx, "source", ""))
                 if source and ctx.chunks_used:
                     _status(f"[>] Project context from {source}")

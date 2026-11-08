@@ -1887,4 +1887,5 @@ addopts = """
     --deselect=tests/test_hardware_profile_contracts.py::test_hw16_smart_router_and_live_metrics_read_the_ram_through_the_profile
     --deselect=tests/test_mycelium_agent_contracts.py::test_my2_every_agent_and_chat_tool_has_a_class_from_the_closed_set_of_six_now_fourteen
     --deselect=tests/test_mycelium_agent_contracts.py::test_my3_the_agent_allowlists_are_the_class_table_read_per_mode_now_fourteen_and_ten
+    --deselect=tests/test_project_turn_contracts.py::test_tm2_a_project_the_store_does_not_cover
 """

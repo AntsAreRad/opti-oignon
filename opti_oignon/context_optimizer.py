@@ -979,7 +979,8 @@ class ContextOptimizer:
             # Where the chunks came from (``ProjectContext.source``): the project's Mycelium store, the knowledge
             # base, or, for a store that cannot be read, none; what the turn says of it goes with the detail.
             source, said = getattr(ctx, "source", "rag"), getattr(ctx, "said", "")
-            zone.strategy = "mycelium" if source == "mycelium" else ("unreadable" if not source and said else "rag")
+            zone.strategy = (source if source in ("mycelium", "mycelium+rag")
+                             else ("unreadable" if not source and said else "rag"))
             zone.detail = (
                 f"{ctx.chunks_used} chunks, ~{ctx.total_tokens_estimate}t" + (f"; {said}" if said else "")
             )

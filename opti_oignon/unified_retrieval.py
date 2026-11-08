@@ -314,15 +314,20 @@ def _default_sources(
     """
 
     def rag(query: str, limit: int) -> list[RetrievedItem]:
+        mycelium: list[RetrievedItem] = []
+        turn_wanted: set[str] | None = None
         if project_id:
             # The project's Mycelium store first (``mycelium.turn``), as the project's context builder reads it.
             turn = _project_turn(project_id, query)
-            if turn is not None and turn.state == "ok":
-                return [RetrievedItem(source="rag", content=p["text"], score=1.0 / (1 + place),
-                                      origin=f"{p['name']} (lines {p['first']}-{p['last']}"
-                                      + ("" if p["state"] == "fresh" else f", {p['state']}") + ")",
-                                      metadata={"store": "mycelium", "state": p["state"]})
-                        for place, p in enumerate(turn.passages[:limit])]
+            if turn is not None and turn.state in ("ok", "both"):
+                mycelium = [RetrievedItem(source="rag", content=p["text"], score=1.0 / (1 + place),
+                                          origin=f"{p['name']} (lines {p['first']}-{p['last']}"
+                                          + ("" if p["state"] == "fresh" else f", {p['state']}") + ")",
+                                          metadata={"store": "mycelium", "state": p["state"]})
+                            for place, p in enumerate(turn.passages[:limit])]
+                if turn.state == "ok":
+                    return mycelium
+                turn_wanted = set(turn.uncovered)
             if turn is not None and turn.state == "unreadable":
                 return []
 
@@ -332,10 +337,15 @@ def _default_sources(
         # No citation logged: the log keeps each query word for word, with no conversation, so a turn's words
         # would outlive its deletion there. The knowledge base page's own searches still log theirs.
         response = get_hybrid_engine().search(
-            query, collection=collection, n_results=limit, track_citations=False,
+            # Both (262): the files the store holds are dropped below, so the knowledge base is asked wider, as the
+            # project's context builder asks it.
+            query, collection=collection, n_results=limit if turn_wanted is None else max(limit, 20),
+            track_citations=False,
         )
         items = []
         for r in response.results:
+            if turn_wanted is not None and r.source_file not in turn_wanted:
+                continue        # both (262): the knowledge base serves only the files the store does not hold
             origin = r.source_file
             if r.section:
                 origin = f"{r.source_file} ({r.section})"
@@ -345,6 +355,9 @@ def _default_sources(
                 source="rag", content=r.content, score=r.fused_score,
                 origin=origin, metadata={"chunk_id": r.chunk_id},
             ))
+        if turn_wanted is not None:
+            # Both (262): the store's passages first, then the knowledge base's results for those files.
+            items = mycelium + items[:max(1, limit - len(mycelium))]
         return items
 
     def memory(query: str, limit: int) -> list[RetrievedItem]:

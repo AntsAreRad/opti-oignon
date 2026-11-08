@@ -11,6 +11,21 @@ package costs.
 
 ### Added
 
+- A project is served by its Mycelium store and the knowledge base
+  together (BACKLOG 254 c): one file its store does not hold (a PDF, a
+  file not UTF-8 or larger than the index reads, one not indexed yet)
+  no longer sends the whole project to the knowledge base. The store
+  serves the files it holds; the knowledge base serves the others, and
+  those alone -- never a second copy of a file the store serves --,
+  after the store's passages; the source is said `mycelium+rag`, with
+  the files the knowledge base serves named, in the turn, the
+  optimizer's zone and the chat's status. A store that holds none of
+  the files still hands the whole project to the knowledge base; a
+  secret's name counts on neither side; a store that cannot be read
+  still gives nothing, never the knowledge base in its place. The
+  unified layer reads the same way. Contracts BS1-BS5 (BS2 supersedes
+  TM2, which held such a project wholly to the knowledge base).
+
 - The Mycelium's map (P20, phase 2, stage 1): `mycelium/map.py` walks a
   corpus as the tree of its folders and files, each node said in a few
   lines drawn from the store's index alone -- no model writes any of
