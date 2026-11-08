@@ -286,6 +286,16 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _answer_metadata(model, turn) -> dict:
+    """What an answer a pipeline saves itself keeps beside its text: its
+    model, and the facts of its project's context (closed forms, never a
+    name) when the executor's call on its run wrote them -- as the
+    executor's own saves keep them."""
+    results = getattr(turn, "results", None)
+    facts = results.get("project_context") if isinstance(results, dict) else None
+    return {"model": model, **({"project_context": facts} if facts else {})}
+
+
 # =============================================================================
 # PIPELINE CONSTANTS
 # =============================================================================
@@ -2776,7 +2786,7 @@ class AgenticExecutor:
                 role="assistant",
                 content=assistant_response,
                 model=model,
-                metadata={"model": model},
+                metadata=_answer_metadata(model, turn),
                 origin=answer_origin,
                 context=context,
                 lineage=lineage,

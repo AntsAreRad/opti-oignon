@@ -11,6 +11,12 @@ package costs.
 
 ### Added
 
+- The answers the think-and-tools and self-correction pipelines save
+  themselves keep the facts of their project's context too, as the
+  executor's own saves do: the executor's call on their run writes
+  them, and the pipeline's save now keeps them beside the model's name.
+  Before, the `done` frame said them and a reload did not. Contracts
+  PAG1-PAG3.
 - Under each answer of a project turn, the chat says where the
   project's context came from and what the turn said of it: the
   passages with their source (the project's Mycelium store, the
@@ -34,10 +40,8 @@ package costs.
   many, and the form of what the turn said of its context with its
   numbers -- on the executor's own path, the context optimizer's, its
   fallback and the single turn (not yet on the onion journal's), each
-  call its own, and the answer is saved with them (not yet the answers
-  the think-and-tools and self-correction pipelines save themselves: the
-  `done` frame says them, the reload does not); the `done` frame carries
-  them, and
+  call its own, and the answer is saved with them; the `done` frame
+  carries them, and
   `GET /api/conversations/{id}/messages` gives each answer's facts back
   (`project_context`), nothing else of its metadata. A file is never
   named in them: what the turn says can name the project's files, and
