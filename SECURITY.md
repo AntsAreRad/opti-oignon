@@ -302,7 +302,37 @@ reported not checked, never refused, lifting no refusal (an engine
 installed under another account is not covered by it). Before the first
 check of a process, the digest alone is checked, and each process
 hashes every pinned blob again. The guarantee is a models folder that
-neither the application's account nor an attacker can write. The escalation preflight refuses Bulbe on an Ollama host (named in
+neither the application's account nor an attacker can write. The
+startup checklist looks for the ways this account could write it
+(`ollama_models_writable`) -- a detector, not a certificate: it names
+the ways it finds, or says it found none among those it knows, never
+that the folder is out of reach. It looks at the folder this process
+names (`OLLAMA_MODELS`, or `~/.ollama/models`) and, on Linux, the system
+install's (`/usr/share/ollama/.ollama/models`), from the files' rights
+alone, the path resolved one link at a time: root, or a capability that
+writes any file; an entry on the way to the folder that this account may
+replace; the folder, or a folder or file it holds, that this account
+may write, owns (an owner can give itself the right), or may write
+through a group it belongs to. A read-only mount is never counted as
+protection: there the rights are read from the files' bits. That is a
+warning, never a refusal -- most installs keep the folder under the
+user's own account, so the check never blocks the boot, in Bulbe either.
+What it cannot tell is reported not checked, an info line: a folder it
+cannot enter or list, a link inside, a folder named relative or through
+`..`, a walk that does not end within ten seconds. Not judged, and said:
+mounts this account controls (a loop image, a FUSE mount, another mount
+namespace), other local accounts that can write the folder, and an
+account that can become root (sudo, the docker group). To take the
+folder out of this account's reach on Linux, run the engine under its
+own account (the official install's `ollama` service, its models in
+`/usr/share/ollama/.ollama/models`), the folder and its files that
+account's alone, with no write for a group this account belongs to;
+point `OLLAMA_MODELS`, in the platform's environment, at the folder the
+engine reads, so the layer check reads it too, and remove an old
+`~/.ollama/models` the engine no longer reads. Elsewhere (macOS,
+Windows, an engine started by hand), run the engine under another
+account. An engine started with another `OLLAMA_MODELS` keeps its
+models where this check does not look. The escalation preflight refuses Bulbe on an Ollama host (named in
 `backends.yaml`, or the registry's default when none is) whose manifest
 pins no Ollama model, and on a `llama_cpp` host whose manifest pins no
 GGUF file. The limits: the seal

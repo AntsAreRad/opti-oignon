@@ -10,6 +10,7 @@ and caches results. Combines:
   - Existing security score checks
   - Resource governor Ollama limits advisory
   - The platform's secrets out of the backend's environment
+  - The Ollama engine's models folder out of this account's reach
 
 Results are cached for the lifetime of the process and exposed via
 ``GET /api/security/startup-checks``.
@@ -22,6 +23,7 @@ from __future__ import annotations
 
 import logging
 import sys
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +39,8 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent / "scripts"
 _SIGN_SCRIPT = _SCRIPTS_DIR / "sign_release.sh"
 _VERIFY_SCRIPT = _SCRIPTS_DIR / "verify_release.sh"
 _RECOGNIZED_MODES = ("daily", "bulbe")
+_REACH_DEADLINE_S = 10.0     # the walk of the engine's models folder, at most, at boot
+_reach_walk: list[Any] = []  # the last walk's thread: one at a time in a process
 
 
 # ---------------------------------------------------------------------------
@@ -154,6 +158,8 @@ def run_startup_checks(*, force: bool = False) -> StartupCheckResult:
         ("backend_provenance_coverage", lambda: _check_backend_provenance_coverage()),
         # Check 9: the platform's secrets out of this process's environment
         ("process_secrets", lambda: _check_process_secrets()),
+        # Check 10: the engine's models folder out of this account's reach (advisory)
+        ("ollama_models_writable", lambda: _check_ollama_models_writable()),
     ):
         try:
             item = check()
@@ -964,6 +970,112 @@ def _check_process_secrets() -> CheckItem:
         passed=True,
         severity="info",
         detail="This process was handed neither the key file's passphrase nor the master key",
+    )
+
+
+def _check_ollama_models_writable() -> CheckItem:
+    """Advisory: can this account write the folder the Ollama engine keeps its models in?
+
+    The background check of the pinned models' layers runs under this account: whatever can rewrite a blob in the
+    engine's folder can fight it, so it is a tripwire. The way out is a folder this account cannot write. This check
+    is a DETECTOR (``model_provenance.ollama_models_reach``: the files' rights, never their bytes): it names the ways
+    in it finds, or says it found none among those it knows, naming what it does not judge -- never that the folder
+    is out of reach. ADVISORY-ONLY in every mode, never critical, so never blocking. A folder that cannot be looked at
+    is said not checked, an info line. The walk runs on a thread of its own, one per process, given
+    ``_REACH_DEADLINE_S``: one that does not end in time (a mount that does not answer) is said not checked, the boot
+    goes on, and while it has not ended no other is started. Never raises.
+    """
+    name = "ollama_models_writable"
+    elsewhere = "an engine started with another OLLAMA_MODELS keeps its models where this process does not look"
+    try:
+        from opti_oignon.model_provenance import ollama_models_dir, ollama_models_reach
+
+        layer_folder = Path(ollama_models_dir())
+        if _reach_walk and _reach_walk[0].is_alive():
+            raise TimeoutError("an earlier walk has not ended")
+        answer: list[Any] = []
+
+        def walk() -> None:
+            try:
+                answer.append(ollama_models_reach())
+            except Exception as exc:  # noqa: BLE001 - handed to the boot's thread, said there
+                answer.append(exc)
+
+        walker = threading.Thread(target=walk, name="ollama-models-reach", daemon=True)
+        _reach_walk[:] = [walker]
+        walker.start()
+        walker.join(_REACH_DEADLINE_S)
+        if not answer:
+            raise TimeoutError(f"the walk did not end within {_REACH_DEADLINE_S:g} s")
+        if isinstance(answer[0], Exception):
+            raise answer[0]
+        verdicts = answer[0]
+    except Exception as exc:  # noqa: BLE001 - said as not checked, never passed or failed for it
+        logger.warning("Ollama models folder check failed: %s", _named(exc))
+        return CheckItem(
+            name=name,
+            passed=True,
+            severity="info",
+            detail=f"Not checked: the engine's models folder could not be looked at ({_named(exc)})",
+        )
+
+    def named(state: str) -> list[str]:
+        return [f"{folder} ({'; '.join(why)})" if why else str(folder)
+                for folder, held, why in verdicts if held == state]
+
+    writable, unchecked, found_none = named("writable"), named("unchecked"), named("none_found")
+    point = ("Point OLLAMA_MODELS, in the platform's environment, at the folder the engine reads: the layer check "
+             "reads that folder too.")
+    if writable:
+        return CheckItem(
+            name=name,
+            passed=False,
+            severity="warning",
+            detail="This account can write the folder the Ollama engine keeps its models in: " + "; ".join(writable)
+                   + ". A layer rewritten there under its own name is seen only by the background check of the "
+                   "layers, which runs under this same account: a tripwire, not a guarantee.",
+            score_impact=-3,
+            tips=[
+                "Linux: run the engine under its own account (the official install's ollama service keeps its "
+                "models in /usr/share/ollama/.ollama/models); that account alone may write the folder and its "
+                "files: no group write for a group this account belongs to, no other write.",
+                point + " A folder of this account the engine does not read (an old ~/.ollama/models) is looked at "
+                "all the same: remove it.",
+                "Elsewhere (macOS, Windows, an engine started by hand): run the engine under another account. A "
+                "read-only mount is not counted: one this account controls can be made writable again.",
+                "SECURITY.md (model provenance) says what the layer check covers and what it does not.",
+            ],
+        )
+    not_judged = ("Not judged: mounts this account controls (a loop image, a FUSE mount, another mount namespace), "
+                  "other accounts, and an account that can become root")
+    if unchecked:
+        return CheckItem(
+            name=name,
+            passed=True,
+            severity="info",
+            detail="Not checked: " + "; ".join(unchecked)
+                   + (". No way for this account to write it found: " + "; ".join(found_none) if found_none else ""),
+        )
+    if found_none:
+        reads = any(folder == layer_folder for folder, state, _why in verdicts if state == "none_found")
+        return CheckItem(
+            name=name,
+            passed=True,
+            severity="info",
+            detail="No way for this account to write it found: " + "; ".join(found_none) + " -- not the folder, "
+                   "an entry on the way to it, or what it holds, by its rights, its groups or its capabilities. "
+                   + not_judged + ". "
+                   + ("The background check of the layers reads it." if reads else
+                      f"The background check of the layers reads {layer_folder}, not this folder.")
+                   + f" ({elsewhere}.)",
+            tips=[] if reads else [point],
+        )
+    return CheckItem(
+        name=name,
+        passed=True,
+        severity="info",
+        detail="Not checked: no folder of the engine's models at "
+               + ", ".join(str(folder) for folder, _held, _why in verdicts) + f" ({elsewhere})",
     )
 
 

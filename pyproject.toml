@@ -1880,4 +1880,6 @@ addopts = """
     --deselect=tests/test_provenance_gate_contracts.py::test_pv13_the_agent_allowlists_are_the_class_table_read_per_mode
     --deselect=tests/test_escalation_preflight_verifies_contracts.py::test_ev7_an_ungated_backend_escalates_whatever_its_manifest_and_it_is_not_read
     --deselect=tests/test_fortress_readiness_contracts.py::test_f21_the_gated_backend_set_is_measured_not_guessed
+    --deselect=tests/test_bulbe_never_boots_unchecked_contracts.py::test_ub5_a_check_that_raises_is_reported_not_checked_and_the_others_still_run
+    --deselect=tests/test_bulbe_never_boots_unchecked_contracts.py::test_ub7_a_check_that_returns_no_item_is_reported_not_checked
 """

@@ -79,6 +79,7 @@ import logging
 import os
 import re
 import stat
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -1550,6 +1551,295 @@ def guard_ollama(name: str, digest: Any, **kwargs: Any) -> ProvenanceDecision:
 def ollama_models_dir() -> Path:
     """Where the engine keeps its manifests and blobs: ``OLLAMA_MODELS``, or ``~/.ollama/models``."""
     return Path(os.environ.get("OLLAMA_MODELS") or Path.home() / ".ollama" / "models")
+
+
+# Who can change what the engine reads (257). The layer check above runs under the account that may write the engine's
+# folder: whatever rewrites a blob can fight it. Whether this account can write the folder is told here from the files'
+# rights (never their bytes). A DETECTOR, not a certificate: it names the ways in it finds, or says it found none among
+# those it knows -- never that the folder is out of reach. Mounts are not judged (a read-only mount is never counted as
+# protection), nor other accounts.
+OLLAMA_SYSTEM_MODELS_DIR = Path("/usr/share/ollama/.ollama/models")   # the Linux install's engine, under its own account
+REACH_BOUND = 8192      # the entries of one models folder looked at, at most
+_REACH_SAID = 3         # the ways in said, at most
+_REACH_HOPS = 40        # the links followed on the way to a folder, at most (the kernel's own bound)
+# The capabilities that let a process write any file whatever its rights (bits of the effective set).
+_CAPABILITIES = {0: "CAP_CHOWN", 1: "CAP_DAC_OVERRIDE", 3: "CAP_FOWNER", 21: "CAP_SYS_ADMIN"}
+_listxattr = getattr(os, "listxattr", None)
+
+
+class _Unseen(Exception):
+    """Something whose rights cannot be told: said not checked, never a verdict."""
+
+
+def _euid() -> int | None:
+    """This process's effective account; None where the platform has none to read."""
+    geteuid = getattr(os, "geteuid", None)
+    return geteuid() if geteuid is not None else None
+
+
+def _access(path: Path | str, mode: int) -> bool:
+    """Whether this process's effective account may ``mode`` the file at ``path``, as the kernel answers (its groups,
+    access lists)."""
+    if os.access in os.supports_effective_ids:
+        return os.access(path, mode, effective_ids=True)
+    return os.access(path, mode)
+
+
+def _read_only_mount(path: Path | str) -> bool:
+    """Whether the file at ``path`` lies on a mount that is read-only for this process; False when it cannot be told.
+    The kernel answers "no" to a write there whatever the rights: they are then read from the bits."""
+    try:
+        return bool(os.statvfs(path).f_flag & getattr(os, "ST_RDONLY", 0))
+    except (OSError, AttributeError):
+        return False
+
+
+def _capabilities(status: str | None = None) -> set[str] | None:
+    """The capabilities this process holds that let it write any file (``_CAPABILITIES``, read from the effective set
+    in ``status``, ``/proc/self/status`` by default); None when they cannot be read."""
+    if status is None:
+        try:
+            with open("/proc/self/status", encoding="ascii", errors="replace") as handle:
+                status = handle.read()
+        except OSError:
+            return None
+    for line in status.splitlines():
+        if line.startswith("CapEff:"):
+            try:
+                bits = int(line.split(":", 1)[1].strip(), 16)
+            except ValueError:
+                return None
+            return {name for bit, name in _CAPABILITIES.items() if bits >> bit & 1}
+    return None
+
+
+def _carried_groups() -> set[int]:
+    """The groups this process carries."""
+    return set(os.getgroups()) | {os.getegid()}
+
+
+def _missing_groups(euid: int) -> tuple[set[int], str | None]:
+    """The groups this account belongs to that this process does not carry (any process of the account may take one,
+    ``sg``), or why they cannot be read."""
+    try:
+        import pwd
+
+        entry = pwd.getpwuid(euid)
+        groups = set(os.getgrouplist(entry.pw_name, entry.pw_gid))
+    except (ImportError, KeyError, OSError, AttributeError) as exc:
+        return set(), f"this account's groups cannot be read ({type(exc).__name__})"
+    return groups - _carried_groups(), None
+
+
+def _has_acl(path: Path | str) -> bool:
+    """Whether the file at ``path`` carries an access list -- POSIX, NFSv4 or another: an extended attribute naming
+    one; False where the filesystem keeps none; raises ``_Unseen`` when it cannot be told."""
+    if _listxattr is None:
+        raise _Unseen(f"{path}: the access lists of this platform are not read here")
+    try:
+        names = _listxattr(path)
+    except OSError as exc:
+        if exc.errno in (errno.ENOTSUP, errno.EOPNOTSUPP):
+            return False
+        raise _Unseen(f"{path}: its access list cannot be read ({type(exc).__name__})") from exc
+    return any("acl" in str(name).lower() for name in names)
+
+
+def _sticky_keeps(folder: os.stat_result, entry: os.stat_result, euid: int) -> bool:
+    """Whether a sticky folder keeps its entry from this account: only the entry's owner, or the folder's, may move it."""
+    return bool(folder.st_mode & stat.S_ISVTX) and entry.st_uid != euid and folder.st_uid != euid
+
+
+def _resolution(folder: Path) -> tuple[Path, list[tuple[Path, Path, os.stat_result]]]:
+    """``folder`` as the kernel resolves it, one link at a time, and each ``(folder, entry, the entry's own stat)`` met
+    on the way -- every folder of the path and of every link's target, with the entry it holds there: whoever may
+    replace that entry swaps what lies under it. Raises OSError when an entry cannot be looked at, or the links do not
+    end."""
+    queue = list(folder.parts[1:])
+    here = Path(folder.anchor)
+    pairs: list[tuple[Path, Path, os.stat_result]] = []
+    hops = 0
+    while queue:
+        name = queue.pop(0)
+        if name in ("", "."):
+            continue
+        if name == "..":
+            here = here.parent
+            continue
+        entry = here / name
+        own = os.lstat(entry)
+        pairs.append((here, entry, own))
+        if stat.S_ISLNK(own.st_mode):
+            hops += 1
+            if hops > _REACH_HOPS:
+                raise OSError(errno.ELOOP, "the links do not end", str(entry))
+            target = Path(os.readlink(entry))
+            if target.is_absolute():
+                here = Path(target.anchor)
+                queue = list(target.parts[1:]) + queue
+            else:
+                queue = list(target.parts) + queue
+        else:
+            here = entry
+    return here, pairs
+
+
+def ollama_models_folders() -> list[Path]:
+    """The folders the engine may keep its models in: the one this process names (``ollama_models_dir``, the folder
+    the layer check reads, as named) and, on Linux, the system install's."""
+    folders = [Path(ollama_models_dir())]
+    if sys.platform.startswith("linux") and OLLAMA_SYSTEM_MODELS_DIR not in folders:
+        folders.append(OLLAMA_SYSTEM_MODELS_DIR)
+    return folders
+
+
+def ollama_folder_reach(folder: Path | str, *, bound: int = REACH_BOUND) -> tuple[str, list[str]]:
+    """``(state, why)`` of one models folder for this process's effective account -- a detector, not a certificate.
+
+    The folder is resolved as the kernel resolves it, one link at a time. ``writable``: the ways in it found, the first
+    few -- root, or a capability that writes any file; an entry on the way to the folder (a folder of its path, a link,
+    a folder of a link's target) that the folder holding it lets the account replace (a sticky folder only an entry of
+    its own); the folder, or a folder or file it holds, that the account may write (as the kernel answers this
+    process), owns (an owner can give itself the right), or may write through a group it belongs to that this process
+    does not carry; on a read-only mount, which is never counted as protection, the same rights read from the bits; a
+    link there that leads to a file it may write. ``none_found``: none of those, every one looked at -- mounts the
+    account controls (a loop image, a FUSE mount, another mount namespace) and other accounts are not judged.
+    ``absent``: no folder there. ``unchecked``, why -- never a verdict: the folder named relative or through ``..``,
+    something that cannot be looked at, a folder it cannot enter or list (what it holds was not looked at), a link
+    inside (where it leads is not walked), more than ``bound`` entries, an access list where the bits do not decide,
+    groups that cannot be read. Reads rights, never bytes; never opens a file in the folder; never raises for a file it
+    cannot look at."""
+    euid = _euid()
+    if euid is None:
+        return "unchecked", ["this platform's file rights are not read here"]
+    folder = Path(folder)
+    if not folder.is_absolute() or ".." in folder.parts:
+        return "unchecked", [f"{folder} is named relative or through '..': the engine and this check may resolve it "
+                             "differently"]
+    try:
+        resolved, pairs = _resolution(folder)
+        top = os.stat(resolved)
+    except (FileNotFoundError, NotADirectoryError):
+        return "absent", []
+    except OSError as exc:
+        return "unchecked", [f"{folder} cannot be looked at ({type(exc).__name__})"]
+    if not stat.S_ISDIR(top.st_mode):
+        return "unchecked", [f"{folder} is not a folder"]
+    if euid == 0:
+        return "writable", ["this process runs as root: it may write any folder"]
+    held = sorted(_capabilities() or ())
+    if held:
+        return "writable", [f"this process holds {', '.join(held)}: it may write any folder"]
+    missing, unread = _missing_groups(euid)
+    if unread is not None:
+        return "unchecked", [unread]
+    groups = _carried_groups() | missing
+    ways: list[str] = []
+    unseen: list[str] = []
+
+    def bits_write(st: os.stat_result) -> bool:
+        directory = stat.S_ISDIR(st.st_mode)
+        other = stat.S_IWOTH | (stat.S_IXOTH if directory else 0)
+        group = stat.S_IWGRP | (stat.S_IXGRP if directory else 0)
+        return (st.st_uid == euid or st.st_mode & other == other
+                or (st.st_gid in groups and st.st_mode & group == group))
+
+    def writes(path: Path, st: os.stat_result) -> str | None:
+        if _read_only_mount(path):
+            if bits_write(st):
+                return (f"{path} lies on a read-only mount, never counted as protection: its rights let this account "
+                        "write it")
+            if _has_acl(path):
+                raise _Unseen(f"{path} lies on a read-only mount and carries an access list, which is not read")
+            return None
+        if _access(path, os.W_OK | (os.X_OK if stat.S_ISDIR(st.st_mode) else 0)):
+            return f"{path} may be written by this account"
+        if st.st_uid == euid:
+            return f"{path} is this account's, which can give itself the right to write it"
+        if missing:
+            group = stat.S_IWGRP | (stat.S_IXGRP if stat.S_ISDIR(st.st_mode) else 0)
+            if st.st_gid in missing and st.st_mode & group == group:
+                return (f"{path} may be written by its group {st.st_gid}, which this account belongs to (this "
+                        "process does not carry it)")
+            if _has_acl(path):
+                raise _Unseen(f"{path} carries an access list, and this account belongs to groups this process does "
+                              "not carry")
+        try:
+            os.lstat(path)      # a "no" from the kernel that was an error, not a right
+        except OSError as exc:
+            raise _Unseen(f"{path} cannot be looked at ({type(exc).__name__})") from exc
+        return None
+
+    def swaps(parent: Path, child: Path, child_st: os.stat_result) -> str | None:
+        st = os.stat(parent)
+        why = writes(parent, st)
+        if why is None or _sticky_keeps(st, child_st, euid):
+            return None
+        return f"{why}: {child} in it can be moved away and another put in its place"
+
+    def said(why: str | None) -> bool:
+        if why is not None and why not in ways:
+            ways.append(why)
+        return len(ways) >= _REACH_SAID
+
+    # Every entry on the way to it: replacing one swaps the folder whole.
+    for parent, child, child_st in pairs:
+        try:
+            if said(swaps(parent, child, child_st)):
+                return "writable", ways
+        except _Unseen as exc:
+            unseen.append(str(exc))
+        except OSError as exc:
+            unseen.append(f"{parent}, on the way to it, cannot be looked at ({type(exc).__name__})")
+    # The folder and all it holds, links never followed into, files never opened.
+    todo: list[tuple[Path, os.stat_result]] = [(resolved, top)]
+    looked = 0
+    while todo:
+        here, st = todo.pop()
+        try:
+            if said(writes(here, st)):
+                return "writable", ways
+        except _Unseen as exc:
+            unseen.append(str(exc))
+        if not _access(here, os.X_OK):
+            unseen.append(f"{here} cannot be entered by this account: what it holds was not looked at")
+            continue
+        try:
+            with os.scandir(here) as entries:
+                for entry in entries:
+                    looked += 1
+                    if looked > bound:
+                        unseen.append(f"it holds more than {bound} entries: the first {bound} looked at")
+                        todo.clear()
+                        break
+                    path = Path(entry.path)
+                    try:
+                        own = entry.stat(follow_symlinks=False)
+                        if stat.S_ISLNK(own.st_mode):
+                            if said(writes(path, os.stat(path))):
+                                return "writable", ways
+                            unseen.append(f"{path} is a link (where it leads is not walked)")
+                        elif stat.S_ISDIR(own.st_mode):
+                            todo.append((path, own))
+                        elif said(writes(path, own)):
+                            return "writable", ways
+                    except _Unseen as exc:
+                        unseen.append(str(exc))
+                    except OSError as exc:
+                        unseen.append(f"{path} cannot be looked at ({type(exc).__name__})")
+        except OSError as exc:
+            unseen.append(f"{here} cannot be listed ({type(exc).__name__})")
+    if ways:
+        return "writable", ways
+    if unseen:
+        return "unchecked", list(dict.fromkeys(unseen))[:_REACH_SAID]
+    return "none_found", []
+
+
+def ollama_models_reach(folders: list[Path] | None = None) -> list[tuple[Path, str, list[str]]]:
+    """``(folder, state, why)`` for each folder the engine may keep its models in (``ollama_folder_reach``)."""
+    return [(Path(folder), *ollama_folder_reach(folder))
+            for folder in (folders if folders is not None else ollama_models_folders())]
 
 
 def read_ollama_manifest(name: str, models_dir: Path | str | None = None) -> tuple[str, list[str]] | None:

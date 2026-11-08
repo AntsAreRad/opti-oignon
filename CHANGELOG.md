@@ -11,6 +11,36 @@ package costs.
 
 ### Added
 
+- [SECURITY] The startup checklist looks for the ways this account
+  could write the folder the Ollama engine keeps its models in
+  (`ollama_models_writable`) -- a detector, not a certificate: it names
+  the ways it finds, or says it found none among those it knows, never
+  that the folder is out of reach. It looks at the folder this process
+  names (`OLLAMA_MODELS`, or `~/.ollama/models`) and, on Linux, the
+  system install's (`/usr/share/ollama/.ollama/models`), the path
+  resolved one link at a time: root, or a capability that writes any
+  file (CAP_CHOWN, CAP_DAC_OVERRIDE, CAP_FOWNER, CAP_SYS_ADMIN); an
+  entry on the way to it that this account can replace (in a sticky
+  folder, only an entry of its own); the folder, or a folder or file it
+  holds, that this account may write, owns (an owner can give itself the
+  right), or may write through a group it belongs to that the process
+  does not carry; a link there that leads to a file it may write. A
+  read-only mount is never counted as protection: there the rights are
+  read from the bits. A way found is a warning naming the folder and the
+  way out (the engine under its own account, `OLLAMA_MODELS` at the
+  folder it reads), advisory in every mode: it never blocks the boot.
+  None found is an info line naming what is not judged (mounts this
+  account controls, other accounts, an account that can become root)
+  and which folder the layer check reads. What cannot be told is
+  reported not checked, an info line that costs no score: a folder that
+  cannot be entered or listed, a link inside, more than 8192 entries, an
+  access list where the bits do not decide, a folder named relative or
+  through `..`, a walk that does not end within ten seconds (it runs on
+  a thread of its own, one per process). Only the files' rights are
+  read, never their bytes; no file in the folder is opened. Contracts
+  OF1-OF7 (OF6 and OF7 supersede UB5 and UB7, whose roster lacked the
+  tenth check).
+
 - [SECURITY] The layers of the pinned Ollama models are hashed without
   anyone asking: in the background at start and every day after, on a
   thread of low priority, in the API, the core daemon and the CLI's chat
