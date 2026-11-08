@@ -1892,4 +1892,5 @@ addopts = """
     --deselect=tests/test_mycelium_vector_contracts.py::test_mv14_the_move_from_schema_1_is_one_transaction
     --deselect=tests/test_mycelium_vector_contracts.py::test_mv19_two_openers_of_a_schema_1_store_move_it_once
     --deselect=tests/test_mycelium_place_contracts.py::test_mp3_reading_writes_nothing
+    --deselect=tests/test_project_mycelium_contracts.py::test_pm1_the_files_a_project_holds
 """

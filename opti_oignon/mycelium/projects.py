@@ -124,8 +124,9 @@ def index(project_id, paths, vectors=True):
 
 def vectors(project_id, holding=contextlib.nullcontext):
     """The vector pass of the project's existing store (none is made), as the owner's route runs it; what was not
-    done, named. Vectors held are left to a later pass. The store is opened under ``holding`` (the projects' write
-    lock), so a deletion never meets the opening and makes it again; it is embedded outside it."""
+    done, named. Vectors held are left to a later pass. The store is opened under ``holding`` (the project's own lock,
+    ``projects.holding_project``), so a deletion never meets the opening and makes it again; it is embedded outside
+    it."""
     from . import vectors as encoder
     from .index import Indexer
 
@@ -245,29 +246,39 @@ def forget(project_id):
     return []
 
 
-def sweep(live):
+def sweep(live, claim=None):
     """What earlier deletions left in the projects' stores, removed: each project's store whose project ``live``
     does not hold (``project id -> the paths its rows store``), and from a live project's store the files its rows no
     longer name, and a rewrite a store still owes run; what stayed, named. A corpus that is not a project's
-    (``project_of``) is never touched."""
+    (``project_of``) is never touched. ``claim(project id)``, when given, takes that project's own lock without
+    waiting, as a context manager, or gives None when another thread holds it: that project is left to its pass
+    running now, which drops what its rows do not name (265) -- never read nor written beside it."""
     left = []
     for corpus in place.corpora():
         project_id = project_of(corpus)
         if project_id is None:
             continue
-        if project_id not in live:
-            left += forget(project_id)
+        held_lock = contextlib.nullcontext() if claim is None else claim(project_id)
+        if held_lock is None:
             continue
-        owed = []
-        held = _held(corpus, owed)
-        if held is None:
-            left += _left(project_id, "not read, the files it holds are unknown")
-            continue
-        named = {Path(path).name for path in live[project_id]}
-        if held - named:
-            folder, _names = _folder_and_names(live[project_id])
-            left += (forget(project_id) if folder is None or not held & named
-                     else index(project_id, [folder / name for name in sorted(held & named)], vectors=False))
-        elif any(owed):
-            left += _rewrite(project_id)
+        with held_lock:
+            left += _swept(corpus, project_id, live)
     return left
+
+
+def _swept(corpus, project_id, live):
+    """One project's store swept (see ``sweep``)."""
+    if project_id not in live:
+        return forget(project_id)
+    owed = []
+    held = _held(corpus, owed)
+    if held is None:
+        return _left(project_id, "not read, the files it holds are unknown")
+    named = {Path(path).name for path in live[project_id]}
+    if held - named:
+        folder, _names = _folder_and_names(live[project_id])
+        return (forget(project_id) if folder is None or not held & named
+                else index(project_id, [folder / name for name in sorted(held & named)], vectors=False))
+    if any(owed):
+        return _rewrite(project_id)
+    return []

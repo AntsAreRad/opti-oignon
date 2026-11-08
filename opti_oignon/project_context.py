@@ -60,7 +60,7 @@ except ImportError:
 
 # ProjectStore for updating file records
 try:
-    from opti_oignon.projects import ProjectFile, holding, project_store
+    from opti_oignon.projects import ProjectFile, claimed, holding, holding_project, project_store
     PROJECTS_AVAILABLE = True
 except ImportError:
     PROJECTS_AVAILABLE = False
@@ -69,6 +69,14 @@ except ImportError:
 
     def holding():
         """No project store, no lock to hold: nothing lands without one."""
+        return contextlib.nullcontext()
+
+    def holding_project(project_id):
+        """No project store, no project's lock to hold."""
+        return contextlib.nullcontext()
+
+    def claimed(project_id):
+        """No project store, no project's lock to take."""
         return contextlib.nullcontext()
 
 # Config
@@ -795,18 +803,23 @@ class ProjectIndexer:
 
     def index_mycelium(self, project_id: str, vectors: bool = True) -> list[str]:
         """The files the project's rows name, passed into its Mycelium store (``mycelium.projects.index``): the rows
-        read and the pass run under the projects' write lock, so a deletion meanwhile is never undone (a project's write
-        or deletion waits for the pass); then the store's vector pass unless ``vectors`` is False, the store opened
-        under the lock and embedded outside it. What was not done, named -- never raised."""
+        read and the pass run under the project's own lock (``projects.holding_project``), so a deletion of its files
+        meanwhile is never undone (that project's deletions wait for the pass) while another project's writes and
+        deletions go on, the sweep a deletion runs leaving this project to its pass (265); then the store's vector pass
+        unless ``vectors`` is False, the store opened under that lock and embedded outside it. What was not done,
+        named -- never raised."""
         if self._store is None:
             return []
 
+        def own() -> Any:
+            return holding_project(project_id)
+
         def passed(stores: Any) -> list[str]:
-            with holding():
+            with own():
                 paths = [pf.file_path for pf in self._store.list_files(project_id)]
                 left = stores.index(project_id, paths, vectors=False)
             if vectors and paths:
-                left += stores.vectors(project_id, holding)
+                left += stores.vectors(project_id, own)
             return left
 
         return _in_mycelium(project_id, passed)
@@ -903,7 +916,7 @@ class ProjectIndexer:
         if not VECTOR_STORE_AVAILABLE:
             return False
 
-        with holding():
+        with holding_project(project_id), holding():   # the project's own lock first, as a deletion takes them
             left = self.forget_project_index(project_id, self._vectors_arg)
         if not left:
             logger.info("Deleted the collection of project %s", project_id)
@@ -971,7 +984,8 @@ class ProjectIndexer:
         hold, and in each project's collection the chunks drawn from no file ``live`` gives it (``project -> paths``);
         what could not be removed, named; the projects' Mycelium stores are swept the same way
         (``mycelium.projects.sweep``). A store that is not there holds none, and is not created."""
-        mine = _in_mycelium("(every project)", lambda stores: stores.sweep(live))
+        # Each project's store swept under its own lock, taken without waiting; one whose pass runs now is left to it.
+        mine = _in_mycelium("(every project)", lambda stores: stores.sweep(live, claimed))
         if not VECTOR_STORE_AVAILABLE:
             return mine
         client = _vector_client(vectors_db)

@@ -2636,6 +2636,20 @@ package costs.
 
 ### Changed
 
+- A project's Mycelium pass no longer holds every project's writes
+  (BACKLOG 253 b): it held the lock of all the projects' writes for its
+  whole length (ten files of 1 MB: about 9 s), so adding or deleting a
+  file in another project waited for it. Each project now has its own
+  lock: its pass holds that lock alone; a deletion of its files, or of
+  the project, takes it first, then the common lock, never the other way
+  round, so it still waits for the pass and is never undone by it.
+  Another project's writes and deletions go on: the sweep a deletion
+  runs takes each project's lock without waiting and leaves a project
+  whose pass runs to that pass. Contracts
+  PK1-PK6 (PK5 supersedes PM1 of
+  tests/test_project_mycelium_contracts.py, which held the pass under
+  the common lock).
+
 - A chat turn's search stops at its deadline (BACKLOG 254 b): past it
   the lexical stages answered, but the whole search ran on to its end
   on its own thread, its bridge's and its judge's questions still sent

@@ -56,6 +56,11 @@ _FILE_TYPE_MAP: dict[str, str] = {}
 # Every write of the store, and the indexer's landing of a file's chunks, hold this lock: a deletion never interleaves
 # with a write that would bring back what it removes -- a file added, a file's chunks landed, as it goes.
 _WRITES = threading.RLock()
+# Each project's own lock (265): its Mycelium pass holds it alone, so no other project's write waits for that pass;
+# a deletion of a project's files, or of the project, holds it FIRST, then ``_WRITES`` -- never the other way round, so
+# no two writers wait on each other -- and so is never undone by the pass.
+_PROJECT_LOCKS: dict = {}
+_PROJECT_LOCKS_GUARD = threading.Lock()
 
 # An id as ``Project``, ``ProjectFile`` and ``ProjectOutput`` make it: the sweep removes only what is named so.
 _ID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{3}")
@@ -65,11 +70,46 @@ _STORE_LABEL = "projects store (single-user)"
 _FILES_LABEL = "project files and saved outputs"
 
 
+def project_lock(project_id: str) -> Any:
+    """The lock of ``project_id`` (made at its first use, kept for the process)."""
+    with _PROJECT_LOCKS_GUARD:
+        lock = _PROJECT_LOCKS.get(project_id)
+        if lock is None:
+            lock = _PROJECT_LOCKS[project_id] = threading.RLock()
+        return lock
+
+
 @contextmanager
 def holding():
     """Hold the store's write lock (``_WRITES``)."""
     with _WRITES:
         yield
+
+
+@contextmanager
+def holding_project(project_id: str):
+    """Hold ``project_id``'s own lock alone (its Mycelium pass): that project's deletions wait for it, no other
+    project's writes do. Never taken while ``_WRITES`` is held, but by ``claimed`` (which never waits)."""
+    with project_lock(project_id):
+        yield
+
+
+def claimed(project_id: str) -> Any:
+    """``project_id``'s own lock taken without waiting, as a context manager -- the sweep's, under ``_WRITES``, so it
+    never waits on a pass while every project's writes wait on it --, or None when another thread holds it (a pass
+    of that project runs now: the sweep leaves it to that pass)."""
+    lock = project_lock(project_id)
+    if not lock.acquire(blocking=False):
+        return None
+
+    @contextmanager
+    def held():
+        try:
+            yield
+        finally:
+            lock.release()
+
+    return held()
 
 
 def _plain(name: str) -> bool:
@@ -843,7 +883,9 @@ class ProjectStore:
         sweep (``sweep_orphans``) removes what it left. With ``sweep``, what earlier deletions left goes too; without
         ``empty``, the logs are left to the caller (``empty_logs``), as the wipe does once at its end.
         """
-        with _WRITES:
+        if self.get_project(project_id) is None:
+            return False, []        # no project's lock made for an id that is none
+        with project_lock(project_id), _WRITES:      # the project's own lock first: its Mycelium pass ends before
             if self.get_project(project_id) is None:
                 return False, []
             left = self._forget_index(project_id)
@@ -938,7 +980,8 @@ class ProjectStore:
         file_id = str(uuid.uuid4())[:12]
 
         # The bytes and their row land under the write lock, the project read again there: a deletion that came
-        # since leaves no file on disk that no row names.
+        # since leaves no file on disk that no row names. (No project's own lock: a file added during the project's
+        # Mycelium pass is passed at the next one, nothing undone.)
         with _WRITES:
             if self.get_project(project_id) is None:
                 raise ValueError(f"Project not found: {project_id}")
@@ -1052,7 +1095,10 @@ class ProjectStore:
         again, then its bytes overwritten and removed, its row (its summary and key terms), and both logs emptied.
         Whether it existed, and what could not be removed, named; with ``sweep``, what earlier deletions left goes
         too (``sweep_orphans``)."""
-        with _WRITES:
+        known = self.get_file(file_id)
+        if known is None:
+            return False, []
+        with project_lock(known.project_id), _WRITES:   # the project's own lock first: its Mycelium pass ends before
             pf = self.get_file(file_id)
             if pf is None:
                 return False, []
