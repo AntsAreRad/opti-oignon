@@ -236,7 +236,16 @@ by the encryption command with the others. They keep no source's text,
 but what they keep is drawn from it: each source's root, each file's
 path (a document's id) and first sentence, a heading's path, the names a
 part defines and names, the full-text index's tokens with their
-positions, and each part's vector, which gives much of its text back. A
+positions, each part's vector, which gives much of its text back, and,
+once `opti-oignon mycelium cards` has run, each file's card: two
+sentences a local model wrote of the file, from its first lines and the
+names it defines, each identifier, number, path and address they give
+checked against the file (a sentence that fails is dropped; their prose
+is not checked) -- of the folders of the public and private sources
+only, never a secret one: a source marked secret loses its cards at
+once, a rewrite owed. A card goes with its file; the pass that changes a
+file removes its card, so its words leave with that pass's rewrite; one
+replaced owes the store a rewrite as a changed file does. A
 store is read through a read-only connection that writes nothing (beside
 a store another program left in WAL, SQLite makes its `-wal` and `-shm`
 on reading), and written by one pass at a time, in the rollback journal.
@@ -258,7 +267,10 @@ opened again when the security mode changed; in Bulbe each call is
 asked. Its map, `mycelium_map`, reads the same sources the same way,
 from the store's index alone (never a file): a folder's sub-folders and
 files, a file's parts and the files of its own source that name what it
-defines. Every query of the map is bound to the run's source: another
+defines, and a file's card when one was written of the file as it is
+indexed, said as a model's, never as something to cite; a card reaches
+the agent as the tool's answer does, inside the untrusted wrapper.
+Every query of the map is bound to the run's source: another
 source of the same store, a secret one included, changes nothing of what
 it says, and a source marked secret since the run began is refused at
 the next call. The account wipe, for a single-user install's one user,

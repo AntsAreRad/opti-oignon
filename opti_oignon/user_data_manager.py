@@ -228,7 +228,7 @@ def _get_code_outputs() -> Any:
 
 
 def _get_mycelium_stores() -> Any:
-    """The Mycelium's stores: each corpus's first sentences, headings, names, tokens and vectors."""
+    """The Mycelium's stores: each corpus's first sentences, headings, names, tokens, vectors and file cards."""
     try:
         from opti_oignon.mycelium.place import remove_every_store
         return remove_every_store
@@ -404,7 +404,8 @@ WIPE_NOT_COVERED = (
     "legacy vector folders (the documents' chunks in plain text until `db_encryption migrate`)",
     "coding history store",
     "code execution outputs (the images and PDFs a run's code wrote, by conversation, not user-scoped)",
-    "the Mycelium's indexes (each corpus's first sentences, headings, names, tokens and vectors; not user-scoped)",
+    "the Mycelium's indexes (each corpus's first sentences, headings, names, tokens, vectors and file cards; "
+    "not user-scoped)",
     "sandbox exports (the files copied out of a sandbox)",
     "skills (written by the user or accepted from the agent)",
     "skills a paired device offered (waiting for this device's approval)",
@@ -443,7 +444,8 @@ WIPE_SINGLE_USER = (
     "the command line's history (questions and answers, not user-scoped)",
     "the knowledge base's search log (the queries, not user-scoped)",
     "code execution outputs (the images and PDFs a run's code wrote, by conversation, not user-scoped)",
-    "the Mycelium's indexes (each corpus's first sentences, headings, names, tokens and vectors; not user-scoped)",
+    "the Mycelium's indexes (each corpus's first sentences, headings, names, tokens, vectors and file cards; "
+    "not user-scoped)",
 )
 
 # Stores the wipe removes only when the request names them, by the word it uses: in single-user mode, for the

@@ -5,11 +5,13 @@ it reads, the tests that name what it defines, the docs that name it, the files 
 any of it: it is never wrong about what it says, and it is as fresh as the last indexing pass.
 
   folder(store, source, path)     a folder: its sub-folders and files, biggest first
-  file_card(store, source, path)  a file: its parts and its links to the rest of the corpus, or None
+  file_card(store, source, path)  a file: its parts, its links to the rest of the corpus and its card, or None
   branch(store, source, path)     the node at ``path`` in a few lines, bounded, for a model or a person
 
-The agent walks it with ``mycelium_map`` (``tool.py``) instead of loading everything (P20, point 5). Reads the store
-only; writes nothing; every query is bound by parameters, never by text built from a path.
+A file's card (stage 2, ``cards.py``) is the one thing a model wrote: two sentences, each name, number and path they
+give checked against the file when the card was written (their prose is not); said as a model's and never as
+something to cite; shown only while it holds the file's sha256 (the index pass that changes a file removes it). The agent walks it with ``mycelium_map`` (``tool.py``) instead of loading everything (P20,
+point 5). Reads the store only; writes nothing; every query is bound by parameters, never by text built from a path.
 """
 from collections import Counter, defaultdict
 
@@ -18,6 +20,7 @@ MAX_PARTS = 30          # parts said of one file
 MAX_LINKS = 8           # files said for each kind of link
 MAX_SETTINGS = 15       # settings said of one file
 MAX_SENTENCE = 110      # characters of a file's first sentence in a folder's listing
+MAX_MODEL = 80          # characters of a card's model name
 
 
 class NoSource(KeyError):
@@ -53,6 +56,21 @@ def _first_sentence(store, file_id):
     head = store.db.execute("SELECT symbol FROM part WHERE file = ? AND kind = 'section' ORDER BY first LIMIT 1",
                             (file_id,)).fetchone()
     return head[0] if head else ""
+
+
+def _card(store, file_id):
+    """The file's card, ``(text, model)``, or None: no card, one left empty, one written of another text of the file,
+    or a store of schema 2 (no card table)."""
+    try:
+        row = store.db.execute("SELECT c.text, c.model FROM card c JOIN file f ON f.id = c.file "
+                               "WHERE c.file = ? AND c.sha256 = f.sha256", (file_id,)).fetchone()
+    except Exception as exc:  # noqa: BLE001 - the drivers' error classes differ; the message says which
+        if "no such table" in str(exc):
+            return None
+        raise
+    if row is None or not row[0]:
+        return None
+    return row[0], row[1]
 
 
 def _escaped(prefix):
@@ -113,7 +131,7 @@ def file_card(store, source, path):
     tests = [(p, n) for p, n in users if p.startswith("tests/") or "/tests/" in p]
     docs = [(p, n) for p, n in users if p.endswith(".md")]
     callers = [(p, n) for p, n in users if (p, n) not in tests and (p, n) not in docs]
-    return {"path": path, "sentence": _first_sentence(store, file_id),
+    return {"path": path, "sentence": _first_sentence(store, file_id), "card": _card(store, file_id),
             "parts": [(k, s, a, b) for _i, k, s, a, b in parts], "defines": defined, "reads_settings": settings,
             "tested_by": tests, "documented_by": docs, "used_by": callers}
 
@@ -125,6 +143,10 @@ def branch(store, source, path=""):
     card = file_card(store, source, where) if where else None
     if card is not None:
         out = [f"{card['path']}: {card['sentence']}" if card["sentence"] else card["path"]]
+        if card["card"]:
+            text, model = card["card"]
+            out.append(f"card (a model's, {model[:MAX_MODEL]}, its names checked against the file; not a citation): "
+                       f"{text}")
         out.append(f"parts ({len(card['parts'])}):")
         for kind, symbol, first, last in card["parts"][:MAX_PARTS]:
             out.append(f"  {first}-{last} {kind.split('~')[0]} {symbol}")

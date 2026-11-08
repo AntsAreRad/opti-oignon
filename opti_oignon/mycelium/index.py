@@ -356,6 +356,8 @@ class Indexer:
             else:
                 file_id = old[0]
                 store.drop_parts(file_id)
+                # Its card told of the old text: it goes with it, the pass owing the rewrite a change owes (264).
+                db.execute("DELETE FROM card WHERE file = ?", (file_id,))
                 db.execute("UPDATE file SET size = ?, mtime_ns = ?, sha256 = ?, generation = ? WHERE id = ?",
                            (st.st_size, st.st_mtime_ns, sha, generation, file_id))
                 counts["changed"] += 1

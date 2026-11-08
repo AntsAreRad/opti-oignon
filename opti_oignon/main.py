@@ -688,6 +688,7 @@ Examples:
   opti-oignon rag search "Shannon diversity"  Search indexed documents
   opti-oignon mycelium index oo ./opti-oignon  Index a repository into the corpus oo
   opti-oignon mycelium status                 Say what the Mycelium holds
+  opti-oignon mycelium cards oo               Write the map's file cards of the corpus oo
   opti-oignon config show                     Show current configuration
   opti-oignon config set code.primary qwen3-coder:30b
   opti-oignon ask "How to calculate Shannon in R?"
@@ -918,6 +919,13 @@ Documentation: https://github.com/AntsAreRad/opti-oignon
     )
     mycelium_forget.add_argument("corpus", help="The corpus")
     mycelium_forget.add_argument("source", help="The source to forget")
+    mycelium_cards = mycelium_subparsers.add_parser(
+        "cards",
+        help="Write the map's file cards: a model's two sentences per file, checked against the file",
+    )
+    mycelium_cards.add_argument("corpus", help="The corpus")
+    mycelium_cards.add_argument("--source", help="Only this source (its public and private sources otherwise)")
+    mycelium_cards.add_argument("--limit", type=int, help="At most this many cards (cards.per_pass otherwise)")
     mycelium_status = mycelium_subparsers.add_parser(
         "status",
         help="Say what each corpus holds (nothing written)"

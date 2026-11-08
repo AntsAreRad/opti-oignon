@@ -475,6 +475,11 @@ STORES = {
         content=("documents",),
         reason="the indexer, which writes the Mycelium's store from a corpus's files or documents",
     ),
+    "mycelium_cards": _store(
+        "opti_oignon/mycelium/cards.py", functions=("write",), writes=("write",), backs=("mycelium",),
+        reason="the map's file cards: two sentences a local model wrote of each file of a corpus, checked against "
+               "the file, which the map lays before the agent's model",
+    ),
     "flesh": _store(
         "opti_oignon/memory/receipts.py", classes=("Flesh",),
         writes=("append", "take_back", "evict_oldest", "evict_span", "evict_until_fits"),
@@ -760,6 +765,9 @@ EXEMPT = {
     ("opti_oignon/mycelium/route.py", "mycelium_index"): (
         "gesture", "it indexes the folder the owner names into a corpus, then its vectors, or forgets the source they "
                    "name, on the command line (main.py, cmd_mycelium)"),
+    ("opti_oignon/mycelium/route.py", "mycelium_cards"): (
+        "gesture", "it writes the map's file cards of the corpus the owner names, on the command line (main.py, "
+                   "cmd_mycelium)"),
     ("opti_oignon/mycelium/projects.py", "mycelium"): (
         "quiet", "it rewrites a project's store after a pass removed or changed a file, and reads whether a rewrite "
                  "is owed: it adds nothing"),
@@ -827,6 +835,8 @@ ARGUED_SITES = {
         ("_rebuild", "append"),),
     ("opti_oignon/mycelium/route.py", "mycelium_index"): (
         ("index", "index"), ("_vectors", "embed"), ("forget", "forget"),),
+    ("opti_oignon/mycelium/route.py", "mycelium_cards"): (
+        ("cards", "write"),),
     ("opti_oignon/mycelium/projects.py", "mycelium_index"): (
         ("index", "index"), ("_vectors", "embed"),),
     ("opti_oignon/project_context.py", "projects"): (

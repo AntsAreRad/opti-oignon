@@ -11,6 +11,34 @@ package costs.
 
 ### Added
 
+- The Mycelium's map gets its file cards (P20, phase 2, stage 2):
+  `opti-oignon mycelium cards CORPUS [--source S] [--limit N]` asks a
+  local model (`mycelium.yaml`, section `cards`: the bench's
+  `qwen3.5:4b` by default, through the registry and the governor, as
+  background work) for two sentences per file -- what it does, when the
+  rest uses it -- and keeps a sentence only once each identifier and
+  number it gives is a whole token of the file, by the citation gate's
+  own rule (a dotted name and a decimal read whole), and each path or
+  address it gives is in the file; a sentence that fails is dropped and
+  counted. Their prose is not checked: the map says a card is a model's.
+  The folders of the public and private sources only, never a secret
+  one: the sensitivity is read again before each file and when its card
+  is written, and a source marked secret loses its cards at once. A
+  file changed since its index is passed over; the index pass that
+  changes a file removes its card, so the old text's words leave with
+  the rewrite that pass owes; the first refusal of the model or of the
+  governor ends the pass, what it wrote kept. `mycelium_map` shows a
+  file's card as a model's, its names checked, never something to cite.
+  The cards are not searched (on the bench they lowered the search). The
+  store moves to schema 3 (a `card` table, going with its file; a
+  replaced card owes a rewrite, which the command does); a store of
+  schema 2 is still read as it is and moved when next written. The write
+  census knows the cards' module as a writer of the Mycelium's store and
+  the command as the owner's gesture. Contracts CA1-CA9 (CA6, CA7, CA9
+  and CA8 supersede MV8, MV14 and MV19 of
+  tests/test_mycelium_vector_contracts.py and MP3 of
+  tests/test_mycelium_place_contracts.py, which held the schema at 2).
+
 - A project is served by its Mycelium store and the knowledge base
   together (BACKLOG 254 c): one file its store does not hold (a PDF, a
   file not UTF-8 or larger than the index reads, one not indexed yet)

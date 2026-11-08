@@ -101,6 +101,8 @@ def run(args):
         return forget(args.corpus, args.source)
     if action == "status":
         return status(args.corpus)
+    if action == "cards":
+        return cards(args.corpus, args.source, args.limit)
     raise ValueError(f"no Mycelium action {action!r}")
 
 
@@ -159,6 +161,59 @@ def index(corpus, folder, source=None, sensitivity=None, vectors=True):
                 code = 1
         if vectors:
             code = max(code, _vectors(indexer, settings))
+        return code
+    finally:
+        store.close()
+
+
+def cards(corpus, source=None, limit=None):
+    """A pass of the map's file cards over ``corpus``'s store (``cards.py``): a model writes them, the store checks
+    them; its exit code."""
+    from . import cards as card_pass
+
+    try:
+        _owners(corpus)
+        if source is not None:
+            source = _source_name(source)
+        settings = card_pass.load_settings()
+    except StoreError as exc:
+        return _refused(str(exc))
+    except ValueError as exc:
+        return _refused(f"the cards' settings are refused, nothing written: {exc}")
+    try:
+        store = place.open_to_write(corpus, make=False)
+    except StoreError as exc:
+        return _refused(str(exc))
+    except Exception as exc:  # noqa: BLE001 - a key, a sealed file, a full disk: said by name, nothing written
+        return _refused(f"the store of {corpus!r} cannot be opened to be written: {exc}")
+    try:
+        try:
+            counts = card_pass.write(store, settings, source=source, limit=limit)
+        except StoreError as exc:
+            return _refused(str(exc))
+        except Exception as exc:  # noqa: BLE001 - a full disk, a store held past the wait: said by name
+            return _refused(f"the cards' pass over {corpus!r} failed, the cards it wrote before kept: "
+                            f"{type(exc).__name__}: {exc}")
+        _say(f"[OK] mycelium: {_counted(counts['written'], 'card')} written into {corpus} by {settings.model} "
+             f"({counts['replaced']} replaced), {counts['empty']} left empty, "
+             f"{_counted(counts['dropped'], 'sentence')} dropped by the check, {counts['passed']} passed over")
+        code = 0
+        if counts["stopped"]:
+            _say(f"[!] the pass stopped: {counts['stopped']}; the next one goes on")
+            code = 1
+        try:
+            owed = store.meta("rewrite")
+        except Exception as exc:  # noqa: BLE001 - another connection holding the store past the wait: said
+            _say(f"[!] whether the store owes a rewrite could not be read ({type(exc).__name__}): the next pass of the "
+                 f"route reads it again")
+            owed, code = None, 1
+        if owed:
+            if store.rewrite():
+                _say("[OK] the store was merged and rewritten: the replaced cards left its pages")
+            else:
+                _say("[!] the store was not rewritten: the replaced cards stay in its pages until a pass of the route "
+                     "rewrites it")
+                code = 1
         return code
     finally:
         store.close()

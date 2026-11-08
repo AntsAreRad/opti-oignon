@@ -8,10 +8,13 @@ text it is embedded as), ``vector`` (by the text embedded and the encoder: parts
 float16 unit vectors), ``fts`` (FTS5 without content: the index keeps tokens, never the text, which stays in the
 source and is read again by path and lines), ``symbol`` (what a part defines), ``ref`` (what a part names: the
 links between parts are ``ref`` joined to ``symbol``, so a removed part leaves no link behind), ``episode`` (each
-indexing pass, and what it did).
+indexing pass, and what it did), ``card`` (schema 3: a file's card for the map, two sentences a model wrote of it and
+the store checked -- ``cards.py`` --, with the file's sha256 it was written from; it goes with its file, and with its
+text when the file changes).
 
 What the store keeps of a source, then, is not its text but: each file's first sentence (its module docstring's, or
-its heading's), a Markdown section's heading path, the names a part defines and names, and the index's tokens with
+its heading's), a file's card when one was written (a model's two sentences on what the file does, each name they
+give found in the file), a Markdown section's heading path, the names a part defines and names, and the index's tokens with
 their positions -- from which a part's stemmed words could be read again in order --, and each part's vector, from
 which a model built for it can guess much of the text it was embedded from. The index keeps no text, but a
 deleted row is only marked until its segment is merged, and freed pages are zeroed (``PRAGMA secure_delete``): after
@@ -25,7 +28,8 @@ end; a recut, which drops no word the store does not hold again, owes none.
 
 A store written by a newer schema is refused by name, and so is a database of another kind (tables, no store's meta
 table: never stamped); a store cut by another version of the cutter is cut again at the next pass, and so is a store
-of schema 1 (its parts had no embedded text yet). The active encoder's card is kept in ``meta``: the dense stage
+of schema 1 (its parts had no embedded text yet). A store of schema 2 is read as it is (it holds no card) and moved to
+3 when opened to write, the ``card`` table added and nothing else touched. The active encoder's card is kept in ``meta``: the dense stage
 reads its vectors, and only its, until another encoder covers every part. An episode holds counts, the meta table
 its own keys: neither takes a source's words. One pass at a time writes: in this process under ``lock``, and across
 connections and processes by the write lock each pass takes at its start (``begin``), before it reads what it will
@@ -46,7 +50,17 @@ checkpoint_before_apply = True
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+# The oldest schema this code reads as it is: a store of 2 holds no card, and is read so (moved to 3 when written).
+READ_FROM = 2
+# A file's card for the map (``cards.py``): two sentences a model wrote, each name they give checked against the file,
+# the sentences that failed counted (``dropped``); ``sha256`` the file's when the card was written (the map shows a
+# card only while it is the file's: the index pass that changes a file removes its card); it goes with its file.
+CARD_TABLE = """
+CREATE TABLE IF NOT EXISTS card(
+  file INTEGER PRIMARY KEY REFERENCES file(id) ON DELETE CASCADE, sha256 TEXT NOT NULL, model TEXT NOT NULL,
+  text TEXT NOT NULL, dropped INTEGER NOT NULL, at TEXT NOT NULL);
+"""
 TOKENIZE = "porter unicode61 remove_diacritics 2 tokenchars '_'"
 SENSITIVITIES = ("public", "private", "secret")
 
@@ -83,7 +97,7 @@ CREATE INDEX IF NOT EXISTS ref_name ON ref(name);
 CREATE INDEX IF NOT EXISTS ref_part ON ref(part);
 CREATE TABLE IF NOT EXISTS episode(
   id INTEGER PRIMARY KEY, at TEXT NOT NULL, action TEXT NOT NULL, source INTEGER, detail TEXT NOT NULL);
-"""
+{CARD_TABLE}"""
 
 
 class StoreError(RuntimeError):
@@ -104,7 +118,7 @@ def _safe_connect(path, read_only=False):
 
 # The tables a store makes, the full-text index's own included: a database holding any other is not a store.
 OWN_TABLES = {"meta", "source", "file", "part", "symbol", "ref", "episode", "vector", "fts", "fts_config",
-              "fts_data", "fts_docsize", "fts_idx"}
+              "fts_data", "fts_docsize", "fts_idx", "card"}
 # The meta table's keys: the schema, the vectors' count of changes, the active encoder's card and a rewrite owed, and
 # per source the cutter that cut it, the header its texts are embedded with and when its last pass began.
 META_KEY = re.compile(r"(schema|vectors|encoder|rewrite|cutter:\d+|header:\d+|pass:\d+)\Z")
@@ -178,8 +192,16 @@ class Store:
                 self.db.execute("DELETE FROM meta WHERE key LIKE 'cutter:%'")
                 self.db.execute("UPDATE meta SET value = '2' WHERE key = 'schema'")
             self.db.commit()
-        if held == SCHEMA_VERSION:
-            return      # a store at this schema holds its tables and its stamp: nothing to write, no lock to take
+        if held in (1, 2):
+            # Schema 2 had no cards: the table comes, nothing else is touched; in one transaction with the new stamp,
+            # the schema read again inside it, as from 1.
+            self.db.execute("BEGIN IMMEDIATE")
+            if self._version() == 2:
+                self.db.execute(CARD_TABLE.strip())
+                self.db.execute("UPDATE meta SET value = '3' WHERE key = 'schema'")
+            self.db.commit()
+        if held in (2, SCHEMA_VERSION):
+            return      # a store at this schema (or moved from 2) holds its tables and its stamp: nothing more to write
         self.db.executescript(SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', ?)", (str(SCHEMA_VERSION),))
         self.db.commit()
@@ -215,7 +237,7 @@ class Store:
             raise StoreError(f"{self.path} has no schema stamp: not a Mycelium store, left untouched")
         if held > SCHEMA_VERSION:
             raise StoreError(f"the store is at schema {held}, this code reads {SCHEMA_VERSION} and before")
-        if held < SCHEMA_VERSION:
+        if held < READ_FROM:
             raise StoreError(f"the store is at schema {held}: it is read once a pass has written it again")
         tables = {r[0] for r in self.db.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
         if tables - OWN_TABLES or "source" not in tables:
@@ -300,7 +322,8 @@ class Store:
     def source(self, name, root, kind="folder", sensitivity=None, commit=True):
         """The id of the source ``name``, made if new (private unless a sensitivity is named); a known name keeps its
         root and its kind, and its sensitivity unless another is named -- taken then at once: its generation moves,
-        so no reader keeps what it allowed before. A pass asks it inside its own transaction (``commit`` False)."""
+        so no reader keeps what it allowed before; marked secret, it loses its file cards at once, a rewrite owed. A pass
+        asks it inside its own transaction (``commit`` False)."""
         with self.lock:     # the row and the commit wait for a pass that holds the store
             if sensitivity is not None and sensitivity not in SENSITIVITIES:
                 raise StoreError(f"sensitivity is one of {', '.join(SENSITIVITIES)}, not {sensitivity!r}")
@@ -313,6 +336,12 @@ class Store:
                 if sensitivity is not None and row[3] != sensitivity:
                     self.db.execute("UPDATE source SET sensitivity = ?, generation = generation + 1 WHERE id = ?",
                                     (sensitivity, row[0]))
+                    if sensitivity == "secret":
+                        # A secret source is never carded: its cards go now, their text owing a rewrite (264).
+                        dropped = self.db.execute("DELETE FROM card WHERE file IN (SELECT id FROM file WHERE "
+                                                  "source = ?)", (row[0],)).rowcount
+                        if dropped:
+                            self.meta("rewrite", owed_mark())
                     if commit:
                         self.db.commit()
                 return row[0]

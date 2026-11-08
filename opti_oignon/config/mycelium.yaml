@@ -57,3 +57,14 @@ rerank:
   parallel: 4
   max_chars: 3000
   timeout_s: 60
+
+# The map's file cards: two sentences per file by a local model, asked
+# through the inference registry as background work, kept only once each
+# identifier and number they give is found in the file (a sentence that
+# fails is dropped). Written by `opti-oignon mycelium cards CORPUS`, at most
+# per_pass cards a run (1 to 2000), each call given up at timeout_s; never
+# for a secret source; never searched, shown by the map alone.
+cards:
+  model: qwen3.5:4b
+  per_pass: 200
+  timeout_s: 60

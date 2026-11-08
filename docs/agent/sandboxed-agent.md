@@ -39,7 +39,10 @@ the tools section of the run's prompt says which corpus, or that none is
 indexed. Its map, `mycelium_map`, walks the same corpus without reading
 any file: a folder gives its sub-folders and files with one line each, a
 file its parts with their lines, what it defines, the settings it reads
-and the tests, docs and files of its source that use it -- to find where
+and the tests, docs and files of its source that use it, and its card
+when `opti-oignon mycelium cards` wrote one (a model's two sentences,
+their names checked against the file, not their prose) -- to
+find where
 to search; its answers are not cited, and a run that walked the map is
 checked by the citation gate as one that searched: a line the map named
 but no search gave reads unseen.

@@ -134,8 +134,8 @@ STORES: tuple[Entry, ...] = (
     Entry("coding history store", ("coding_history.db",), ("coding_history.py",), WORDS, NOT_COVERED),
     Entry("code execution outputs (the images and PDFs a run's code wrote, by conversation, not user-scoped)",
           ("exec_outputs",), ("code_executor.py",), DRAWN, ONE_USER, failures=("code execution outputs",)),
-    Entry("the Mycelium's indexes (each corpus's first sentences, headings, names, tokens and vectors; not "
-          "user-scoped)",
+    Entry("the Mycelium's indexes (each corpus's first sentences, headings, names, tokens, vectors and file cards; "
+          "not user-scoped)",
           ("mycelium",), ("mycelium/place.py",), DRAWN, ONE_USER, failures=("the Mycelium's indexes",)),
     Entry("sandbox exports (the files copied out of a sandbox)", ("sandbox_exports",), ("api/routes_sandbox.py",),
           DRAWN, NOT_COVERED),
