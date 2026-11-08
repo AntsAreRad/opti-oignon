@@ -35,6 +35,7 @@
 	import Markdown from './markdown/Markdown.svelte';
 	import PlainText from './markdown/PlainText.svelte';
 	import RunSummary from './RunSummary.svelte';
+	import ProjectContextLine from './ProjectContextLine.svelte';
 
 	export let message: MessageItem;
 	export let isStreaming: boolean = false;
@@ -273,6 +274,7 @@
 		<!-- The run's summary line, after done, from the steps' record -->
 		{#if !isUser && !isStreaming}
 			<RunSummary steps={message.steps} durationMs={message.duration_ms} stopped={message.stopped === true} />
+			<ProjectContextLine facts={message.project_context} />
 		{/if}
 
 		<!-- Feedback widget (always visible on assistant messages, not streaming) -- BUG-05 -->

@@ -11,6 +11,20 @@ package costs.
 
 ### Added
 
+- Under each answer of a project turn, the chat says where the
+  project's context came from and what the turn said of it: the
+  passages with their source (the project's Mycelium store, the
+  knowledge base, or both), cut to fit, withheld or left out, then a
+  store that could not be read, the knowledge base serving, the lexical
+  stages answering, files left to the knowledge base (counted, never
+  named), in the very words the loader gave the turn's own status lines;
+  an answer that kept no passage says only why, or what the turn said.
+  It is read from the facts the answer kept (`project_context`): from
+  the `done` frame while the turn ends, from the conversation's messages
+  after a reload; a reply that was stopped, which the server does not
+  save, keeps none. A form the loader's table does not know says nothing
+  of itself, and anything that is not those facts says nothing at all.
+  Contracts PU1-PU5.
 - An answer keeps where its project's context came from, without a
   name. A turn's project context was said only in passing, in status
   lines the chat's loader replaces one by one, and nothing of it stayed

@@ -156,6 +156,9 @@ function endOf(response: ChatResponse): Partial<MessageItem> {
 		end.steps = response.steps;
 		end.duration_ms = response.duration_ms;
 	}
+	// A stopped reply is not saved: its facts belong to no answer (a retry's
+	// reload would lay them under the answer before it).
+	if (response.project_context && !end.stopped) end.project_context = response.project_context;
 	return end;
 }
 

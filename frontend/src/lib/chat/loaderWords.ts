@@ -175,6 +175,71 @@ function projectSaid(said: string): Line | null {
 	return null;
 }
 
+/** The source of the passages an answer kept (the server's `project_facts`), as the passages' line says it. */
+const PROJECT_SOURCE_KEYS: Record<string, string> = {
+	mycelium: 'project_passages_mycelium',
+	rag: 'project_passages_rag',
+	'mycelium+rag': 'project_passages_both',
+	cut: 'project_passages_cut',
+};
+
+/** What the turn said of its context, each closed form and the numbers it keeps (`PROJECT_SAID`'s, by key). */
+const PROJECT_FORMS: Record<string, readonly string[]> = {
+	unreadable: [],
+	search_failed: [],
+	rag_serves: [],
+	lexical: ['s'],
+	left: ['files'],
+	lexical_left: ['s', 'files'],
+};
+
+/** The largest count or number of seconds a kept fact may hold: anything past it is not the facts' shape. */
+const PROJECT_BOUND = 1_000_000;
+
+function owns(table: Record<string, unknown>, key: string): boolean {
+	return Object.prototype.hasOwnProperty.call(table, key);
+}
+
+/**
+ * The lines an answer's kept project context says again under it (the
+ * server's `project_facts`): its passages with their source, or why there
+ * are none, then what the turn said, each in the table's words. Files are
+ * counted, never named; a form the table does not know says nothing, and
+ * anything that is not the facts' closed shape says nothing at all.
+ */
+export function projectFactsLines(facts: unknown): Line[] {
+	if (!facts || typeof facts !== 'object') return [];
+	const f = facts as Record<string, unknown>;
+	const n = f.passages;
+	const source = f.source;
+	if (typeof n !== 'number' || !Number.isInteger(n) || n < 0 || n > PROJECT_BOUND || typeof source !== 'string') {
+		return [];
+	}
+	const lines: Line[] = [];
+	if (owns(PROJECT_SOURCE_KEYS, source)) {
+		if (n > 0) lines.push({ key: PROJECT_SOURCE_KEYS[source], values: { passages: passages(String(n)) } });
+	} else if (source === 'withheld') {
+		lines.push({ key: 'project_withheld' });
+	} else if (source === 'left_out') {
+		lines.push({ key: 'project_left_out' });
+	} else if (source !== 'none') {
+		return [];
+	}
+	const told = f.said;
+	if (!told || typeof told !== 'object') return lines;
+	const s = told as Record<string, unknown>;
+	if (typeof s.form !== 'string' || !owns(PROJECT_FORMS, s.form)) return lines;
+	const values: Values = {};
+	for (const name of PROJECT_FORMS[s.form]) {
+		const value = s[name];
+		if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > PROJECT_BOUND) return lines;
+		if (name === 'files' && !Number.isInteger(value)) return lines;
+		values[name] = name === 'files' ? files(String(value)) : String(value);
+	}
+	lines.push(Object.keys(values).length ? { key: `project_${s.form}`, values } : { key: `project_${s.form}` });
+	return lines;
+}
+
 /**
  * The server's statuses the table says, by their fixed openings. The runner's
  * own step line is not among them: the terminal reads it, the loader does not.

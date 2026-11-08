@@ -75,6 +75,14 @@ export interface MessageItem {
 	stopped?: boolean;  // A Stop ended the reply: its text is what was written
 	steps?: PipelineStepFrame[];  // The steps' record the reply's done carried
 	duration_ms?: number;  // The reply's duration, as the server measured it
+	project_context?: ProjectContextFacts | null;  // Where its project's context came from (never a name)
+}
+
+/** What an answer kept of its project's context (the server's `project_facts`): closed forms, never a name. */
+export interface ProjectContextFacts {
+	source: string;
+	passages: number;
+	said: { form: string; s?: number; files?: number } | null;
 }
 
 // Quick sandbox metadata attached to assistant messages
@@ -271,6 +279,8 @@ export interface ChatResponse {
 	// Whether a Stop ended the reply, and the last state of every step it ran
 	cancelled?: boolean;
 	steps?: PipelineStepFrame[];
+	// What the turn kept of its project's context, when it had a project
+	project_context?: ProjectContextFacts;
 	// Quick sandbox metadata (present when sandbox was used)
 	sandbox_active?: boolean;
 	sandbox_session_id?: string;

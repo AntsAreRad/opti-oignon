@@ -19,6 +19,7 @@ import type {
 	ChatStreamCallbacks,
 	ChatToken,
 	PipelineStepFrame,
+	ProjectContextFacts,
 	ReasoningMetaInfo,
 	ReasoningStepInfo,
 	ToolCallInfo,
@@ -88,6 +89,10 @@ export function responseOf(data: ChatToken, conversationId: string): ChatRespons
 		duration_ms: (meta.duration_ms as number) ?? 0,
 		cancelled: meta.cancelled === true,
 		steps: Array.isArray(meta.steps) ? (meta.steps as PipelineStepFrame[]) : undefined,
+		project_context:
+			meta.project_context && typeof meta.project_context === 'object'
+				? (meta.project_context as ProjectContextFacts)
+				: undefined,
 		// Quick sandbox metadata
 		sandbox_active: (meta.sandbox_active as boolean) ?? false,
 		sandbox_session_id: (meta.sandbox_session_id as string) ?? undefined,
