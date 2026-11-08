@@ -512,6 +512,42 @@ def _project_zone_lines(report: Any) -> list[str]:
         lines.append(f"[!] Project context: {said}")
     return lines
 
+
+def _project_of(conversation_id: str | None) -> str | None:
+    """The project a conversation is linked to; None when it has none or the
+    projects' store cannot say."""
+    if not (conversation_id and PROJECT_CONTEXT_AVAILABLE and _project_store):
+        return None
+    try:
+        return _project_store.get_project_for_conversation(conversation_id)
+    except Exception:
+        return None
+
+
+def _wrapped_project_part(
+    text: str, on_status: Callable[[str], None] | None = None,
+) -> tuple[str, tuple] | None:
+    """The project's context as the turn's tail carries it, and the label it
+    vouches for; None when there is no text, or when nothing can wrap it.
+
+    Project files are data like any other retrieved text: wrapped under their
+    own label, or withheld when nothing can wrap them -- and then the turn
+    says so after the passages' line, which no longer holds, and the log too.
+    """
+    if not text:
+        return None
+    wrapped = (
+        _wrap_untrusted(text, source=_UNTRUSTED_SOURCE_FILE)
+        if UNTRUSTED_WRAP_AVAILABLE and _wrap_untrusted is not None
+        else ""
+    )
+    if not wrapped:
+        logger.warning("Project context withheld: the untrusted-data wrapper is unavailable")
+        if on_status is not None:
+            on_status("[!] Project context withheld: the untrusted-data wrapper is unavailable")
+        return None
+    return "\n\n" + wrapped, (["file"], ["file:" + hashlib.sha256(text.encode("utf-8")).hexdigest()])
+
 # Prompt optimization (v1.6.4)
 try:
     from .prompt_optimization import (
@@ -3307,6 +3343,10 @@ class Executor:
         self._last_prompt_budget = None
         _turn_budget = None
         _active_project_id = None  # always initialize for optimizer access
+        # Whether the turn's project was read: the templates read it first;
+        # the optimizer, which composes the project's context by it, reads it
+        # when they did not (their module could not load).
+        _project_read = False
 
         if (
             self.prompt_optimization_enabled
@@ -3314,13 +3354,7 @@ class Executor:
             and _prompt_budget_manager is not None
         ):
             # Determine project context for template resolution
-            if conversation_id and PROJECT_CONTEXT_AVAILABLE and _project_store:
-                try:
-                    _active_project_id = _project_store.get_project_for_conversation(
-                        conversation_id
-                    )
-                except Exception:
-                    pass
+            _active_project_id, _project_read = _project_of(conversation_id), True
 
             # Get template for detected task type
             template = _prompt_template_engine.get_template(
@@ -3415,6 +3449,18 @@ class Executor:
             and _get_context_optimizer() is not None
             and _get_context_optimizer().enabled
         )
+        # Multi-turn mode: the conversation history is loaded (read here, so
+        # the project's composer is decided once).
+        use_conversation = (
+            conversation_id is not None
+            and CONVERSATION_AVAILABLE
+            and conversation_manager is not None
+        )
+        # The optimizer composes the project's context only when it will be
+        # called: active, on a conversation turn, off the journal's path. On
+        # any other turn the project's context is composed below, whatever
+        # the optimizer's switch says.
+        _optimizer_composes = _optimizer_active and use_conversation and not _journal
 
         # The sources the turn brings to the onion's journal, raw: each cut whole
         # to its share of the tail, wrapped where the journal lays it. The room
@@ -3451,28 +3497,19 @@ class Executor:
                 ]})
 
         # Step 2c-bis: Inject project context
-        # Skipped when optimizer is active (it handles RAG with budget passthrough),
-        # and on the journal's path, which took the retrieval above.
-        if not _optimizer_active and not _journal:
-            _proj_text = self._compose_project_context(
-                question, conversation_id, on_status=status,
+        # Skipped when the optimizer composes it (it handles RAG with budget
+        # passthrough), and on the journal's path, which took the retrieval
+        # above. The place the project takes in the tail is kept: an
+        # optimizer that fails hands the turn to the manual pipeline, which
+        # composes the project there.
+        _proj_slot = len(_volatile_parts)
+        if not _optimizer_composes and not _journal:
+            _proj_part = _wrapped_project_part(
+                self._compose_project_context(question, conversation_id, on_status=status), status,
             )
-            # Project files are data like any other retrieved text: wrapped
-            # under their own label, or withheld when nothing can wrap them.
-            _proj_wrapped = (
-                _wrap_untrusted(_proj_text, source=_UNTRUSTED_SOURCE_FILE)
-                if _proj_text and UNTRUSTED_WRAP_AVAILABLE and _wrap_untrusted is not None
-                else ""
-            )
-            if _proj_wrapped:
-                _volatile_parts.append("\n\n" + _proj_wrapped)
-                _volatile_labels.append(
-                    (["file"], ["file:" + hashlib.sha256(_proj_text.encode("utf-8")).hexdigest()])
-                )
-            elif _proj_text:
-                logger.warning(
-                    "Project context withheld: the untrusted-data wrapper is unavailable"
-                )
+            if _proj_part is not None:
+                _volatile_parts.append(_proj_part[0])
+                _volatile_labels.append(_proj_part[1])
 
         # Step 2d: Web search injection
         # If web_search is enabled, run a search and inject results. The kill
@@ -3589,13 +3626,6 @@ class Executor:
         _user_label = _user_turn_label(user_content, _turn_origin, _turn_segments)
         if _image_label is not None:
             _user_label = _join_labels([_user_label, _image_label])
-
-        # Multi-turn mode: load the conversation history
-        use_conversation = (
-            conversation_id is not None
-            and CONVERSATION_AVAILABLE
-            and conversation_manager is not None
-        )
 
         # Ledger retrieval figures (count and best score of injected snippets)
         _ledger_retrieval_count = 0
@@ -3792,6 +3822,11 @@ class Executor:
             if _optimizer_active:
                 self._last_optimization_report = None
                 optimizer = _get_context_optimizer()
+                # The optimizer composes the project's context by the turn's
+                # project: a template module that cannot load must not take
+                # the project with it.
+                if not _project_read:
+                    _active_project_id, _project_read = _project_of(conversation_id), True
 
                 # Load conversation history for optimizer
                 _conv_history = self._labelled_history(conversation_id)
@@ -3853,6 +3888,18 @@ class Executor:
                     logger.warning(
                         "Optimizer failed, falling back to manual pipeline: %s", e
                     )
+                    # The project's context was the optimizer's to compose:
+                    # the manual pipeline composes it as its own path would,
+                    # at the place that path gives it in the tail, so the turn
+                    # keeps its passages and says them.
+                    _proj_part = _wrapped_project_part(
+                        self._compose_project_context(question, conversation_id, on_status=status), status,
+                    )
+                    if _proj_part is not None:
+                        _volatile_parts.insert(_proj_slot, _proj_part[0])
+                        _volatile_labels.insert(_proj_slot, _proj_part[1])
+                        _volatile_tail = "".join(_volatile_parts)
+                        _volatile_label = _join_labels(_volatile_labels)
                     # Fallback: use manual pipeline
                     messages, context_tokens, window_stats = self._build_conversation_messages(
                         system_prompt=system_prompt,

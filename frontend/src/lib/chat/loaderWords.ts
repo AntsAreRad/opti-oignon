@@ -36,6 +36,7 @@ export const WORDS: Record<string, string> = {
 	project_lexical_left:
 		'Project context: the search ran past {s} s, names and full text answered, {files} left to the knowledge base',
 	project_left_out: 'Project context left out: no room in the window',
+	project_withheld: 'Project context withheld: nothing could wrap it as data, no project passage',
 	count_file: '1 file',
 	count_files: '{n} files',
 	count_passage: '1 passage',
@@ -210,6 +211,7 @@ const STATUSES: readonly [RegExp, string, ((match: RegExpMatchArray) => Values)?
 		/^\[!\] Project context left out: (?:its share of the window holds no chunk|over its share of the window)$/,
 		'project_left_out',
 	],
+	[/^\[!\] Project context withheld: the untrusted-data wrapper is unavailable$/, 'project_withheld'],
 	[/^\[>\] (?:Archive retrieval|Optimizer|Multi-turn):/, 'fitting'],
 	[/^\[(?:CACHE|SEMANTIC|CACHE-X)\]/, 'cache'],
 	[/^\[!\] Ollama offline -- request not sent/, 'offline'],

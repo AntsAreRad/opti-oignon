@@ -4111,6 +4111,22 @@ package costs.
   origin. Contracts op1-op8 in
   `tests/test_another_port_is_another_site_contracts.py`; xs2 gives way
   to them.
+- A project turn no longer loses its passages without saying so. With
+  the context optimizer on (the shipped default), the executor left the
+  project's context to the optimizer and skipped its own composition, so
+  three turns answered without the project's passages, and only a log
+  line knew: an optimizer that raised handed the turn to the manual
+  pipeline, which built the window without them; the optimizer was handed
+  the turn's project only when the prompt templates could load; and a
+  conversation turn whose conversation manager was missing went the
+  single-turn way, where nothing composed the project. Now the turn's
+  project is read once, whatever the templates say; the optimizer
+  composes the project only when it is called; and the manual pipeline
+  that takes over from a failed optimizer composes the project as its own
+  path does, in the same place of the turn and with its status lines. A
+  project's text that nothing can wrap as data is withheld, as before,
+  and the turn now says so after the passages' line, which no longer
+  holds, in the chat's loader too. Contracts PZ1-PZ6.
 - A question asked with "where", "when", "why", "whom" or "whose", or in
   French with "quand", "pourquoi", "combien", "lequel", "laquelle",
   "lesquels" or "lesquelles", no longer reaches the memory's anchors by
