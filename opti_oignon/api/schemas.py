@@ -87,6 +87,9 @@ class MessageItem(BaseModel):
     timestamp: str | None = None
     model: str | None = None
     token_estimate: int = 0
+    # What an answer kept of its project's context (``project_facts``):
+    # closed forms, never a name; None for a turn without a project.
+    project_context: dict | None = None
 
 
 # -- Models --

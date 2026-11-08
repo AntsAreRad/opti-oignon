@@ -44,6 +44,9 @@ CORE = frozenset({
     "opti_oignon.core_client",
     "opti_oignon.core_daemon",
     "opti_oignon.db_encryption",
+    # What an answer keeps of its project's context: the executor reads its
+    # closed forms at every turn; stdlib-only, it pulls nothing at all.
+    "opti_oignon.project_facts",
     "opti_oignon.db_utils",
     "opti_oignon.emergency_stop",
     "opti_oignon.encryption",

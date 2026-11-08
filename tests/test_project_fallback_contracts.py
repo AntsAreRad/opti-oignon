@@ -128,7 +128,7 @@ def _turn(optimizer, *, notes=_NOTES, web=True, memory=None, cache=None, convers
         ex._memory_enabled = memory is not None
         calls, said = [], []
 
-        def compose(question, conversation_id, on_status=None, budget_tokens=None, fit=None):
+        def compose(question, conversation_id, on_status=None, budget_tokens=None, fit=None, facts=None):
             calls.append(conversation_id)
             if notes and on_status is not None:
                 on_status(_LINE)

@@ -1585,6 +1585,10 @@ async def _stream_turn(
         _steps_summary = _pipeline_step.emit(turn.steps, "summary")
         if _steps_summary:
             done_metadata["steps"] = _steps_summary
+    # What the turn kept of its project's context (closed forms, never a
+    # name), said again under the answer: on every path that had a project.
+    if turn.results.get("project_context"):
+        done_metadata["project_context"] = turn.results["project_context"]
     # Add the agentic information: this turn's own results
     if use_agentic and _agentic_executor is not None:
         done_metadata["pipeline"] = turn.results.get("pipeline") or PIPELINE_DIRECT

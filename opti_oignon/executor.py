@@ -482,6 +482,12 @@ except ImportError:
     _trigger_detector = None
     _project_store = None
 
+# What an answer keeps of its project's context: closed forms, never a name.
+try:
+    from . import project_facts as _project_facts
+except ImportError:
+    _project_facts = None
+
 # Where a project's passages came from (``ProjectContext.source``), as the
 # passages' status line says it; the chat loader's table maps these words.
 _PROJECT_SOURCES = {
@@ -511,6 +517,30 @@ def _project_zone_lines(report: Any) -> list[str]:
     if said:
         lines.append(f"[!] Project context: {said}")
     return lines
+
+
+def _project_zone_facts(report: Any) -> dict | None:
+    """The facts an answer keeps of its project's context on the optimizer's
+    path, from its project zone, as its lines say them; None for no zone, for
+    a zone the unified layer filled or that failed, or when the facts' module
+    cannot load."""
+    zone = next((z for z in getattr(report, "zones", ()) or () if getattr(z, "zone", "") == "project"), None)
+    strategy = getattr(zone, "strategy", "") if zone is not None else ""
+    if _project_facts is None or zone is None or strategy in ("", "unified", "error"):
+        return None
+    passages = int(getattr(zone, "passages", 0) or 0)
+    if strategy in _PROJECT_SOURCES and passages:
+        source = strategy
+    else:
+        source, passages = ("withheld" if strategy == "withheld" else "none"), 0
+    return _project_facts.facts(source, passages, getattr(zone, "said", "") or None)
+
+
+def _answer_facts(results: dict) -> dict | None:
+    """The facts of its project's context a saved answer keeps beside its
+    text, or None: a turn without a project is saved as before."""
+    facts = results.get("project_context") if isinstance(results, dict) else None
+    return facts or None
 
 
 def _project_of(conversation_id: str | None) -> str | None:
@@ -2391,6 +2421,7 @@ class Executor:
         on_status: Callable[[str], None] | None = None,
         budget_tokens: int | None = None,
         fit: Callable[[str], str] | None = None,
+        facts: dict | None = None,
     ) -> str:
         """The project context text for this turn, or an empty string.
 
@@ -2411,6 +2442,10 @@ class Executor:
                 counts it (the onion's journal), applied before its lines are
                 said: a text it cuts names no source (the passages it drops
                 are the last, the knowledge base's) and is said cut.
+            facts: Filled, when given, with what the answer keeps of the
+                project's context (``project_facts``: the source of the
+                passages kept, their number, the form of what the turn said;
+                never a name); left empty on a turn with no project.
 
         Returns:
             the retrieved context text, or an empty string when there is
@@ -2439,6 +2474,8 @@ class Executor:
         # or the builder: the retrieval is said left out.
         if budget_tokens is not None and budget_tokens < _RAG_FLOOR:
             _status("[!] Project context left out: its share of the window holds no chunk")
+            if facts is not None and _project_facts is not None:
+                facts.update(_project_facts.facts("left_out", 0))
             return ""
 
         # Run trigger detection. L3 (LLM classification) is intentionally
@@ -2490,6 +2527,12 @@ class Executor:
                 )
             if getattr(ctx, "said", ""):
                 _status(f"[!] Project context: {ctx.said}")
+            if facts is not None and _project_facts is not None:
+                kept = getattr(ctx, "source", "") if text and ctx.chunks_used else ""
+                facts.update(_project_facts.facts(
+                    "cut" if text and cut else kept if kept in _PROJECT_SOURCES else "none",
+                    ctx.chunks_used if text else 0, getattr(ctx, "said", "") or None,
+                ))
             if text:
                 return text
 
@@ -2497,6 +2540,21 @@ class Executor:
             logger.warning("Project context injection failed: %s", e)
 
         return ""
+
+    def _project_part(
+        self, question: str, conversation_id: str | None, on_status: Callable[[str], None], results: dict,
+    ) -> tuple[str, tuple] | None:
+        """The project's part of the turn's tail, or None; what the answer
+        keeps of the project's context written in ``results`` (a text that
+        nothing could wrap kept as withheld, with no passage)."""
+        facts: dict = {}
+        text = self._compose_project_context(question, conversation_id, on_status=on_status, facts=facts)
+        part = _wrapped_project_part(text, on_status)
+        if facts:
+            if text and part is None and _project_facts is not None:
+                facts = _project_facts.facts("withheld", 0, facts.get("said"))
+            results["project_context"] = facts
+        return part
 
     def _onion_fit(self, text: str, share: int, model: str) -> str:
         """The retrieval cut to its share of the window, counted as the window counts it.
@@ -3085,6 +3143,9 @@ class Executor:
         _cached_marks = _begin_cached_request(run)
         _call_run = run if run is not None else _Run()
         stop, _run_results = _call_run.stop, _call_run.results
+        # The facts of a project's context are this call's own: a run the
+        # steps of a pipeline share keeps none of an earlier step's.
+        _run_results.pop("project_context", None)
         # The question as this call received it: the vision step may rewrite
         # it, and the saved turn is measured against these words.
         _entry_question = question
@@ -3504,9 +3565,7 @@ class Executor:
         # composes the project there.
         _proj_slot = len(_volatile_parts)
         if not _optimizer_composes and not _journal:
-            _proj_part = _wrapped_project_part(
-                self._compose_project_context(question, conversation_id, on_status=status), status,
-            )
+            _proj_part = self._project_part(question, conversation_id, status, _run_results)
             if _proj_part is not None:
                 _volatile_parts.append(_proj_part[0])
                 _volatile_labels.append(_proj_part[1])
@@ -3881,6 +3940,9 @@ class Executor:
                     )
                     for line in _project_zone_lines(rpt):
                         status(line)
+                    _zone_facts = _project_zone_facts(rpt) if _active_project_id is not None else None
+                    if _zone_facts is not None:
+                        _run_results["project_context"] = _zone_facts
                 except Exception as e:
                     # The optimizer's request is given up: its label leaves
                     # with it, and the fallback's is read where it is sent.
@@ -3892,9 +3954,7 @@ class Executor:
                     # the manual pipeline composes it as its own path would,
                     # at the place that path gives it in the tail, so the turn
                     # keeps its passages and says them.
-                    _proj_part = _wrapped_project_part(
-                        self._compose_project_context(question, conversation_id, on_status=status), status,
-                    )
+                    _proj_part = self._project_part(question, conversation_id, status, _run_results)
                     if _proj_part is not None:
                         _volatile_parts.insert(_proj_slot, _proj_part[0])
                         _volatile_labels.insert(_proj_slot, _proj_part[1])
@@ -4175,12 +4235,24 @@ class Executor:
                         )
                         # The cache answers the request whose key it was
                         # filed under: the same context, the same label.
-                        conversation_manager.add_message(
-                            conversation_id, "assistant", cached.response,
-                            model=routing.model,
-                            origin="assistant+web" if _web_injected else "assistant",
-                            context=_answer_context, lineage=_turn_label[1],
-                        )
+                        # An answer of a project turn keeps the facts of its
+                        # project's context; any other is saved as before.
+                        _kept = _answer_facts(_run_results)
+                        if _kept is not None:
+                            conversation_manager.add_message(
+                                conversation_id, "assistant", cached.response,
+                                model=routing.model,
+                                origin="assistant+web" if _web_injected else "assistant",
+                                context=_answer_context, lineage=_turn_label[1],
+                                metadata={"project_context": _kept},
+                            )
+                        else:
+                            conversation_manager.add_message(
+                                conversation_id, "assistant", cached.response,
+                                model=routing.model,
+                                origin="assistant+web" if _web_injected else "assistant",
+                                context=_answer_context, lineage=_turn_label[1],
+                            )
                     except Exception as e:
                         logger.error(f"Conversation save error (cache hit): {e}")
 
@@ -4673,12 +4745,24 @@ class Executor:
                     conversation_id, "user", user_content,
                     origin=_turn_origin, segments=_turn_segments,
                 )
-                conversation_manager.add_message(
-                    conversation_id, "assistant", full_response,
-                    model=routing.model,
-                    origin="+".join(["assistant", *_answer_flags]),
-                    context=_answer_context, lineage=_answer_lineage,
-                )
+                # An answer of a project turn keeps the facts of its
+                # project's context; any other is saved as before.
+                _kept = _answer_facts(_run_results)
+                if _kept is not None:
+                    conversation_manager.add_message(
+                        conversation_id, "assistant", full_response,
+                        model=routing.model,
+                        origin="+".join(["assistant", *_answer_flags]),
+                        context=_answer_context, lineage=_answer_lineage,
+                        metadata={"project_context": _kept},
+                    )
+                else:
+                    conversation_manager.add_message(
+                        conversation_id, "assistant", full_response,
+                        model=routing.model,
+                        origin="+".join(["assistant", *_answer_flags]),
+                        context=_answer_context, lineage=_answer_lineage,
+                    )
                 conversation_manager.update_conversation_metadata(
                     conversation_id,
                     model=routing.model,

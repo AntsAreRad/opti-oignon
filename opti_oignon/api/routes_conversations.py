@@ -332,9 +332,21 @@ def get_messages(conv_id: str) -> list:
             timestamp=m.timestamp,
             model=m.model,
             token_estimate=m.token_estimate,
+            project_context=_project_context_of(m),
         ).model_dump()
         for m in messages
     ]
+
+
+def _project_context_of(message) -> dict | None:
+    """What an answer kept of its project's context, read back in its closed
+    shape only; nothing else of a message's metadata leaves here."""
+    metadata = getattr(message, "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    from opti_oignon import project_facts
+
+    return project_facts.clean(metadata.get("project_context"))
 
 
 # =============================================================================

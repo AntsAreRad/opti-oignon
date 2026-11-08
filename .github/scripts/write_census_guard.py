@@ -812,6 +812,7 @@ ARGUED_SITES = {
     ("opti_oignon/executor.py", "conversation"): (
         ("Executor._summarize_old_messages", "update_conversation_metadata"), ("Executor.execute", "add_message"),
         ("Executor.execute", "add_message"), ("Executor.execute", "add_message"),
+        ("Executor.execute", "add_message"), ("Executor.execute", "add_message"),
         ("Executor.execute", "add_message"), ("Executor.execute", "update_conversation_metadata"),),
     ("opti_oignon/memory/librarian.py", "flesh"): (
         ("OnionState._take_back", "take_back"), ("OnionState._take_back", "take_back"),

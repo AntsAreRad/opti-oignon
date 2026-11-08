@@ -1392,6 +1392,14 @@ fail_under = 0
 # backend script's server argv; the script now turns uvicorn's proxy headers off too: va6 runs ul14 whole with the
 # flag in that argv. They stay in the tree word for word.
 #
+# ot25 of tests/test_turn_origin_contracts.py counted four sites of the
+# executor that save a message naming its origin. An answer of a project
+# turn now keeps the facts of its project's context (block 268): the two
+# sites that save an answer each became two calls, one with the facts and
+# one as before, every one naming its origin -- six; pq7 of
+# tests/test_project_facts_contracts.py keeps ot25's assertions with that
+# count. It stays in the tree word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1893,4 +1901,5 @@ addopts = """
     --deselect=tests/test_mycelium_vector_contracts.py::test_mv19_two_openers_of_a_schema_1_store_move_it_once
     --deselect=tests/test_mycelium_place_contracts.py::test_mp3_reading_writes_nothing
     --deselect=tests/test_project_mycelium_contracts.py::test_pm1_the_files_a_project_holds
+    --deselect=tests/test_turn_origin_contracts.py::test_ot25_every_message_write_site_in_the_package_is_accounted_for
 """

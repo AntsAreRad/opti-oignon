@@ -11,6 +11,25 @@ package costs.
 
 ### Added
 
+- An answer keeps where its project's context came from, without a
+  name. A turn's project context was said only in passing, in status
+  lines the chat's loader replaces one by one, and nothing of it stayed
+  with the answer. Now each project turn writes its facts -- the source
+  of the passages kept (the project's Mycelium store, the knowledge
+  base, or both; cut to the window's share, withheld, or left out), how
+  many, and the form of what the turn said of its context with its
+  numbers -- on the executor's own path, the context optimizer's, its
+  fallback and the single turn (not yet on the onion journal's), each
+  call its own, and the answer is saved with them (not yet the answers
+  the think-and-tools and self-correction pipelines save themselves: the
+  `done` frame says them, the reload does not); the `done` frame carries
+  them, and
+  `GET /api/conversations/{id}/messages` gives each answer's facts back
+  (`project_context`), nothing else of its metadata. A file is never
+  named in them: what the turn says can name the project's files, and
+  a name kept with the answer would outlive the file; the files are
+  counted. The forms are the chat loader's, one table on each side, the
+  same patterns in the same order. Contracts PQ1-PQ8.
 - The web interface says where a project's context came from, and what
   the Mycelium was not given. The passages' status line names its source
   (the project's Mycelium store, the knowledge base, or both) instead of
