@@ -4153,6 +4153,17 @@ package costs.
   origin. Contracts op1-op8 in
   `tests/test_another_port_is_another_site_contracts.py`; xs2 gives way
   to them.
+- A turn whose request never left no longer says the passages of its
+  project's context. A turn composes its project's context early, and
+  several of its ends come after it with nothing sent: the onion window
+  refused, the governor's refusal, the engine offline, a stop before the
+  engine is asked. Each kept the facts of the passages composed, and the
+  turn's last frame said them under its refusal. The ledger row such a
+  call writes (the engine never asked, no answer from the cache) now
+  drops them, and hands back those an earlier call of the same turn left:
+  a pipeline phase refused after one that answered keeps the facts the
+  saved answer was composed with. A call closed or failing before its
+  ledger row keeps them still. Contracts PUS1-PUS5.
 - On the onion journal's path, a project's text that the window's fit
   cut now says the passages and the tokens it sends: its status line and
   the facts its answer keeps gave the builder's numbers, those of the

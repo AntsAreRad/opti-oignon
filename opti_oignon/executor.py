@@ -3158,8 +3158,9 @@ class Executor:
         _call_run = run if run is not None else _Run()
         stop, _run_results = _call_run.stop, _call_run.results
         # The facts of a project's context are this call's own: a run the
-        # steps of a pipeline share keeps none of an earlier step's.
-        _run_results.pop("project_context", None)
+        # steps of a pipeline share keeps none of an earlier step's -- unless
+        # this call's request never leaves, which hands them back.
+        _entry_facts = _run_results.pop("project_context", None)
         # The question as this call received it: the vision step may rewrite
         # it, and the saved turn is measured against these words.
         _entry_question = question
@@ -3199,6 +3200,10 @@ class Executor:
         # One record per call: a call closed by its caller after a stop
         # emits from the close, and must not emit a second time.
         _ledger_sent = [False]
+        # Whether the request left: the stream's thread passed its last stop
+        # check and asked the engine (a cache's answer asks none, and keeps
+        # its context).
+        _left = [False]
 
         def _emit_ledger(outcome: str, **extra) -> None:
             if outcome == "cancelled":
@@ -3208,6 +3213,15 @@ class Executor:
             if outcome == "offline_queued":
                 # So is a call queued offline: its words are the queue's notice.
                 _run_results["offline_queued"] = True
+            if not _left[0] and outcome != "cache_hit":
+                # A call whose request never left -- refused, offline, stopped
+                # before the engine was asked -- sent and saved nothing: it
+                # keeps no fact of its project's context, and hands the run
+                # back those an earlier call of it left (a pipeline's phase
+                # whose answer is saved with them).
+                _run_results.pop("project_context", None)
+                if _entry_facts is not None:
+                    _run_results["project_context"] = _entry_facts
             fields = dict(_ledger_base)
             fields["outcome"] = outcome
             fields["duration_ms"] = (time.time() - _ledger_t0) * 1000.0
@@ -4511,6 +4525,7 @@ class Executor:
                             _onion_end_load(_gov_decision)
                         chunk_queue.put(("cancel", None))
                         return
+                    _left[0] = True
                     # A tool turn: the tool executor's rounds, every request
                     # under this ticket, in place of one stream. Rounds that
                     # end before their first request claimed no load.
