@@ -2441,7 +2441,9 @@ class Executor:
             fit: What fits the text to its share of the window as the window
                 counts it (the onion's journal), applied before its lines are
                 said: a text it cuts names no source (the passages it drops
-                are the last, the knowledge base's) and is said cut.
+                are the last, the knowledge base's) and is said cut, with the
+                passages and tokens it sends (``ProjectContext.sent``: the fit
+                cuts the text from its end).
             facts: Filled, when given, with what the answer keeps of the
                 project's context (``project_facts``: the source of the
                 passages kept, their number, the form of what the turn said;
@@ -2518,11 +2520,21 @@ class Executor:
             if text and fit is not None:
                 text = fit(text)
             cut = text != ctx.context_text
+            # A text the fit cut says what it sends: the passages whose words
+            # its beginning reaches, and its own tokens, not the builder's. A
+            # text that is not a cut from its end cannot be counted: it is
+            # still handed on and said, with the builder's numbers.
+            passages, tokens = ctx.chunks_used, ctx.total_tokens_estimate
+            if text and cut:
+                try:
+                    passages, tokens = ctx.sent(text)
+                except ValueError:
+                    logger.warning("Project context cut to its share of the window: what it sends cannot be counted")
             if text:
                 source = _PROJECT_SOURCES.get(getattr(ctx, "source", "")) if ctx.chunks_used else None
                 _status(
                     f"[OK] Project context injected: "
-                    f"{ctx.chunks_used} chunks, ~{ctx.total_tokens_estimate} tokens"
+                    f"{passages} chunks, ~{tokens} tokens"
                     + (", cut to its share of the window" if cut else f", from {source}" if source else "")
                 )
             if getattr(ctx, "said", ""):
@@ -2531,7 +2543,7 @@ class Executor:
                 kept = getattr(ctx, "source", "") if text and ctx.chunks_used else ""
                 facts.update(_project_facts.facts(
                     "cut" if text and cut else kept if kept in _PROJECT_SOURCES else "none",
-                    ctx.chunks_used if text else 0, getattr(ctx, "said", "") or None,
+                    passages if text else 0, getattr(ctx, "said", "") or None,
                 ))
             if text:
                 return text
@@ -2564,7 +2576,9 @@ class Executor:
         a token does not foresee: code read heavier, the envelope and the
         chunks' names included. Whole chunks leave first, from the last,
         while the text keeps the builder's chunk boundaries; then
-        characters. Empty when nothing of it fits.
+        characters. What it gives is always a beginning of the text it was
+        handed (the composer counts what is sent from that); empty when
+        nothing of it fits.
         """
 
         def counted(piece: str) -> int:

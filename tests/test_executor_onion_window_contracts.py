@@ -773,20 +773,27 @@ def _code_builder(asked):
     when more than fifty of its tokens fit."""
     chunks = [("beds.R", "model", f"# {_RAG}\n" + _R)] + [("parse.rs", "beds", _RUST), ("beds.R", "plots", _R)] * 4
 
+    context = w.project_context_class()  # the builder's own shape: where each passage's words begin (block 272)
+
     def build_context(project_id, question, budget_tokens=None):
         asked.append(budget_tokens)
         available = (4096 if budget_tokens is None else budget_tokens) - 32
-        parts, used = [], 0
+        parts, used, starts = [], 0, []
+        at = len("--- Project Context ---") + 2
         for name, section, content in chunks:
             tokens = len(content) // 4
             if used + tokens > available:
                 if available - used > 50:
                     parts.append(f"[{name}] {content[:(available - used) * 4]}...")
+                    starts.append(at + len(f"[{name}] "))
                 break
             parts.append(f"[{name} ({section})]\n{content}")
+            starts.append(at + len(f"[{name} ({section})]\n"))
+            at += len(parts[-1]) + 2
             used += tokens
         text = "\n\n".join(["--- Project Context ---", *parts, "--- End Project Context ---"]) if parts else ""
-        return SimpleNamespace(context_text=text, chunks_used=len(parts), total_tokens_estimate=len(text) // 4)
+        return context(context_text=text, chunks_used=len(parts), total_tokens_estimate=len(text) // 4,
+                       passage_starts=starts)
 
     return build_context
 

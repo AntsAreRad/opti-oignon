@@ -313,6 +313,17 @@ class ProjectContext:
     # and what is to be said of it (a store left unread, a project the knowledge base serves), no file's words.
     source: str = ""
     said: str = ""
+    # Where the words of each passage kept begin in ``context_text``, in order (after its ``[name]`` label): what a
+    # cut of the text from its end sends is counted from them (``sent``).
+    passage_starts: list[int] = field(default_factory=list)
+
+    def sent(self, text: str) -> tuple[int, int]:
+        """What ``text``, a cut of ``context_text`` from its end, sends: the passages whose words it reaches, and its
+        tokens as the builder estimates them. A text that is not such a cut is refused: its passages cannot be
+        counted from where they begin."""
+        if not self.context_text.startswith(text):
+            raise ValueError("not a cut of the project context's text from its end")
+        return sum(1 for at in self.passage_starts if at < len(text)), _estimate_tokens(text)
 
 
 # =============================================================================
@@ -1278,8 +1289,8 @@ class ProjectContextBuilder:
         # Retrieve relevant chunks: the project's Mycelium store first, the knowledge base when it does not serve.
         chunks = self._project_chunks(ctx, project_id, query)
 
-        # Assemble chunks within budget
-        selected_parts = []
+        # Assemble chunks within budget: each part its label and its words
+        selected_parts: list[tuple[str, str]] = []
         total_chunk_tokens = 0
         source_files = set()
         kept_chunks = []
@@ -1294,9 +1305,7 @@ class ProjectContextBuilder:
                     cut_label = Path(chunk.source_file).name
                     if chunk.section_name:
                         cut_label += f" ({chunk.section_name}, cut)"
-                    selected_parts.append(
-                        f"[{cut_label}] {truncated}..."
-                    )
+                    selected_parts.append((f"[{cut_label}] ", f"{truncated}..."))
                     source_files.add(Path(chunk.source_file).name)
                     kept_chunks.append(chunk)
                 break
@@ -1304,7 +1313,7 @@ class ProjectContextBuilder:
             source_label = Path(chunk.source_file).name
             if chunk.section_name:
                 source_label += f" ({chunk.section_name})"
-            selected_parts.append(f"[{source_label}]\n{chunk.content}")
+            selected_parts.append((f"[{source_label}]\n", chunk.content))
             total_chunk_tokens += chunk_tokens
             source_files.add(Path(chunk.source_file).name)
             kept_chunks.append(chunk)
@@ -1318,13 +1327,17 @@ class ProjectContextBuilder:
             ctx.source = ("mycelium+rag" if 0 < from_rag < len(kept_chunks)
                           else "rag" if from_rag else "mycelium")
 
-        # Build final context text
+        # Build final context text, noting where each passage's words begin in it
         parts = []
         if ctx.system_instructions:
             parts.append(ctx.system_instructions)
         if selected_parts:
             parts.append(header)
-            parts.extend(selected_parts)
+            at = sum(len(part) + 2 for part in parts)  # where the next part begins, the parts joined by a blank line
+            for label, words in selected_parts:
+                ctx.passage_starts.append(at + len(label))
+                parts.append(label + words)
+                at += len(label) + len(words) + 2
             parts.append(footer)
 
         ctx.context_text = "\n\n".join(parts)

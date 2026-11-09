@@ -1400,6 +1400,15 @@ fail_under = 0
 # tests/test_project_facts_contracts.py keeps ot25's assertions with that
 # count. It stays in the tree word for word.
 #
+# pq1 of tests/test_project_facts_contracts.py and ld31 of
+# tests/test_project_context_words_contracts.py pinned what a project text
+# the onion journal's fit cut said: the builder's count of passages and
+# tokens, those of the text before the fit. The turn now says the passages
+# and the tokens it sends (block 272): pcc2 of
+# tests/test_project_cut_count_contracts.py keeps both contracts' other
+# assertions, the cut's count the passages sent. They stay in the tree
+# word for word.
+#
 # tests/life is not a deselection: it is the life tier, ten-year lives of the
 # componion on the native core, owed where the core is not built. The sweep
 # ignores the directory; bash scripts/ladder.sh life runs it by path, which
@@ -1902,4 +1911,6 @@ addopts = """
     --deselect=tests/test_mycelium_place_contracts.py::test_mp3_reading_writes_nothing
     --deselect=tests/test_project_mycelium_contracts.py::test_pm1_the_files_a_project_holds
     --deselect=tests/test_turn_origin_contracts.py::test_ot25_every_message_write_site_in_the_package_is_accounted_for
+    --deselect=tests/test_project_facts_contracts.py::test_pq1_the_composer_writes_the_facts_its_lines_say
+    --deselect=tests/test_project_context_words_contracts.py::test_ld31_the_journals_fit_is_said
 """

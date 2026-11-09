@@ -653,3 +653,19 @@ def kinds(record):
 def sent(world):
     """Every request the engine was sent, whole, as the client received it."""
     return list(world.scripted.calls)
+
+
+def project_context_class():
+    """The project builder's ``ProjectContext``, loaded from ``opti_oignon/project_context.py``'s file in the window
+    it is called in (its optional imports refused there), never through the package: the shape a stand-in project
+    builder answers with."""
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location("project_context_under_contract", source("project_context.py"))
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # the dataclass reads its module while it is made
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.modules.pop(spec.name, None)
+    return module.ProjectContext

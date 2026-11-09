@@ -4153,6 +4153,14 @@ package costs.
   origin. Contracts op1-op8 in
   `tests/test_another_port_is_another_site_contracts.py`; xs2 gives way
   to them.
+- On the onion journal's path, a project's text that the window's fit
+  cut now says the passages and the tokens it sends: its status line and
+  the facts its answer keeps gave the builder's numbers, those of the
+  text before the fit ("40 chunks, cut" when 4 were sent). The builder
+  notes where the words of each passage begin in its text and counts
+  what a cut of it from its end sends; the fit always keeps a beginning
+  of the text, and a text that could not be counted would still be sent
+  and said, with the builder's numbers. Contracts PCC1-PCC5.
 - A project turn no longer loses its passages without saying so. With
   the context optimizer on (the shipped default), the executor left the
   project's context to the optimizer and skipped its own composition, so
