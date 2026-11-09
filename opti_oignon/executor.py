@@ -3549,9 +3549,13 @@ class Executor:
                 (lambda text, _share=_onion_room["rag"]: self._onion_fit(text, _share, routing.model))
                 if _onion_room.get("rag") is not None and _wrap_untrusted is not None else None
             )
+            _rag_facts: dict = {}
             _rag_text = self._compose_project_context(
                 question, conversation_id, on_status=status, budget_tokens=_rag_room, fit=_rag_fit,
+                facts=_rag_facts,
             )
+            if _rag_facts:
+                _run_results["project_context"] = _rag_facts
             if _rag_text:
                 _onion_tail.append({"kind": "rag", "items": [
                     (_rag_text, (["file"], ["file:" + hashlib.sha256(_rag_text.encode("utf-8")).hexdigest()])),
@@ -3876,6 +3880,12 @@ class Executor:
             )
             if dict(getattr(_onion_win, "cut", None) or ()).get("rag"):
                 status("[!] Project context left out: over its share of the window")
+                # The window let the retrieval go: the answer kept no
+                # passage of it, and what the turn said stays said.
+                if _project_facts is not None and "project_context" in _run_results:
+                    _run_results["project_context"] = _project_facts.facts(
+                        "left_out", 0, _run_results["project_context"].get("said"),
+                    )
         elif use_conversation:
             # Use context optimizer when active (replaces manual pipeline)
             if _optimizer_active:

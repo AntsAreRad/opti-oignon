@@ -11,6 +11,11 @@ package costs.
 
 ### Added
 
+- The onion journal's turns keep the facts of their project's context
+  too: the source of the passages kept, their number and what the turn
+  said, as the other paths keep them; a retrieval the journal's window
+  had no room for is kept as left out, with no passage. Contracts
+  PJR1-PJR3.
 - The answers the think-and-tools and self-correction pipelines save
   themselves keep the facts of their project's context too, as the
   executor's own saves do: the executor's call on their run writes
@@ -39,8 +44,8 @@ package costs.
   base, or both; cut to the window's share, withheld, or left out), how
   many, and the form of what the turn said of its context with its
   numbers -- on the executor's own path, the context optimizer's, its
-  fallback and the single turn (not yet on the onion journal's), each
-  call its own, and the answer is saved with them; the `done` frame
+  fallback, the single turn and the onion journal's, each call its own,
+  and the answer is saved with them; the `done` frame
   carries them, and
   `GET /api/conversations/{id}/messages` gives each answer's facts back
   (`project_context`), nothing else of its metadata. A file is never

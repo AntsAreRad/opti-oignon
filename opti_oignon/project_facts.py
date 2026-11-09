@@ -12,6 +12,10 @@ kept. A form this table does not know is kept as ``unknown``, without its text. 
 import math
 import re
 
+# New-module safety rule: any change this module drives through the system
+# must checkpoint first. Hardcoded, never overridable.
+checkpoint_before_apply = True
+
 # Where the passages kept came from, or why there are none: the passages' line names the first three; "cut" is a
 # text fitted to its share of the window (it names no source), "withheld" a text nothing could wrap as data,
 # "left_out" a retrieval the window had no room for, "none" a project turn that kept no passage.
