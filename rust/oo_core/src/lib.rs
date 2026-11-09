@@ -18,18 +18,22 @@
 //! only for text they class exactly as Python does, and refuse the rest.
 //! The trust kernel's twin lives in `trust`: the labels of a tool call's
 //! arguments and the gate's decision, asked in the gate's shadow.
+//! The Mycelium's value head lives in `value`: the one twin that computes
+//! with floats, held to the reference within 1e-9 rather than byte for
+//! byte, and served in its stead when the core is built.
 
 mod allium;
 mod linear;
 mod probes;
 mod trust;
+mod value;
 
 use pyo3::exceptions::{PyTypeError, PyValueError};
 use pyo3::prelude::*;
 use pyo3::types::{PyBool, PyDict, PyFloat, PyInt, PyList, PyString, PyTuple};
 use sha2::{Digest, Sha256};
 
-const VERSION: &str = "0.10.0";
+const VERSION: &str = "0.11.0";
 
 /// The shape of `compose_counted`'s arguments; the composer asks a core whose format is its own, and no other.
 const COMPOSE_FORMAT: i64 = 2;
@@ -296,6 +300,9 @@ fn oo_core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("TRUST_FORMAT", trust::FORMAT)?;
     m.add_function(wrap_pyfunction!(trust::trust_labels, m)?)?;
     m.add_function(wrap_pyfunction!(trust::trust_decide, m)?)?;
+    m.add("VALUE_FORMAT", value::FORMAT)?;
+    m.add_function(wrap_pyfunction!(value::value_fit, m)?)?;
+    m.add_function(wrap_pyfunction!(value::value_scores, m)?)?;
     m.add_class::<linear::LinearProgram>()?;
     m.add_class::<linear::LinearRead>()?;
     Ok(())

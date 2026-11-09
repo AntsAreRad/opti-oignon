@@ -272,13 +272,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install test dependencies
-        run: pip install pytest pyyaml -c constraints.txt
+        run: pip install pytest pyyaml numpy -c constraints.txt
 
       - name: Build the native core from the pinned crate
         run: bash scripts/build_oo_core.sh
 
       - name: Native-core contracts (native path against the reference)
-        run: python -m pytest -q tests/test_native_core_contracts.py tests/test_linear_native_contracts.py
+        run: python -m pytest -q tests/test_native_core_contracts.py tests/test_linear_native_contracts.py tests/test_mycelium_value_contracts.py
 
   # -------------------------------------------------------------------
   # Typecheck -- mypy with baseline gate

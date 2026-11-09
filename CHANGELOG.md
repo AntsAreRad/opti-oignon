@@ -11,6 +11,17 @@ package costs.
 
 ### Added
 
+- The Mycelium's value head: an L2 logistic regression that orders a
+  search's candidate files by their traits, learned by Newton's method
+  on the traits centred and scaled, kept as a record of one shape
+  (`opti_oignon/mycelium/value.py`). The native core learns and scores
+  it when it is built and declares the head's shape (core 0.11.0),
+  without holding the interpreter's lock; the numpy reference does
+  otherwise and is the one the core is held to, within 1e-9. A
+  strength or a trait beyond its bounds, and a head that does not
+  settle, are refused by name, the same whichever engine learns. Nothing
+  uses the head yet: the traits of a real store and the project's own
+  learning come next. Contracts VH1-VH9.
 - The onion journal's turns keep the facts of their project's context
   too: the source of the passages kept, their number and what the turn
   said, as the other paths keep them; a retrieval the journal's window
