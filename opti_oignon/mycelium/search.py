@@ -36,6 +36,28 @@ DOCUMENTS = "documents:"
 
 # A search's passages, and why each silent stage was silent: its own, whatever other searches run meanwhile.
 Found = namedtuple("Found", "hits silent")
+# A search's lists before their fusion: the words the words-matching stages were asked, each stage's list, the
+# vectors' scores over the whole matrix (part ids, cosines) or None, and the silences.
+Listed = namedtuple("Listed", "worded lists scores silent")
+STAGES = ("symbols", "lexical", "dense")
+
+
+def fuse(lists):
+    """The parts of ``lists`` by their reciprocal ranks (K): (the part ids in order, their fused scores, why each)."""
+    fused, why = {}, {}
+    for stage, ranked in lists.items():
+        for place, (part_id, _score) in enumerate(ranked, 1):
+            fused[part_id] = fused.get(part_id, 0.0) + 1.0 / (K + place)
+            why.setdefault(part_id, []).append(f"{stage}#{place}")
+    return sorted(fused, key=lambda i: (-fused[i], i)), fused, why
+
+
+def _top(scored, n):
+    import numpy as np
+
+    ids, scores = scored
+    order = np.argsort(-scores, kind="stable")[:n]
+    return [(ids[j], float(scores[j])) for j in order]
 
 
 class Searcher:
@@ -136,6 +158,12 @@ class Searcher:
         return held[1:]
 
     def dense(self, query, n=DEPTH):
+        scored = self._scores(query)
+        return [] if scored is None else _top(scored, n)
+
+    def _scores(self, query):
+        """(part ids, cosines) of ``query`` over the whole matrix of the active encoder, or None, the stage's silence
+        said."""
         import numpy as np
 
         silent = getattr(self._searching, "silent", None)
@@ -143,32 +171,42 @@ class Searcher:
         held = self._matrix()
         if held is None:
             silent["dense"] = f"a pass holds the store past {self.timeout_s:g} s: the vectors are left out"
-            return []
+            return None
         active, ids, matrix = held
         if active is None:
             silent["dense"] = "no encoder is active: no vector pass has completed"
-            return []
+            return None
         if not ids:
             silent["dense"] = f"the active encoder {active['key']} has no vector this search may read"
-            return []
+            return None
         if self.stop is not None and self.stop.is_set():      # checked after the matrix, which may outlast it
             silent["dense"] = "the search's deadline passed: the vectors are left out"
-            return []
+            return None
         try:
             vector = Embedder(Encoder(**active["card"]), self.timeout_s).query(query)
         except VectorError as exc:
             silent["dense"] = str(exc)
-            return []
+            return None
         # The question's vector comes as its unit vector (normalized in double precision): a cast never overflows.
-        scores = matrix @ np.asarray(vector, dtype=np.float32)
-        order = np.argsort(-scores, kind="stable")[:n]
-        return [(ids[j], float(scores[j])) for j in order]
+        return ids, matrix @ np.asarray(vector, dtype=np.float32)
 
     def search(self, query, k=10, stages=("symbols", "lexical", "dense"), rerank=False):
         """The fused, cited passages, k at most (``find``'s); the silences kept on the searcher, the last search's."""
         found = self.find(query, k, stages, rerank)
         self.silent = found.silent
         return found.hits
+
+    def lists(self, query, stages=STAGES):
+        """``Listed``: the lists of this search's stages before their fusion, the vectors' scores over the whole
+        matrix, and the silences of this search's own stages -- what ``find`` fuses, for the traits of its files."""
+        silent = {}
+        outer = getattr(self._searching, "silent", None)
+        self._searching.silent = silent
+        try:
+            worded, lists, scores = self._lists(query, stages, silent, whole=True)
+            return Listed(worded, lists, scores, silent)
+        finally:
+            self._searching.silent = outer
 
     def find(self, query, k=10, stages=("symbols", "lexical", "dense"), rerank=False):
         """``Found``: the fused, cited passages, k at most -- with ``rerank``, the first ones judged by the
@@ -181,7 +219,7 @@ class Searcher:
         finally:
             self._searching.silent = outer
 
-    def _find(self, query, k, stages, rerank, silent):
+    def _lists(self, query, stages, silent, whole=False):
         worded = query
         if self.bridge is not None and ("symbols" in stages or "lexical" in stages):
             worded = self.bridge.english(query, silent)
@@ -195,14 +233,21 @@ class Searcher:
             said = self.bridge.rewritten(query, silent) if self.bridge is not None else ""
             if said and said != worded:
                 lists["rewritten"] = self.lexical(said)
+        scores = None
         if "dense" in stages:
-            lists["dense"] = self.dense(query)      # left out once ``stop`` is set (``dense``)
-        fused, why = {}, {}
-        for stage, ranked in lists.items():
-            for place, (part_id, _score) in enumerate(ranked, 1):
-                fused[part_id] = fused.get(part_id, 0.0) + 1.0 / (K + place)
-                why.setdefault(part_id, []).append(f"{stage}#{place}")
-        order = sorted(fused, key=lambda i: (-fused[i], i))
+            # left out once ``stop`` is set (``dense``)
+            if whole:
+                scores = self._scores(query)
+                lists["dense"] = [] if scores is None else _top(scores, DEPTH)
+                # The caller's own ids: the matrix's are the store's, shared by its searchers.
+                scores = None if scores is None else (list(scores[0]), scores[1])
+            else:
+                lists["dense"] = self.dense(query)
+        return worded, lists, scores
+
+    def _find(self, query, k, stages, rerank, silent):
+        _worded, lists, _scores = self._lists(query, stages, silent)
+        order, fused, why = fuse(lists)
         # A part gone since the index was read gives no citation: the next ones take its place, k at most -- or as
         # many as the reranker judges, before the cut to k.
         judging = rerank and self.reranker is not None

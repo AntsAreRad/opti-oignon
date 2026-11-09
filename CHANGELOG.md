@@ -11,6 +11,22 @@ package costs.
 
 ### Added
 
+- The traits of a Mycelium search's candidate files, what the value
+  head will order them by (`opti_oignon/mycelium/traits.py`): for a
+  question, the files of the search's fused list, in its order, each
+  with nineteen traits read from the project's store and from the
+  search's own lists -- each list's rank of the file and its best
+  scores, the vectors' best cosine over the whole matrix, the cosines of
+  the means of the file's and of its folder's vectors, its parts, the
+  files that name what it defines, its kind, whether it is a test, the
+  question's words in its path. A list the search left silent leaves
+  its traits at nought, said; what the searcher may not read gives no
+  candidate, link or vector. The store's tables are read in one
+  reading of the store, kept for its file whichever opening a search
+  reads while its generation and a digest of its files hold, and never
+  begun past the turn's deadline. The search gives its lists before their
+  fusion (`Searcher.lists`) and cites the same passages as before.
+  Contracts TR1-TR9.
 - The Mycelium's value head: an L2 logistic regression that orders a
   search's candidate files by their traits, learned by Newton's method
   on the traits centred and scaled, kept as a record of one shape
