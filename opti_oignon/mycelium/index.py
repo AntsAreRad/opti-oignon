@@ -32,6 +32,7 @@ import time
 from contextlib import contextmanager
 from pathlib import Path
 
+from . import links
 from .chunk import CHUNKER_VERSION, cut, language, module_doc
 from .lexis import subwords
 from .store import StoreBusy, owed_mark
@@ -367,6 +368,17 @@ class Indexer:
             db.execute("DELETE FROM file WHERE id = ?", (row[0],))
             counts["removed"] += 1
         counts["vectors_dropped"] = store.orphan_vectors()
+        moved = counts["added"] or counts["changed"] or counts["renamed"] or counts["removed"] or counts["recut"]
+        secret = db.execute("SELECT sensitivity = 'secret' FROM source WHERE id = ?", (source,)).fetchone()[0]
+        # The source's links, computed again whole from what its files now name (``links.py``), in this pass's
+        # transaction, when it moved a file or they are due; one dropped by a pass that changed no file (a new
+        # resolution, a recut) owes the rewrite a changed file owes: which file named which would stay in the pages'
+        # free space. A secret source has none.
+        found = None if secret else links.recompute(store, source, moved=bool(moved))
+        if found is not None:
+            counts["links"] = found["links"]
+            if found["dropped"] and not (counts["changed"] or counts["renamed"] or counts["removed"]):
+                store.meta("rewrite", owed_mark())
         db.execute("UPDATE source SET generation = ? WHERE id = ?", (generation, source))
         if not blind and not unlooked:
             # Only a pass that looked at every file says the source is cut by this cutter, and when it began.

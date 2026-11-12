@@ -26,7 +26,13 @@ WINDOW, OVERLAP, MAX_LINES = 40, 10, 60
 MIN_LINES = 6
 # Raised when what a part is or holds changes: a store cut by another version cuts its files again (its vectors stay
 # for every text that did not change).
-CHUNKER_VERSION = 5
+CHUNKER_VERSION = 6     # 6: the network's records (below); `import a.b` binds `a` to `a`
+# The records the network resolves (``links.py``), besides those every reader joins by name: what an import brings
+# (``imodule``, ``ifrom``), a name read that an import bound (``bound``), a chain read on one (``dotted``), and the
+# module's own namespace (``binds``: its imports' bindings, ``assign``: its other names). Their names start with "="
+# or hold a dot, which no definition's name can: no join by name, and no reader of the store but the network, sees
+# them. Off, the cutter records what it recorded before them (a contract compares the two on the package's code).
+NETWORK = True
 LOG_METHODS = {"debug", "info", "warning", "warn", "error", "exception", "critical", "fatal", "log"}
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 BACKTICK = re.compile(r"`([A-Za-z_][A-Za-z0-9_.]*)(?:\(\))?`")
@@ -93,8 +99,11 @@ def _resolve(module, level, path):
 class _Refs(ast.NodeVisitor):
     """The references of a subtree: calls by name, imported names, key-like strings, routes, backticked names."""
 
-    def __init__(self, path, imported):
-        self.path, self.imported, self.out = path, imported, []
+    def __init__(self, path, imported, bound, scope=False):
+        self.path, self.imported, self.bound, self.out = path, imported, bound, []
+        # ``scope``: the subtree's statements are the module's own (its namespace: ``binds``, ``assign``); a function's
+        # or a class's body inside them is not. ``head``: the name now visited heads a chain (no ``bound`` of its own).
+        self.scope, self.head = scope, False
 
     def add(self, name, kind, module=""):
         item = (name, kind, module)
@@ -109,21 +118,72 @@ class _Refs(ast.NodeVisitor):
             self.add(target.attr, "call", "")
         self.generic_visit(node)
 
+    def visit_Attribute(self, node):
+        # A chain of attributes read on an imported name (`np.linalg.norm`, a class's base `views.View`), as written
+        # and once -- its whole length, never its shorter heads --, with the dotted name its head is bound to: the
+        # network resolves it (``links.py``); its dot keeps it out of every join by name (a definition's name has
+        # none). What a write goes through (`a.b` of `a.b.c = 1`) is read: its own chain. Inside a chain, what is not
+        # an attribute (its head, a call, a subscript) is visited as any node is.
+        if not NETWORK:
+            self.generic_visit(node)
+            return
+        if not isinstance(node.ctx, ast.Load):
+            self.visit(node.value)
+            return
+        chain, head = [], node
+        while isinstance(head, ast.Attribute):
+            chain.append(head.attr)
+            head = head.value
+        if isinstance(head, ast.Name) and head.id in self.bound:
+            self.add(".".join([head.id, *reversed(chain)]), "dotted", self.bound[head.id])
+        self.head = True
+        self.visit(head)
+        self.head = False
+
     def visit_Name(self, node):
         # An imported name used without a call (passed, compared, asserted): a use of what it names.
         if isinstance(node.ctx, ast.Load) and node.id in self.imported:
             self.add(node.id, "use", self.imported[node.id])
+        # For the network, a name an import bound, read on its own (the head of a chain is the chain's).
+        if NETWORK and isinstance(node.ctx, ast.Load) and node.id in self.bound and not self.head:
+            self.add(f"={node.id}", "bound", self.bound[node.id])
+        self.head = False
 
     def visit_Import(self, node):
         for alias in node.names:
             self.add(alias.name.split(".")[-1], "import", alias.name)
+            if NETWORK:
+                # What the statement imports (the module named), and, at the module's level, what it binds.
+                self.add(f"={alias.name}", "imodule", alias.name)
+                if self.scope:
+                    head = alias.name.split(".")[0]
+                    self.add(f"={alias.asname or head}", "binds", alias.name if alias.asname else head)
 
     def visit_ImportFrom(self, node):
         module = _resolve(node.module, node.level, self.path)
         for alias in node.names:
             self.add(alias.name, "import", module)
+            if not NETWORK:
+                continue
+            if alias.name == "*":
+                self.add(f"={module}.*", "imodule", module)
+                if self.scope:
+                    self.add("=*", "binds", module)
+                continue
+            target = f"{module}:{alias.name}" if module else alias.name     # the module by its path, then the name
+            self.add(f"={target}", "ifrom", target)
+            if self.scope:
+                self.add(f"={alias.asname or alias.name}", "binds", target)
         if module:
             self.add(module.split(".")[-1], "import", module)
+
+    def _inner(self, node):
+        # A function's, a class's or a lambda's body: not the module's namespace.
+        held, self.scope = self.scope, False
+        self.generic_visit(node)
+        self.scope = held
+
+    visit_FunctionDef = visit_AsyncFunctionDef = visit_ClassDef = visit_Lambda = _inner
 
     def visit_Constant(self, node):
         if isinstance(node.value, str):
@@ -153,16 +213,81 @@ def _imports(tree, path):
             for alias in node.names:
                 found[alias.asname or alias.name] = module
         elif isinstance(node, ast.Import):
+            # `import a.b` binds `a` to the package `a` (version 6; it was the last `import a.x` read), `import a.b as
+            # x` binds `x` to `a.b`.
             for alias in node.names:
-                found[(alias.asname or alias.name).split(".")[0]] = alias.name
+                head = alias.name.split(".")[0]
+                found[alias.asname or head] = alias.name if alias.asname else head
     return found
 
 
-def _refs(nodes, path, imported):
-    visitor = _Refs(path, imported)
+def _bindings(tree, path):
+    """{local name: what the import binds it to}, as the interpreter binds it: ``import a.b`` binds ``a`` to the
+    module ``a``, ``import a.b as x`` binds ``x`` to the module ``a.b``, ``from m import n as k`` binds ``k`` to
+    ``m:n`` -- the module ``m`` by its path (a relative one resolved as ``_resolve`` does), then the name ``n`` read on
+    it."""
+    found = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                head = alias.name.split(".")[0]
+                found[alias.asname or head] = alias.name if alias.asname else head
+        elif isinstance(node, ast.ImportFrom):
+            module = _resolve(node.module, node.level, path)
+            for alias in node.names:
+                if alias.name != "*":
+                    found[alias.asname or alias.name] = f"{module}:{alias.name}" if module else alias.name
+    return found
+
+
+def _refs(nodes, path, imported, bound, scope=False):
+    visitor = _Refs(path, imported, bound, scope)
     for node in nodes:
         visitor.visit(node)
+    if NETWORK and scope:
+        for name in _namespace(nodes):
+            visitor.add(f"={name}", "assign")
     return visitor.out
+
+
+def _namespace(nodes):
+    """The names the module's own statements bind other than by import: assignments (plain, annotated, augmented,
+    unpacked), the targets of ``for`` and ``with ... as``, functions and classes defined inside a block -- through
+    ``if``, ``try``, ``with``, ``for`` and ``while``, never into a function's or a class's body."""
+    found = []
+
+    def targets(node):
+        if isinstance(node, ast.Name):
+            found.append(node.id)
+        elif isinstance(node, (ast.Tuple, ast.List)):
+            for item in node.elts:
+                targets(item)
+        elif isinstance(node, ast.Starred):
+            targets(node.value)
+
+    def walk(statements):
+        for node in statements:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                found.append(node.name)
+                continue
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    targets(target)
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                targets(node.target)
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                targets(node.target)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        targets(item.optional_vars)
+            for block in ("body", "orelse", "finalbody"):
+                walk(getattr(node, block, []) or [])
+            for handler in getattr(node, "handlers", []) or []:
+                walk(handler.body)
+
+    walk(nodes)
+    return list(dict.fromkeys(found))
 
 
 def _literal(node):
@@ -221,6 +346,7 @@ def python_parts(path, lines):
     except (SyntaxError, ValueError):
         return None
     imported = _imports(tree, path)
+    bound = _bindings(tree, path)
     module = module_name(path)
     defs = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
 
@@ -248,19 +374,20 @@ def python_parts(path, lines):
             # A module's docstring is a part of its own: it is often the design of the module, and mixed with the
             # imports and constants it says less to a search for how something works.
             out.append(Part("doc", module, 1, doc.end_lineno, defines=[(module.split(".")[-1], module, "module")],
-                            refs=_refs([doc], path, imported)))
+                            refs=_refs([doc], path, imported, bound, scope=True)))
             rest = run[1:]
             if rest:
                 first_rest = start(rest[0])
                 while last > first_rest and not lines[last - 1].strip():
                     last -= 1
-                out.append(Part("module", f"{module}:imports", first_rest, last, refs=_refs(rest, path, imported),
+                out.append(Part("module", f"{module}:imports", first_rest, last,
+                                refs=_refs(rest, path, imported, bound, scope=True),
                                 said=_said(rest)))
             run.clear()
             return
         out.append(Part("module" if head else "code", module if head else f"{module}:{first}", first, last,
                         defines=[(module.split(".")[-1], module, "module")] if head else [],
-                        refs=_refs(run, path, imported), said=_said(run)))
+                        refs=_refs(run, path, imported, bound, scope=True), said=_said(run)))
         run.clear()
 
     for node in tree.body:
@@ -275,7 +402,7 @@ def python_parts(path, lines):
                 heading = node.bases + node.decorator_list + before
                 out.append(Part("class", node.name, start(node), max(start(node), head_end),
                                 defines=[(node.name, node.name, "class")],
-                                refs=_refs(heading, path, imported), said=_said(heading)))
+                                refs=_refs(heading, path, imported, bound), said=_said(heading)))
                 # The class body's statements between and after its methods (constants, aliases): their own parts.
                 group = []
 
@@ -285,7 +412,7 @@ def python_parts(path, lines):
                         while last > group[0].lineno and not lines[last - 1].strip():
                             last -= 1
                         out.append(Part("code", f"{node.name}:{group[0].lineno}", group[0].lineno, last,
-                                        refs=_refs(group, path, imported), said=_said(group)))
+                                        refs=_refs(group, path, imported, bound), said=_said(group)))
                         group.clear()
 
                 for item in node.body:
@@ -293,14 +420,14 @@ def python_parts(path, lines):
                         close(start(item) - 1)
                         out.append(Part("method", f"{node.name}.{item.name}", start(item), item.end_lineno,
                                         defines=[(item.name, f"{node.name}.{item.name}", "method")]
-                                        + _route_defs(item), refs=_refs([item], path, imported), said=_said([item])))
+                                        + _route_defs(item), refs=_refs([item], path, imported, bound), said=_said([item])))
                     elif item.lineno > head_end:
                         group.append(item)
                 close(node.end_lineno)
             else:
                 out.append(Part("function", node.name, start(node), node.end_lineno,
                                 defines=[(node.name, node.name, "function")] + _route_defs(node),
-                                refs=_refs([node], path, imported), said=_said([node])))
+                                refs=_refs([node], path, imported, bound), said=_said([node])))
         else:
             run.append(node)
     flush(len(lines) + 1)

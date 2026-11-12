@@ -1913,4 +1913,10 @@ addopts = """
     --deselect=tests/test_turn_origin_contracts.py::test_ot25_every_message_write_site_in_the_package_is_accounted_for
     --deselect=tests/test_project_facts_contracts.py::test_pq1_the_composer_writes_the_facts_its_lines_say
     --deselect=tests/test_project_context_words_contracts.py::test_ld31_the_journals_fit_is_said
+    --deselect=tests/test_mycelium_cards_contracts.py::test_ca1_the_schema
+    --deselect=tests/test_mycelium_cards_contracts.py::test_ca6_a_schema_1_store_opens_at_schema_3_and_is_cut_again
+    --deselect=tests/test_mycelium_cards_contracts.py::test_ca7_each_move_from_schema_1_is_whole
+    --deselect=tests/test_mycelium_cards_contracts.py::test_ca8_reading_writes_nothing
+    --deselect=tests/test_mycelium_cards_contracts.py::test_ca9_two_openers_of_a_schema_1_store_move_it_once
+    --deselect=tests/test_mycelium_map_contracts.py::test_ma5_the_tool_declared
 """

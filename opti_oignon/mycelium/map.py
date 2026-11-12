@@ -7,6 +7,8 @@ any of it: it is never wrong about what it says, and it is as fresh as the last 
   folder(store, source, path)     a folder: its sub-folders and files, biggest first
   file_card(store, source, path)  a file: its parts, its links to the rest of the corpus and its card, or None
   branch(store, source, path)     the node at ``path`` in a few lines, bounded, for a model or a person
+  next_files(store, source, opened)  from the files opened, the files to open next: linked, and by the same names
+  walk(store, source, opened)     the same in a few lines, bounded
 
 A file's card (stage 2, ``cards.py``) is the one thing a model wrote: two sentences, each name, number and path they
 give checked against the file when the card was written (their prose is not); said as a model's and never as
@@ -15,9 +17,11 @@ point 5). Reads the store only; writes nothing; every query is bound by paramete
 """
 from collections import Counter, defaultdict
 
+from . import links
+
 MAX_CHILDREN = 25       # sub-folders, and files, said of one folder
 MAX_PARTS = 30          # parts said of one file
-MAX_LINKS = 8           # files said for each kind of link
+MAX_LINKS = 8           # files said for each kind of link, and each list of the walk
 MAX_SETTINGS = 15       # settings said of one file
 MAX_SENTENCE = 110      # characters of a file's first sentence in a folder's listing
 MAX_MODEL = 80          # characters of a card's model name
@@ -131,9 +135,11 @@ def file_card(store, source, path):
     tests = [(p, n) for p, n in users if p.startswith("tests/") or "/tests/" in p]
     docs = [(p, n) for p, n in users if p.endswith(".md")]
     callers = [(p, n) for p, n in users if (p, n) not in tests and (p, n) not in docs]
+    links_to, linked_from = links.links_of(store, file_id)
     return {"path": path, "sentence": _first_sentence(store, file_id), "card": _card(store, file_id),
             "parts": [(k, s, a, b) for _i, k, s, a, b in parts], "defines": defined, "reads_settings": settings,
-            "tested_by": tests, "documented_by": docs, "used_by": callers}
+            "tested_by": tests, "documented_by": docs, "used_by": callers, "links_to": links_to,
+            "linked_from": linked_from}
 
 
 def branch(store, source, path=""):
@@ -156,7 +162,8 @@ def branch(store, source, path=""):
             out.append("reads settings: " + ", ".join(card["reads_settings"][:MAX_SETTINGS])
                        + (f", ... {len(card['reads_settings']) - MAX_SETTINGS} more"
                           if len(card["reads_settings"]) > MAX_SETTINGS else ""))
-        for label, key in (("tested by", "tested_by"), ("documented by", "documented_by"), ("used by", "used_by")):
+        for label, key in (("tested by", "tested_by"), ("documented by", "documented_by"), ("used by", "used_by"),
+                           ("links to", "links_to"), ("linked from", "linked_from")):
             if card[key]:
                 out.append(f"{label}: " + ", ".join(f"{p} ({n})" for p, n in card[key][:MAX_LINKS])
                            + (f", ... {len(card[key]) - MAX_LINKS} more" if len(card[key]) > MAX_LINKS else ""))
@@ -173,4 +180,41 @@ def branch(store, source, path=""):
         out.append(f"  {name}  {parts} parts" + (f": {sentence[:MAX_SENTENCE]}" if sentence else ""))
     if len(files) > MAX_CHILDREN:
         out.append(f"  ... {len(files) - MAX_CHILDREN} more files")
+    return "\n".join(out)
+
+
+def next_files(store, source, opened):
+    """From the files of ``source`` the agent has opened (paths; one the source does not hold left out), the files to
+    open next: (linked, same names), each [(path, score)], ``MAX_LINKS`` at most, most first then by path, the opened
+    left out (``links.next_files``). Raises ``NoSource`` when the store holds no such source, or holds it secret."""
+    sid = _source_id(store, source)
+    ids = _opened_ids(store, sid, opened)
+    return links.next_files(store, sid, list(ids.values()), MAX_LINKS)
+
+
+def _opened_ids(store, sid, opened):
+    wanted = list(dict.fromkeys(opened))
+    found = {}
+    for at in range(0, len(wanted), 200):
+        chunk = wanted[at:at + 200]
+        marks = ",".join("?" * len(chunk))
+        found.update(store.db.execute(f"SELECT path, id FROM file WHERE source = ? AND path IN ({marks})",
+                                      (sid, *chunk)).fetchall())
+    return found
+
+
+def walk(store, source, opened):
+    """The walk from the files opened in a few lines, for a model or a person: how many were opened, those the source
+    does not hold, then the two lists -- each said, or said empty. Raises ``NoSource`` as ``next_files``."""
+    sid = _source_id(store, source)
+    held = _opened_ids(store, sid, opened)
+    linked, named = links.next_files(store, sid, list(held.values()), MAX_LINKS)
+    count = len(dict.fromkeys(opened))
+    out = [f"{source}: next from {count} opened file{'' if count == 1 else 's'}"]
+    unknown = [p for p in dict.fromkeys(opened) if p not in held]
+    if unknown:
+        out.append(f"not indexed in {source}: " + ", ".join(unknown[:MAX_LINKS])
+                   + (f", ... {len(unknown) - MAX_LINKS} more" if len(unknown) > MAX_LINKS else ""))
+    out.append("linked (resolved, both ways): " + (", ".join(f"{p} ({n})" for p, n in linked) or "none"))
+    out.append("same names: " + (", ".join(f"{p} ({n})" for p, n in named) or "none"))
     return "\n".join(out)

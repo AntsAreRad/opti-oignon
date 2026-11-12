@@ -14,7 +14,7 @@ text when the file changes).
 
 What the store keeps of a source, then, is not its text but: each file's first sentence (its module docstring's, or
 its heading's), a file's card when one was written (a model's two sentences on what the file does, each name they
-give found in the file), a Markdown section's heading path, the names a part defines and names, and the index's tokens with
+give found in the file), which file of a source links to which (two ids and a count, ``links.py``), a Markdown section's heading path, the names a part defines and names, and the index's tokens with
 their positions -- from which a part's stemmed words could be read again in order --, and each part's vector, from
 which a model built for it can guess much of the text it was embedded from. The index keeps no text, but a
 deleted row is only marked until its segment is merged, and freed pages are zeroed (``PRAGMA secure_delete``): after
@@ -29,7 +29,8 @@ end; a recut, which drops no word the store does not hold again, owes none.
 A store written by a newer schema is refused by name, and so is a database of another kind (tables, no store's meta
 table: never stamped); a store cut by another version of the cutter is cut again at the next pass, and so is a store
 of schema 1 (its parts had no embedded text yet). A store of schema 2 is read as it is (it holds no card) and moved to
-3 when opened to write, the ``card`` table added and nothing else touched. The active encoder's card is kept in ``meta``: the dense stage
+3 when opened to write, the ``card`` table added and nothing else touched; a store of schema 3 is read as it is (it
+holds no link) and moved to 4 when opened to write, the ``link`` table added and nothing else touched. The active encoder's card is kept in ``meta``: the dense stage
 reads its vectors, and only its, until another encoder covers every part. An episode holds counts, the meta table
 its own keys: neither takes a source's words. One pass at a time writes: in this process under ``lock``, and across
 connections and processes by the write lock each pass takes at its start (``begin``), before it reads what it will
@@ -50,12 +51,20 @@ checkpoint_before_apply = True
 
 logger = logging.getLogger(__name__)
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 # The oldest schema this code reads as it is: a store of 2 holds no card, and is read so (moved to 3 when written).
 READ_FROM = 2
 # A file's card for the map (``cards.py``): two sentences a model wrote, each name they give checked against the file,
 # the sentences that failed counted (``dropped``); ``sha256`` the file's when the card was written (the map shows a
 # card only while it is the file's: the index pass that changes a file removes its card); it goes with its file.
+# A source's network (``links.py``): a file that names, resolved through its imports, what another file of the same
+# source defines, with the count of its parts that do; the edge goes with either of its files.
+LINK_TABLE = """
+CREATE TABLE IF NOT EXISTS link(
+  src INTEGER NOT NULL REFERENCES file(id) ON DELETE CASCADE, dst INTEGER NOT NULL REFERENCES file(id) ON DELETE CASCADE,
+  evidence INTEGER NOT NULL CHECK (evidence > 0), PRIMARY KEY(src, dst), CHECK (src != dst)) WITHOUT ROWID;
+CREATE INDEX IF NOT EXISTS link_dst ON link(dst);
+"""
 CARD_TABLE = """
 CREATE TABLE IF NOT EXISTS card(
   file INTEGER PRIMARY KEY REFERENCES file(id) ON DELETE CASCADE, sha256 TEXT NOT NULL, model TEXT NOT NULL,
@@ -97,7 +106,7 @@ CREATE INDEX IF NOT EXISTS ref_name ON ref(name);
 CREATE INDEX IF NOT EXISTS ref_part ON ref(part);
 CREATE TABLE IF NOT EXISTS episode(
   id INTEGER PRIMARY KEY, at TEXT NOT NULL, action TEXT NOT NULL, source INTEGER, detail TEXT NOT NULL);
-{CARD_TABLE}"""
+{CARD_TABLE}{LINK_TABLE}"""
 
 
 class StoreError(RuntimeError):
@@ -118,10 +127,13 @@ def _safe_connect(path, read_only=False):
 
 # The tables a store makes, the full-text index's own included: a database holding any other is not a store.
 OWN_TABLES = {"meta", "source", "file", "part", "symbol", "ref", "episode", "vector", "fts", "fts_config",
-              "fts_data", "fts_docsize", "fts_idx", "card"}
+              "fts_data", "fts_docsize", "fts_idx", "card", "link"}
+# The tables a store at this schema holds (the full-text index's own aside): one missing is made at the next opening.
+MADE = {"meta", "source", "file", "part", "vector", "fts", "symbol", "ref", "episode", "card", "link"}
 # The meta table's keys: the schema, the vectors' count of changes, the active encoder's card and a rewrite owed, and
-# per source the cutter that cut it, the header its texts are embedded with and when its last pass began.
-META_KEY = re.compile(r"(schema|vectors|encoder|rewrite|cutter:\d+|header:\d+|pass:\d+)\Z")
+# per source the cutter that cut it, the header its texts are embedded with, when its last pass began and the version
+# of the resolution its links were computed by.
+META_KEY = re.compile(r"(schema|vectors|encoder|rewrite|cutter:\d+|header:\d+|pass:\d+|links:\d+)\Z")
 # The longest value the meta table keeps: the active encoder's card, as stored (``encoder_value``), is the longest.
 MAX_VALUE = 4096
 
@@ -200,8 +212,22 @@ class Store:
                 self.db.execute(CARD_TABLE.strip())
                 self.db.execute("UPDATE meta SET value = '3' WHERE key = 'schema'")
             self.db.commit()
-        if held in (2, SCHEMA_VERSION):
-            return      # a store at this schema (or moved from 2) holds its tables and its stamp: nothing more to write
+        if held in (1, 2, 3):
+            # Schema 3 had no links: the table comes, and every source's links are computed at its next pass (no
+            # version of them kept); in one transaction with the new stamp, the schema read again inside it, as from 2.
+            self.db.execute("BEGIN IMMEDIATE")
+            if self._version() == 3:
+                for statement in LINK_TABLE.strip().split(";"):
+                    if statement.strip():
+                        self.db.execute(statement.strip())
+                self.db.execute("DELETE FROM meta WHERE key LIKE 'links:%'")
+                self.db.execute("UPDATE meta SET value = '4' WHERE key = 'schema'")
+            self.db.commit()
+        if held == SCHEMA_VERSION and not MADE - tables:
+            return      # a store at this schema holds its tables and its stamp: nothing to write
+        # A new store, or one moved here, or one at this schema that lacks a table (a process ended between its last
+        # move's commit and the tables below): each table it lacks made, only if missing, and its stamp.
+        # (A store of schema 1 whose move stopped at 2 or 3 never had the vectors' table.)
         self.db.executescript(SCHEMA)
         self.db.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema', ?)", (str(SCHEMA_VERSION),))
         self.db.commit()
@@ -322,7 +348,8 @@ class Store:
     def source(self, name, root, kind="folder", sensitivity=None, commit=True):
         """The id of the source ``name``, made if new (private unless a sensitivity is named); a known name keeps its
         root and its kind, and its sensitivity unless another is named -- taken then at once: its generation moves,
-        so no reader keeps what it allowed before; marked secret, it loses its file cards at once, a rewrite owed. A pass
+        so no reader keeps what it allowed before; marked secret, it loses its file cards and its links at once, a rewrite
+        owed, and its links are computed again at its first pass once it is not secret. A pass
         asks it inside its own transaction (``commit`` False)."""
         with self.lock:     # the row and the commit wait for a pass that holds the store
             if sensitivity is not None and sensitivity not in SENSITIVITIES:
@@ -340,6 +367,10 @@ class Store:
                         # A secret source is never carded: its cards go now, their text owing a rewrite (264).
                         dropped = self.db.execute("DELETE FROM card WHERE file IN (SELECT id FROM file WHERE "
                                                   "source = ?)", (row[0],)).rowcount
+                        # Nor linked: its links go now, owing a rewrite too, their version with them.
+                        dropped += self.db.execute("DELETE FROM link WHERE src IN (SELECT id FROM file WHERE "
+                                                   "source = ?)", (row[0],)).rowcount
+                        self.db.execute("DELETE FROM meta WHERE key = ?", (f"links:{row[0]}",))
                         if dropped:
                             self.meta("rewrite", owed_mark())
                     if commit:
@@ -376,7 +407,7 @@ class Store:
                 self.db.executemany("DELETE FROM fts WHERE rowid = ?", [(i,) for i in parts])
                 self.db.execute("DELETE FROM source WHERE id = ?", (source,))
                 self.db.executemany("DELETE FROM meta WHERE key = ?",
-                                    [(f"{kind}:{source}",) for kind in ("cutter", "header", "pass")])
+                                    [(f"{kind}:{source}",) for kind in ("cutter", "header", "pass", "links")])
                 self.db.execute("DELETE FROM episode WHERE source = ?", (source,))
                 vectors = self.orphan_vectors()
                 self.vectors_changed()

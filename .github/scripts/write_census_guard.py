@@ -471,14 +471,19 @@ STORES = {
     ),
     "mycelium_index": _store(
         "opti_oignon/mycelium/index.py", classes=("Indexer",),
-        writes=("index", "index_documents", "embed", "forget"), quiet=("embed", "forget"), backs=("mycelium",),
-        content=("documents",),
+        writes=("index", "index_documents", "embed", "forget"), quiet=("embed", "forget"),
+        backs=("mycelium", "mycelium_links"), content=("documents",),
         reason="the indexer, which writes the Mycelium's store from a corpus's files or documents",
     ),
     "mycelium_cards": _store(
         "opti_oignon/mycelium/cards.py", functions=("write",), writes=("write",), backs=("mycelium",),
         reason="the map's file cards: two sentences a local model wrote of each file of a corpus, checked against "
                "the file, which the map lays before the agent's model",
+    ),
+    "mycelium_links": _store(
+        "opti_oignon/mycelium/links.py", functions=("recompute",), writes=("recompute",), backs=("mycelium",),
+        reason="the network of a corpus's files: which file names, resolved through its imports, what another "
+               "defines, which the map and the agent's walk lay before the agent's model",
     ),
     "flesh": _store(
         "opti_oignon/memory/receipts.py", classes=("Flesh",),

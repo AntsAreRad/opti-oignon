@@ -11,6 +11,45 @@ package costs.
 
 ### Added
 
+- The Mycelium's network, its first kind of edge
+  (`opti_oignon/mycelium/links.py`): a Python file links to another file
+  of the same source when one of its parts names, resolved through its
+  imports, what that file defines, binds or is -- what an import
+  statement brings, a name an import bound, a chain of attributes read
+  on one -- each edge with the count of its file's parts that do. A
+  name resolves from left to right as the interpreter finds it: a
+  module of the source (a `src/` or `lib/` folder that is no package
+  importable under both names, never under the standard library's), then
+  each name defined or assigned there, or bound there by an import
+  (followed three steps at most, aliases and stars included), or a
+  submodule; the package before a module of its name, the attribute
+  before the submodule but for what an `import a.b` imports; an
+  `__init__` that holds nothing, a namespace package and a name that is
+  nowhere make no edge. The store moves to schema 4 with a `link` table
+  (two file ids and a count, no word of the source); a source's edges
+  are computed again, whole, by a folder pass that changed, renamed,
+  removed or cut again one of its files, in that pass's transaction; an
+  edge goes with either of its files, a forgotten source takes them all
+  with its settings, no edge joins two sources, a source of documents
+  has none, and a source has links only while it is not a secret one
+  (marked secret, it loses them at once, a rewrite owed). A store at this
+  schema that lacks a table gets it at its next opening. The cutter
+  (version 6) records what the network resolves -- what each import
+  brings and binds, each name and chain read on an imported name, and
+  the names a module assigns -- in records no join by name reads, and
+  binds the head of a plain `import a.b` to `a`. A file's map card lists
+  the files it links to and that link to it, and the agent's map tool,
+  `mycelium_map(path?, source?, opened?)`, given the files the agent
+  opened, names the files to open next: those linked to them, both ways,
+  and those sharing their names by the map's own rule (measured on this
+  machine, outside the package, on 97 issues of the public LocBench
+  benchmark: a walk from a search's first five files over the package's
+  own edges, both ways, reached a missing answer file within ten openings
+  for 39% of them and within twenty for 48%, against 29% and 42% by names
+  alone). Contracts
+  RS1-RS15 in `tests/test_mycelium_link_contracts.py` (CA1, CA6, CA7,
+  CA8, CA9 and MA5 superseded).
+
 - The traits of a Mycelium search's candidate files, what the value
   head will order them by (`opti_oignon/mycelium/traits.py`): for a
   question, the files of the search's fused list, in its order, each

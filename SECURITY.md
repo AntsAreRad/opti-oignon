@@ -243,7 +243,13 @@ names it defines, each identifier, number, path and address they give
 checked against the file (a sentence that fails is dropped; their prose
 is not checked) -- of the folders of the public and private sources
 only, never a secret one: a source marked secret loses its cards at
-once, a rewrite owed. A card goes with its file; the pass that changes a
+once, a rewrite owed. They keep too which Python file of a source links
+to which: a file that names, resolved through its imports, what another
+file of the same source defines, as two file ids and a count, never a
+word -- of the public and private sources only, never a secret one: a
+source marked secret loses its links at once, a rewrite owed; a pass
+that drops a link without changing a file owes the rewrite a changed
+file owes. A card goes with its file; the pass that changes a
 file removes its card, so its words leave with that pass's rewrite; one
 replaced owes the store a rewrite as a changed file does. A
 store is read through a read-only connection that writes nothing (beside
@@ -267,7 +273,9 @@ opened again when the security mode changed; in Bulbe each call is
 asked. Its map, `mycelium_map`, reads the same sources the same way,
 from the store's index alone (never a file): a folder's sub-folders and
 files, a file's parts and the files of its own source that name what it
-defines, and a file's card when one was written of the file as it is
+defines, the files it links to and that link to it, and, from the files
+the agent says it opened, the files to open next (linked to them, and
+sharing their names), and a file's card when one was written of the file as it is
 indexed, said as a model's, never as something to cite; a card reaches
 the agent as the tool's answer does, inside the untrusted wrapper.
 Every query of the map is bound to the run's source: another
